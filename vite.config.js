@@ -9,6 +9,8 @@ export default defineConfig({
     emptyOutDir: true,
     // Don't minify in dev; minify for production
     minify: process.env.NODE_ENV === 'production' ? 'esbuild' : false,
+    // A desktop app loads its bundle from disk, so one large chunk is fine.
+    chunkSizeWarningLimit: 4096,
     rollupOptions: {
       input: path.resolve(__dirname, 'src/renderer/index.html')
     }

@@ -5,7 +5,8 @@
 
 const { parseOrDefault, schemas } = require('./schemas');
 const { withDebugLog } = require('../utils/logger');
-const { approveDirectory } = require('../utils/pathValidator');
+const path = require('path');
+const { approveDirectory, validatePath } = require('../utils/pathValidator');
 
 const defaultFail = { success: false, error: 'Invalid input' };
 
@@ -15,13 +16,22 @@ const defaultFail = { success: false, error: 'Invalid input' };
  * @param {{ arduinoService: import('../services/arduinoService'), errorMemory: import('../services/errorMemory') }} ctx
  */
 function register(ipcMain, ctx) {
-  const { arduinoService, errorMemory } = ctx;
+  const { arduinoService, errorMemory, dialog, mainWindow } = ctx;
+  const denied = (sketchPath) => {
+    const check = validatePath(sketchPath || '');
+    return check.valid ? null : { success: false, error: check.error };
+  };
 
   ipcMain.handle('arduino:compile', withDebugLog('arduino:compile', async (event, sketchPath, boardFQBN) => {
     const parsed = parseOrDefault(schemas.arduinoCompile, { sketchPath: sketchPath ?? '', boardFQBN: boardFQBN ?? '' }, defaultFail);
     if (!parsed.ok) return parsed.defaultResult;
+    const blocked = denied(parsed.data.sketchPath);
+    if (blocked) return blocked;
     try {
       const result = await arduinoService.compile(parsed.data.sketchPath, parsed.data.boardFQBN);
+      if (result && result.success === false) {
+        return { success: false, error: result.error?.message || result.error || result.message || 'Compile failed' };
+      }
       return { success: true, data: result };
     } catch (error) {
       const analyzedError = await errorMemory.analyzeError(error).catch(() => null);
@@ -36,14 +46,57 @@ function register(ipcMain, ctx) {
   }));
 
   ipcMain.handle('arduino:compile-hex', withDebugLog('arduino:compile-hex', async (event, sketchPath, boardFQBN) => {
-    return arduinoService.compileHex(sketchPath, boardFQBN);
+    const blocked = denied(sketchPath);
+    if (blocked) return blocked;
+    return arduinoService.compileHex(sketchPath, boardFQBN || 'arduino:avr:uno');
+  }));
+
+  ipcMain.handle('arduino:export-binaries', withDebugLog('arduino:export-binaries', async (event, sketchPath, boardFQBN) => {
+    const blocked = denied(sketchPath);
+    if (blocked) return blocked;
+    return arduinoService.exportBinaries(sketchPath, boardFQBN);
+  }));
+
+  ipcMain.handle('arduino:archive-sketch', withDebugLog('arduino:archive-sketch', async (event, sketchPath) => {
+    const blocked = denied(sketchPath);
+    if (blocked) return blocked;
+    const dir = arduinoService.sketchDir(sketchPath);
+    const result = await dialog.showSaveDialog(mainWindow, {
+      title: 'Archive Sketch',
+      defaultPath: path.join(path.dirname(dir), `${path.basename(dir)}.zip`),
+      filters: [{ name: 'Zip archive', extensions: ['zip'] }]
+    });
+    if (result.canceled || !result.filePath) return { success: false, canceled: true };
+    const dest = result.filePath.toLowerCase().endsWith('.zip') ? result.filePath : `${result.filePath}.zip`;
+    return arduinoService.archiveSketch(sketchPath, dest);
+  }));
+
+  ipcMain.handle('arduino:list-programmers', withDebugLog('arduino:list-programmers', async (event, boardFQBN) => {
+    return { success: true, data: await arduinoService.listProgrammers(typeof boardFQBN === 'string' ? boardFQBN : '') };
+  }));
+
+  ipcMain.handle('arduino:upload-programmer', withDebugLog('arduino:upload-programmer', async (event, sketchPath, boardFQBN, programmerId, port) => {
+    const blocked = denied(sketchPath);
+    if (blocked) return blocked;
+    if (typeof programmerId !== 'string' || !/^[\w.-]+$/.test(programmerId)) return { success: false, error: 'Choose a programmer.' };
+    return arduinoService.uploadWithProgrammer(sketchPath, boardFQBN, programmerId, typeof port === 'string' ? port : '');
+  }));
+
+  ipcMain.handle('arduino:board-info', withDebugLog('arduino:board-info', async (event, port) => {
+    if (typeof port !== 'string' || !port) return { success: false, error: 'Select a port first.' };
+    return arduinoService.boardInfo(port);
   }));
 
   ipcMain.handle('arduino:upload', withDebugLog('arduino:upload', async (event, sketchPath, boardFQBN, port) => {
     const parsed = parseOrDefault(schemas.arduinoUpload, { sketchPath: sketchPath ?? '', boardFQBN: boardFQBN ?? '', port: port ?? '' }, defaultFail);
     if (!parsed.ok) return parsed.defaultResult;
+    const blocked = denied(parsed.data.sketchPath);
+    if (blocked) return blocked;
     try {
       const result = await arduinoService.upload(parsed.data.sketchPath, parsed.data.boardFQBN, parsed.data.port);
+      if (result && result.success === false) {
+        return { success: false, error: result.error?.message || result.error || result.message || 'Upload failed' };
+      }
       return { success: true, data: result };
     } catch (error) {
       const analyzedError = await errorMemory.analyzeError(error).catch(() => null);
@@ -125,7 +178,7 @@ function register(ipcMain, ctx) {
       const list = await arduinoService.libExamples(libraryName ?? '');
       if (Array.isArray(list)) {
         for (const item of list) {
-          if (item && typeof item.path === 'string') approveDirectory(item.path);
+          if (item && typeof item.path === 'string') approveDirectory(item.path, { readOnly: true });
         }
       }
       return { success: true, data: Array.isArray(list) ? list : [] };
@@ -141,7 +194,7 @@ function register(ipcMain, ctx) {
       // Approve each example folder so folder:list / file:read can open them.
       if (Array.isArray(list)) {
         for (const item of list) {
-          if (item && typeof item.path === 'string') approveDirectory(item.path);
+          if (item && typeof item.path === 'string') approveDirectory(item.path, { readOnly: true });
         }
       }
       return { success: true, data: Array.isArray(list) ? list : [] };

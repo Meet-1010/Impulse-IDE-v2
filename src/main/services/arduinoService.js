@@ -41,41 +41,36 @@ class ArduinoService {
    */
   async runCommand(args, options = {}) {
     return new Promise((resolve) => {
+      const { timeout = 60000, ...spawnOptions } = options;
       const proc = spawn(this.cliPath, args, {
         windowsHide: true,
-        ...options
+        ...spawnOptions
       });
 
       let stdout = '';
       let stderr = '';
+      let settled = false;
+      const finish = (result) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(result);
+      };
 
       proc.stdout.on('data', (data) => { stdout += data.toString(); });
       proc.stderr.on('data', (data) => { stderr += data.toString(); });
 
       proc.on('close', (code) => {
-        if (code === 0) {
-          resolve({ success: true, stdout, stderr });
-        } else {
-          resolve({ success: false, stdout, stderr, code });
-        }
+        finish(code === 0 ? { success: true, stdout, stderr } : { success: false, stdout, stderr, code });
       });
 
       proc.on('error', (error) => {
-        resolve({
-          success: false,
-          stdout: '',
-          stderr: error.message,
-          code: error.code
-        });
+        finish({ success: false, stdout: '', stderr: error.message, code: error.code });
       });
 
-      // Default 60s timeout to avoid hung processes
-      const timeout = options.timeout || 60000;
-      setTimeout(() => {
-        if (!proc.killed) {
-          proc.kill();
-          resolve({ success: false, stdout, stderr: 'Command timed out', code: 'TIMEOUT' });
-        }
+      const timer = setTimeout(() => {
+        proc.kill();
+        finish({ success: false, stdout, stderr: 'Command timed out', code: 'TIMEOUT' });
       }, timeout);
     });
   }
@@ -415,53 +410,44 @@ class ArduinoService {
   /**
    * List connected boards/ports using JSON output
    */
+  /**
+   * Connected ports. Throws when arduino-cli fails, so callers can tell
+   * "no boards plugged in" apart from "couldn't ask".
+   */
   async listPorts() {
-    try {
-      const result = await this.runCommand(['board', 'list', '--format', 'json']);
-      
-      if (!result.success) {
-        throw new Error(result.stderr);
-      }
-      
-      const data = JSON.parse(result.stdout);
-      const ports = [];
-      
-      // Handle different JSON structures
-      const portList = data.detected_ports || data.ports || data;
-      
-      if (Array.isArray(portList)) {
-        for (const item of portList) {
-          const port = item.port || item;
-          if (port && port.address) {
-            const boardName = item.matching_boards && item.matching_boards[0] 
-              ? item.matching_boards[0].name 
-              : (port.protocol_label || 'Unknown');
-            
-            ports.push({
-              port: port.address,
-              protocol: port.protocol || 'serial',
-              board: boardName
-            });
-          }
+    let result = await this.runCommand(['board', 'list', '--format', 'json']);
+    if (!result.success) {
+      // board list can fail transiently while another CLI call holds the lock.
+      await new Promise(resolve => setTimeout(resolve, 400));
+      result = await this.runCommand(['board', 'list', '--format', 'json']);
+    }
+    if (!result.success) throw new Error(result.stderr.trim() || 'arduino-cli board list failed');
+
+    const data = JSON.parse(result.stdout);
+    const portList = data.detected_ports || data.ports || data;
+    const ports = [];
+    if (Array.isArray(portList)) {
+      for (const item of portList) {
+        const port = item.port || item;
+        if (port && port.address) {
+          const boardName = item.matching_boards && item.matching_boards[0]
+            ? item.matching_boards[0].name
+            : (port.protocol_label || 'Unknown');
+          ports.push({ port: port.address, protocol: port.protocol || 'serial', board: boardName });
         }
       }
-      
-      return ports;
-    } catch (error) {
-      console.error('Failed to list ports:', error.message);
-      return [];
     }
+    return ports;
   }
 
   /**
    * Validate FQBN format
    */
   validateFQBN(fqbn) {
-    if (!fqbn) return false;
-    // FQBN format: vendor:architecture:board[:options]
-    // e.g., arduino:avr:uno or esp32:esp32:esp32
+    if (typeof fqbn !== 'string' || /\s/.test(fqbn)) return false;
+    // vendor:architecture:board[:option=value,...], e.g. arduino:avr:uno
     const parts = fqbn.split(':');
-    return parts.length >= 3;
+    return parts.length >= 3 && parts.length <= 4 && parts.every(p => p.length > 0);
   }
 
   // ==================== Compile/Upload Operations ====================
@@ -476,7 +462,7 @@ class ArduinoService {
         { sketchPath, boardFQBN },
         {
           sketchPath: { required: true, type: 'string', minLength: 1 },
-          boardFQBN: { required: true, type: 'string', pattern: /^[^:]+:[^:]+:[^:]+$/ }
+          boardFQBN: { required: true, type: 'string', minLength: 5 }
         }
       );
 
@@ -555,7 +541,8 @@ class ArduinoService {
               message: parsed.message || 'Compilation completed successfully'
             });
           } else {
-            const errorMessage = parsed.message || `Compilation failed with exit code ${code}`;
+            const errorMessage = ArduinoService.explainToolchainError(stdout + '\n' + stderr)
+              || parsed.message || `Compilation failed with exit code ${code}`;
             notifications.error(`Compilation failed: ${errorMessage}`);
             const err = new Error(errorMessage);
             // Attach parsed errors + full build output so callers (and the AI)
@@ -601,7 +588,10 @@ class ArduinoService {
   async compileHex(sketchPath, boardFQBN) {
     const os = require('os');
     const fs = require('fs');
-    const outputDir = path.join(os.tmpdir(), `impulse-hex-${Date.now()}`);
+    if (!this.validateFQBN(boardFQBN)) {
+      return { success: false, error: `Invalid board: "${boardFQBN}"` };
+    }
+    const outputDir = path.join(os.tmpdir(), `impulse-hex-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
     fs.mkdirSync(outputDir, { recursive: true });
 
     return new Promise((resolve) => {
@@ -620,12 +610,12 @@ class ArduinoService {
       proc.on('close', (code) => {
         if (code !== 0) {
           fs.rmSync(outputDir, { recursive: true, force: true });
-          resolve({ success: false, error: stderr });
+          resolve({ success: false, error: ArduinoService.explainToolchainError(stderr) || stderr });
           return;
         }
-        // Find .hex file
+        // The application image, not the copy merged with the bootloader.
         const files = fs.readdirSync(outputDir);
-        const hexFile = files.find(f => f.endsWith('.hex'));
+        const hexFile = files.find(f => f.endsWith('.hex') && !f.endsWith('.with_bootloader.hex'));
         if (!hexFile) {
           fs.rmSync(outputDir, { recursive: true, force: true });
           resolve({ success: false, error: 'No .hex output found' });
@@ -643,6 +633,113 @@ class ArduinoService {
   }
 
   /**
+   * Translate known toolchain failures into an actionable message.
+   * @returns {string|null}
+   */
+  static explainToolchainError(text) {
+    if (!text) return null;
+    if (/bad CPU type in executable/i.test(text)) {
+      return 'The installed board toolchain is built for Intel Macs and needs Rosetta 2. ' +
+        'Install it with: softwareupdate --install-rosetta --agree-to-license, then try again.';
+    }
+    if (/platform not installed|Platform '.+' not found/i.test(text)) {
+      return 'The core for this board is not installed. Open Board Manager and install it, then try again.';
+    }
+    return null;
+  }
+
+  sketchDir(sketchPath) {
+    return sketchPath.toLowerCase().endsWith('.ino') ? path.dirname(sketchPath) : sketchPath;
+  }
+
+  /**
+   * Compile and export the .hex/.bin/.elf next to the sketch (sketch/build/<fqbn>/).
+   */
+  async exportBinaries(sketchPath, boardFQBN) {
+    if (!this.validateFQBN(boardFQBN)) return { success: false, error: 'Select a board first.' };
+    const dir = this.sketchDir(sketchPath);
+    const result = await this.runCommand(['compile', '--fqbn', boardFQBN, '--export-binaries', dir], { cwd: dir, timeout: 180000 });
+    if (!result.success) {
+      return { success: false, error: ArduinoService.explainToolchainError(result.stderr) || result.stderr.trim() || 'Export failed' };
+    }
+    const outputDir = path.join(dir, 'build', boardFQBN.split(':').slice(0, 3).join('.'));
+    let files = [];
+    try { files = (await fs.readdir(outputDir)).filter(f => /\.(hex|bin|elf|eep|uf2)$/i.test(f)); } catch { /* listed below as empty */ }
+    return { success: true, outputDir, files };
+  }
+
+  /**
+   * Zip the sketch folder with `arduino-cli sketch archive`.
+   */
+  async archiveSketch(sketchPath, destinationZip) {
+    const dir = this.sketchDir(sketchPath);
+    const result = await this.runCommand(['sketch', 'archive', dir, destinationZip], { timeout: 120000 });
+    if (!result.success) return { success: false, error: result.stderr.trim() || 'Archive failed' };
+    return { success: true, archivePath: destinationZip };
+  }
+
+  /**
+   * Programmers available for a board (e.g. AVRISP mkII, USBasp).
+   * @returns {Promise<{id: string, name: string}[]>}
+   */
+  async listProgrammers(boardFQBN) {
+    if (!this.validateFQBN(boardFQBN)) return [];
+    const result = await this.runCommand(['board', 'details', '-b', boardFQBN, '--format', 'json']);
+    if (!result.success) return [];
+    try {
+      const data = JSON.parse(result.stdout);
+      return (data.programmers || []).filter(p => p && p.id).map(p => ({ id: p.id, name: p.name || p.id }));
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Compile and upload through an external programmer (ISP).
+   */
+  async uploadWithProgrammer(sketchPath, boardFQBN, programmerId, port) {
+    if (!this.validateFQBN(boardFQBN)) return { success: false, error: 'Select a board first.' };
+    const dir = this.sketchDir(sketchPath);
+    const args = ['compile', '--fqbn', boardFQBN, '--upload', '--programmer', programmerId];
+    if (port) args.push('--port', port);
+    args.push(dir);
+    const result = await this.runCommand(args, { cwd: dir, timeout: 240000 });
+    if (!result.success) {
+      return { success: false, error: ArduinoService.explainToolchainError(result.stderr) || result.stderr.trim() || 'Upload failed' };
+    }
+    return { success: true, output: result.stdout };
+  }
+
+  /**
+   * Hardware details for a connected port (VID/PID, serial number, matching boards).
+   */
+  async boardInfo(port) {
+    const result = await this.runCommand(['board', 'list', '--format', 'json']);
+    if (!result.success) return { success: false, error: result.stderr.trim() || 'Could not list boards' };
+    try {
+      const data = JSON.parse(result.stdout);
+      const list = data.detected_ports || data.ports || data;
+      const entry = (Array.isArray(list) ? list : []).find(item => (item.port || item)?.address === port);
+      if (!entry) return { success: false, error: `No device found on ${port}. Is it still plugged in?` };
+      const p = entry.port || entry;
+      const props = p.properties || {};
+      return {
+        success: true,
+        info: {
+          port: p.address,
+          protocol: p.protocol_label || p.protocol || 'serial',
+          vid: props.vid || null,
+          pid: props.pid || null,
+          serialNumber: props.serialNumber || null,
+          boards: (entry.matching_boards || []).map(b => ({ name: b.name, fqbn: b.fqbn }))
+        }
+      };
+    } catch {
+      return { success: false, error: 'Could not read board list output' };
+    }
+  }
+
+  /**
    * Upload to Arduino board
    */
   async upload(sketchPath, boardFQBN, port) {
@@ -652,7 +749,7 @@ class ArduinoService {
         { sketchPath, boardFQBN, port },
         {
           sketchPath: { required: true, type: 'string', minLength: 1 },
-          boardFQBN: { required: true, type: 'string', pattern: /^[^:]+:[^:]+:[^:]+$/ },
+          boardFQBN: { required: true, type: 'string', minLength: 5 },
           port: { required: true, type: 'string', minLength: 1 }
         }
       );
@@ -665,10 +762,10 @@ class ArduinoService {
         throw new Error(`Invalid FQBN format: "${boardFQBN}". Expected format: vendor:architecture:board`);
       }
 
-      // Check if port exists
-      const availablePorts = await this.listPorts();
-      const portExists = availablePorts.some(p => p.port === port);
-      if (!portExists) {
+      // Check the port is present (skip the check if listing itself fails;
+      // the upload will report a missing port precisely).
+      const availablePorts = await this.listPorts().catch(() => null);
+      if (availablePorts && !availablePorts.some(p => p.port === port)) {
         throw new Error(`Port ${port} is not available. Please check if your device is connected.`);
       }
 

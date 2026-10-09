@@ -1,3 +1,10 @@
+// AVR runner: one simulated board (Uno, Nano or Mega 2560) built on avr8js.
+//
+// The runner owns the CPU and its peripherals and exposes a small surface to
+// the rest of the simulator: pin states and edges, external drive of input
+// pins, ADC voltages, the serial ports, an addressed I²C bus, an SPI bus with
+// chip-select routing, and cycle-accurate scheduling for timing protocols.
+
 import {
   CPU,
   avrInstruction,
@@ -5,143 +12,263 @@ import {
   AVRUSART,
   AVRADC,
   AVRTimer,
-  portBConfig,
-  portCConfig,
-  portDConfig,
-  usart0Config,
-  timer0Config,
-  timer1Config,
-  timer2Config,
-  adcConfig,
+  AVRTWI,
+  AVRSPI,
+  AVREEPROM,
+  EEPROMMemoryBackend,
+  AVRClock,
+  AVRWatchdog,
   PinState,
 } from 'avr8js';
-import { parseHex } from './hex-loader.js';
+import { parseHex, hexImageSize } from './hex-loader.js';
+import { MCUS } from './mcu.js';
+import { boardById } from './boards.js';
 
-export const F_CPU = 16_000_000; // 16 MHz
+export const F_CPU = 16_000_000; // 16 MHz on every supported board
 const CYCLES_PER_MS = F_CPU / 1000;
 
-// Arduino UNO pin → {port, bit}
-const PIN_MAP = {
-  0:  { port: 'D', bit: 0 },
-  1:  { port: 'D', bit: 1 },
-  2:  { port: 'D', bit: 2 },
-  3:  { port: 'D', bit: 3 },
-  4:  { port: 'D', bit: 4 },
-  5:  { port: 'D', bit: 5 },
-  6:  { port: 'D', bit: 6 },
-  7:  { port: 'D', bit: 7 },
-  8:  { port: 'B', bit: 0 },
-  9:  { port: 'B', bit: 1 },
-  10: { port: 'B', bit: 2 },
-  11: { port: 'B', bit: 3 },
-  12: { port: 'B', bit: 4 },
-  13: { port: 'B', bit: 5 },
-  14: { port: 'C', bit: 0 }, // A0
-  15: { port: 'C', bit: 1 },
-  16: { port: 'C', bit: 2 },
-  17: { port: 'C', bit: 3 },
-  18: { port: 'C', bit: 4 },
-  19: { port: 'C', bit: 5 },
-};
+export { PinState };
+
+/**
+ * I²C bus shared by every device on SDA/SCL. Devices answer to a 7-bit address:
+ *   { i2cConnect?(read: boolean): boolean, i2cWrite?(byte): boolean,
+ *     i2cRead?(ack: boolean): number, i2cStop?(): void }
+ * Addresses without a device NACK, like real hardware.
+ */
+export class I2CBus {
+  constructor() {
+    this.devices = new Map();
+  }
+
+  add(address, device) {
+    this.devices.set(address & 0x7f, device);
+  }
+
+  remove(address, device) {
+    if (this.devices.get(address) === device) this.devices.delete(address);
+  }
+
+  clear() {
+    this.devices.clear();
+  }
+}
+
+/**
+ * SPI bus. Each device decides whether it is selected (usually its CS pin is
+ * LOW) and answers one byte per transfer:
+ *   { selected(): boolean, transfer(byte): number }
+ */
+export class SPIBus {
+  constructor() {
+    this.devices = new Set();
+  }
+
+  add(device) { this.devices.add(device); }
+  remove(device) { this.devices.delete(device); }
+  clear() { this.devices.clear(); }
+
+  transfer(byte) {
+    let miso = 0xff;
+    for (const dev of this.devices) {
+      if (dev.selected()) {
+        const out = dev.transfer(byte);
+        if (typeof out === 'number') miso &= out;
+      }
+    }
+    return miso & 0xff;
+  }
+}
 
 export class AvrRunner {
   constructor() {
     this.cpu = null;
-    this.portB = null;
-    this.portC = null;
-    this.portD = null;
-    this.usart = null;
+    this.board = boardById('uno');
+    this.mcu = MCUS[this.board.mcu];
+    this.ports = {};
+    this.usarts = [];
     this.adc = null;
+    this.twi = null;
+    this.spi = null;
     this.running = false;
     this._rafId = null;
-    this._pinStates = new Array(20).fill(false);
-    this._externalDrive = new Array(20).fill(null); // null = floating
-    this._speed = 0; // simulated speed vs realtime, 0..1+
+    this._speed = 0;
     this._startWall = 0;
     this._startCycles = 0;
+    this._hex = null;
+
+    this.i2c = new I2CBus();
+    this.spiBus = new SPIBus();
+    this._eepromBackends = new Map(); // board id → backend, kept across reloads
 
     // Callbacks
-    this.onPinChange = null;   // (pin, high, cycles) => void
-    this.onSerial = null;      // (char) => void
+    this.onPinChange = null;   // (pin, high, cycles) — output level edges
+    this.onPinState = null;    // (pin, state: PinState, cycles) — any mode/level change
+    this.onSerial = null;      // (char, port) — port 0 is Serial, 1-3 are Serial1-3 (Mega)
     this.onError = null;       // (msg) => void
+    this.onReset = null;       // () => void, after a reset (watchdog, RESET pin, restart)
 
-    this._analogValues = new Array(6).fill(0);
+    this._resetPinArrays();
+  }
+
+  _resetPinArrays() {
+    const n = this.board.pinCount;
+    this._state = new Uint8Array(n).fill(PinState.Input);
+    this._high = new Array(n).fill(false);
+    this._external = new Array(n).fill(null); // null = not driven by the circuit
+    this._analog = new Array(this.mcu.adcChannels).fill(0); // volts
   }
 
   get cycles() {
     return this.cpu ? this.cpu.cycles : 0;
   }
 
-  // Simulated time in seconds
+  /** Simulated time in seconds. */
   get time() {
     return this.cpu ? this.cpu.cycles / F_CPU : 0;
   }
 
-  // Ratio of simulated speed to real time (1 = realtime)
+  /** Ratio of simulated speed to real time (1 = realtime). */
   get speed() {
     return this._speed;
   }
 
-  load(hexString) {
+  /**
+   * Load a program and build the board's peripherals.
+   * @param {string} hexString Intel HEX
+   * @param {string} [boardId] uno | nano | mega
+   */
+  load(hexString, boardId) {
     try {
-      const progMem = parseHex(hexString);
-      this.cpu = new CPU(progMem);
-
-      this.portB = new AVRIOPort(this.cpu, portBConfig);
-      this.portC = new AVRIOPort(this.cpu, portCConfig);
-      this.portD = new AVRIOPort(this.cpu, portDConfig);
-
-      this.usart = new AVRUSART(this.cpu, usart0Config, F_CPU);
-      this.usart.onByteTransmit = (byte) => {
-        if (this.onSerial) this.onSerial(String.fromCharCode(byte));
-      };
-      // RX pacing: the UART accepts one byte per character time, so queue
-      // input and feed the next byte whenever the previous one is consumed.
-      this._rxQueue = [];
-      this.usart.onRxComplete = () => this._pumpRx();
-
-      this.adc = new AVRADC(this.cpu, adcConfig);
-      this._pushAnalog();
-
-      new AVRTimer(this.cpu, timer0Config);
-      new AVRTimer(this.cpu, timer1Config);
-      new AVRTimer(this.cpu, timer2Config);
-
-      this._pinStates = new Array(20).fill(false);
-
-      const watchPort = (port, base) => {
-        port.addListener(() => {
-          for (let bit = 0; bit < 8; bit++) {
-            const pin = base + bit;
-            if (!(pin in PIN_MAP)) continue;
-
-            // Emulate the internal pull-up: a floating input pin with the
-            // pull-up enabled reads HIGH (avr8js leaves this to the caller).
-            if (this._externalDrive[pin] === null &&
-                port.pinState(bit) === PinState.InputPullUp &&
-                !(port.pinValue & (1 << bit))) {
-              port.setPin(bit, true);
-              continue; // listener re-fires after setPin
-            }
-
-            const high = port.pinState(bit) === PinState.High;
-            if (this._pinStates[pin] !== high) {
-              this._pinStates[pin] = high;
-              if (this.onPinChange) this.onPinChange(pin, high, this.cpu.cycles);
-            }
-          }
-        });
-      };
-      watchPort(this.portB, 8);
-      watchPort(this.portC, 14);
-      watchPort(this.portD, 0);
-
+      if (boardId) this.board = boardById(boardId);
+      this.mcu = MCUS[this.board.mcu];
+      const size = hexImageSize(hexString);
+      if (size > this.mcu.flashBytes) {
+        throw new Error(`the program is ${size} bytes but the ${this.mcu.name} has ${this.mcu.flashBytes} bytes of flash. Was it compiled for a different board?`);
+      }
+      this._hex = hexString;
+      this._build();
       return true;
     } catch (err) {
       if (this.onError) this.onError(`Failed to load program: ${err.message}`);
       return false;
     }
   }
+
+  _build() {
+    const mcu = this.mcu;
+    const cpu = new CPU(parseHex(this._hex, mcu.flashBytes), mcu.sramBytes);
+    this.cpu = cpu;
+    this._resetPinArrays();
+
+    this.ports = {};
+    for (const [letter, config] of Object.entries(mcu.ports)) {
+      this.ports[letter] = new AVRIOPort(cpu, config);
+    }
+
+    for (const t of mcu.timers) new AVRTimer(cpu, t);
+
+    this.clock = new AVRClock(cpu, F_CPU);
+    this.usarts = mcu.usarts.map((cfg, index) => {
+      const usart = new AVRUSART(cpu, cfg, F_CPU);
+      usart.onByteTransmit = (byte) => {
+        if (this.onSerial) this.onSerial(String.fromCharCode(byte), index);
+      };
+      // RX pacing: the UART accepts one byte per character time.
+      usart._rxQueue = [];
+      usart.onRxComplete = () => this._pumpRx(usart);
+      return usart;
+    });
+    this.usart = this.usarts[0];
+
+    this.adc = new AVRADC(cpu, mcu.adc);
+    this._pushAnalog();
+
+    // I²C master → addressed devices.
+    this.twi = new AVRTWI(cpu, mcu.twi, F_CPU);
+    const twi = this.twi;
+    let current = null;
+    this.twi.eventHandler = {
+      start: () => twi.completeStart(),
+      stop: () => {
+        current?.i2cStop?.();
+        current = null;
+        twi.completeStop();
+      },
+      connectToSlave: (addr, write) => {
+        current = this.i2c.devices.get(addr) || null;
+        const ack = !!current && current.i2cConnect?.(!write) !== false;
+        if (!ack) current = null;
+        twi.completeConnect(ack);
+      },
+      writeByte: (value) => {
+        const ack = !!current && current.i2cWrite?.(value) !== false;
+        twi.completeWrite(ack);
+      },
+      readByte: (ack) => {
+        const value = current?.i2cRead ? current.i2cRead(ack) : 0xff;
+        twi.completeRead(value & 0xff);
+      },
+    };
+
+    // SPI master → chip-selected devices.
+    this.spi = new AVRSPI(cpu, mcu.spi, F_CPU);
+    this.spi.onByte = (value) => {
+      const response = this.spiBus.transfer(value);
+      cpu.addClockEvent(() => this.spi.completeTransfer(response), this.spi.transferCycles);
+    };
+
+    let backend = this._eepromBackends.get(this.board.id);
+    if (!backend || backend.memory.length !== mcu.eepromBytes) {
+      backend = new EEPROMMemoryBackend(mcu.eepromBytes);
+      this._eepromBackends.set(this.board.id, backend);
+    }
+    this.eeprom = new AVREEPROM(cpu, backend, mcu.eeprom);
+
+    this.watchdog = new AVRWatchdog(cpu, mcu.watchdog, this.clock);
+    // avr8js' CPU reset (used by the watchdog) only rewinds PC/SP. A real reset
+    // also returns the I/O registers to their defaults, so do that here.
+    const cpuReset = cpu.reset.bind(cpu);
+    cpu.reset = () => {
+      cpuReset();
+      this._resetIoRegisters();
+      if (this.onReset) queueMicrotask(() => this.onReset());
+    };
+
+    // Pin listeners: report output edges and mode changes per Arduino pin.
+    for (const [letter, port] of Object.entries(this.ports)) {
+      const pins = this.board.pins.filter(p => p.port === letter);
+      if (!pins.length) continue;
+      port.addListener(() => {
+        for (const p of pins) this._refreshPin(p, port);
+      });
+    }
+  }
+
+  _resetIoRegisters() {
+    const { cpu, mcu } = this;
+    const zero = (addr) => { if (addr) cpu.writeData(addr, 0); };
+    for (const cfg of Object.values(mcu.ports)) { zero(cfg.DDR); zero(cfg.PORT); }
+    for (const t of mcu.timers) { zero(t.TIMSK); zero(t.TCCRA); zero(t.TCCRB); }
+    for (const u of mcu.usarts) zero(u.UCSRB);
+    zero(mcu.adc.ADCSRA);
+    zero(mcu.twi.TWCR);
+    zero(mcu.spi.SPCR);
+  }
+
+  _refreshPin(p, port) {
+    const st = port.pinState(p.bit);
+    if (this._state[p.pin] === st) return;
+    this._state[p.pin] = st;
+    if (st === PinState.Input || st === PinState.InputPullUp) this._applyInput(p.pin);
+    const high = st === PinState.High;
+    if (this._high[p.pin] !== high) {
+      this._high[p.pin] = high;
+      if (this.onPinChange) this.onPinChange(p.pin, high, this.cpu.cycles);
+    }
+    if (this.onPinState) this.onPinState(p.pin, st, this.cpu.cycles);
+  }
+
+  // ── Run control ──────────────────────────────────────────────────────────
 
   start() {
     if (!this.cpu || this.running) return;
@@ -159,80 +286,138 @@ export class AvrRunner {
     }
   }
 
+  /** Power-cycle the board: rebuild every peripheral from the loaded program. */
   reset() {
+    const wasRunning = this.running;
     this.stop();
-    if (this.cpu) this.cpu.reset();
-    this._pinStates = new Array(20).fill(false);
+    if (this._hex) this._build();
+    if (this.onReset) this.onReset();
+    if (wasRunning) this.start();
   }
 
-  setInputPin(arduinoPin, high) {
-    const m = PIN_MAP[arduinoPin];
-    if (!m) return;
-    this._externalDrive[arduinoPin] = high;
-    const port = this._getPort(m.port);
-    if (port) port.setPin(m.bit, high);
-  }
-
-  // Queue text for the simulated UART; bytes are fed at line rate.
-  serialWrite(text) {
-    if (!this.usart) return;
-    for (const ch of text) this._rxQueue.push(ch.charCodeAt(0) & 0xff);
-    this._pumpRx();
-  }
-
-  _pumpRx() {
-    if (!this.usart || !this._rxQueue) return;
-    while (this._rxQueue.length && this.usart.writeByte(this._rxQueue[0])) {
-      this._rxQueue.shift();
+  /** Run `cycles` CPU cycles synchronously (headless runs and tests). */
+  step(cycles) {
+    const cpu = this.cpu;
+    const end = cpu.cycles + cycles;
+    while (cpu.cycles < end) {
+      avrInstruction(cpu);
+      cpu.tick();
     }
   }
 
-  // Release external drive; pin floats (pull-up snaps it high if enabled)
-  setPinFloating(arduinoPin) {
-    const m = PIN_MAP[arduinoPin];
-    if (!m) return;
-    this._externalDrive[arduinoPin] = null;
-    const port = this._getPort(m.port);
-    if (!port) return;
-    port.setPin(m.bit, port.pinState(m.bit) === PinState.InputPullUp);
+  /**
+   * Call `fn` after `cycles` CPU cycles of simulated time.
+   * @returns {Function} handle for cancel()
+   */
+  schedule(cycles, fn) {
+    if (!this.cpu) return null;
+    return this.cpu.addClockEvent(fn, Math.max(1, Math.round(cycles)));
   }
 
-  setAnalogPin(channel, value) {
-    if (channel < 0 || channel > 5) return;
-    this._analogValues[channel] = Math.max(0, Math.min(1023, value));
+  cancel(handle) {
+    if (handle && this.cpu) this.cpu.clearClockEvent(handle);
+  }
+
+  // ── Pins ─────────────────────────────────────────────────────────────────
+
+  _portOf(pin) {
+    const entry = this.board.byPin.get(pin);
+    if (!entry || !entry.port) return null;
+    return { port: this.ports[entry.port], bit: entry.bit, entry };
+  }
+
+  /** PinState of an Arduino pin (Low/High = output, Input/InputPullUp = input). */
+  pinState(pin) {
+    return this._state[pin] ?? PinState.Input;
+  }
+
+  isOutput(pin) {
+    const st = this.pinState(pin);
+    return st === PinState.High || st === PinState.Low;
+  }
+
+  /** True when the pin is an output driven HIGH. */
+  getPinState(pin) {
+    return !!this._high[pin];
+  }
+
+  /** Drive an input pin from the circuit. */
+  setInputPin(pin, high) {
+    if (this._external[pin] === !!high) return;
+    this._external[pin] = !!high;
+    this._applyInput(pin);
+  }
+
+  /** Stop driving a pin from the circuit; the pull-up (if enabled) reads HIGH. */
+  setPinFloating(pin) {
+    if (this._external[pin] === null) return;
+    this._external[pin] = null;
+    this._applyInput(pin);
+  }
+
+  _applyInput(pin) {
+    const loc = this._portOf(pin);
+    if (!loc) return;
+    const ext = this._external[pin];
+    const value = ext !== null ? ext : loc.port.pinState(loc.bit) === PinState.InputPullUp;
+    loc.port.setPin(loc.bit, value);
+  }
+
+  /** Set an ADC channel to a voltage (0-5 V). */
+  setAnalogVoltage(channel, volts) {
+    if (channel < 0 || channel >= this._analog.length) return;
+    this._analog[channel] = Math.max(0, Math.min(5, Number(volts) || 0));
     this._pushAnalog();
   }
 
-  getPinState(arduinoPin) {
-    return this._pinStates[arduinoPin] || false;
+  /** Back-compat: ADC channel from a 0-1023 reading. */
+  setAnalogPin(channel, value) {
+    this.setAnalogVoltage(channel, (Math.max(0, Math.min(1023, value)) / 1023) * 5);
+  }
+
+  /** Apply a voltage to an Arduino pin: ADC channel if it has one, digital level otherwise. */
+  setPinVoltage(pin, volts) {
+    const entry = this.board.byPin.get(pin);
+    if (!entry) return;
+    if (entry.adc !== undefined) this.setAnalogVoltage(entry.adc, volts);
+    if (entry.port) this.setInputPin(pin, volts > 2.5);
   }
 
   _pushAnalog() {
     if (!this.adc) return;
-    // avr8js reads channel voltages (0-5V) from this array
-    for (let i = 0; i < 6; i++) {
-      this.adc.channelValues[i] = (this._analogValues[i] / 1023) * 5;
+    for (let i = 0; i < this._analog.length; i++) this.adc.channelValues[i] = this._analog[i];
+  }
+
+  // ── Serial ───────────────────────────────────────────────────────────────
+
+  /** Queue text for a UART; bytes are fed at line rate. */
+  serialWrite(text, port = 0) {
+    const usart = this.usarts[port];
+    if (!usart) return;
+    for (const ch of text) usart._rxQueue.push(ch.charCodeAt(0) & 0xff);
+    this._pumpRx(usart);
+  }
+
+  _pumpRx(usart) {
+    if (!usart || !usart._rxQueue) return;
+    while (usart._rxQueue.length && usart.writeByte(usart._rxQueue[0])) {
+      usart._rxQueue.shift();
     }
   }
 
-  _getPort(letter) {
-    if (letter === 'B') return this.portB;
-    if (letter === 'C') return this.portC;
-    return this.portD;
-  }
+  // ── Main loop ────────────────────────────────────────────────────────────
 
   _tick() {
     if (!this.running) return;
 
-    const frameBudgetMs = 10;
-    const targetCycles = CYCLES_PER_MS * 16; // aim ~16ms sim time per frame
+    const frameBudgetMs = 12;
+    const targetCycles = CYCLES_PER_MS * 16; // ~16 ms of simulated time per frame
     const start = performance.now();
 
     try {
       const cpu = this.cpu;
       const endCycles = cpu.cycles + targetCycles;
       while (cpu.cycles < endCycles) {
-        // Run a small batch, then check the wall clock
         for (let i = 0; i < 5000; i++) {
           avrInstruction(cpu);
           cpu.tick();
@@ -245,7 +430,6 @@ export class AvrRunner {
       return;
     }
 
-    // Update speed estimate
     const wallSec = (performance.now() - this._startWall) / 1000;
     if (wallSec > 0.2) {
       const simSec = (this.cpu.cycles - this._startCycles) / F_CPU;

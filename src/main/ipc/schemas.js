@@ -46,7 +46,21 @@ const schemas = {
   aiSetAutoUpgrade: z.object({ enabled: z.boolean() }),
   aiExecuteTool: z.object({ toolName: requiredString, args: z.record(z.unknown()).optional().default({}) }),
   apiKeysSet: z.object({ provider: requiredString, apiKey: requiredString }),
-  apiKeysProvider: z.object({ provider: requiredString })
+  apiKeysProvider: z.object({ provider: requiredString }),
+  exampleCreate: z.object({
+    name: z.string().regex(/^[a-z0-9][a-z0-9-]{0,60}$/, 'Example names are lower-case letters, digits and dashes'),
+    code: z.string().min(1).max(512 * 1024),
+    diagram: z.string().min(2).max(4 * 1024 * 1024)
+  }),
+  diagramSave: z.object({
+    content: z.string().min(2).max(4 * 1024 * 1024),
+    suggestedName: z.string().max(255).refine(v => !/[\\/\0]/.test(v), 'Invalid file name')
+  }),
+  aiGenerateCircuit: z.object({
+    code: z.string().min(1).max(256 * 1024),
+    board: z.string().max(64).optional().default('uno'),
+    catalog: z.string().max(256 * 1024).optional().default('')
+  })
 };
 
 /**

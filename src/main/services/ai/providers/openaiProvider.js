@@ -57,8 +57,8 @@ class OpenAIProvider extends BaseProvider {
     const requestOptions = {
       model: modelToUse,
       messages: messages,
-      temperature: isReasoning ? 1 : (options.temperature || 0.7),
-      [tokenKey]: options.max_tokens || 2000
+      temperature: isReasoning ? 1 : (options.temperature ?? 0.7),
+      [tokenKey]: options.max_tokens ?? 8192
     };
     if (useTools) {
       requestOptions.tools = formattedTools;

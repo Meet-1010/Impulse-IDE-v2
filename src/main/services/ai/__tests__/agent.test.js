@@ -14,7 +14,7 @@ class MockProvider {
   constructor() { this.name = 'mock'; }
   validateApiKey() { return true; }
   getAvailableModels() { return ['mock-model']; }
-  async chat(messages, options) {
+  async chat() {
     return {
       content: 'Mock response',
       toolCalls: [],

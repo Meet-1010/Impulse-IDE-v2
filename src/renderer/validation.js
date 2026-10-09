@@ -220,7 +220,7 @@ class ValidationManager {
   }
 
   // Show validation summary
-  showValidationSummary(errors, target = null) {
+  showValidationSummary(errors) {
     if (errors.length === 0) return;
 
     const message = `Please fix the following issues:\n${errors.map(e => `• ${e}`).join('\n')}`;

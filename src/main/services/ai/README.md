@@ -49,30 +49,13 @@ Executes structured tool instructions:
 - Records executions in memory
 - Buffers serial output for analysis
 
-### 4. Memory System (`memory/aiMemory.js`)
+### 4. Memory System (`memory/simpleMemory.js`)
 
-SQLite database for persistent learning:
-
-**Tables:**
-- `error_signatures` - Error patterns and occurrence counts
-- `board_types` - Board usage tracking
-- `serial_patterns` - Serial output pattern recognition
-- `fixes` - Successful fixes and their contexts
-- `execution_outcomes` - Tool execution history
-- `error_fix_associations` - Links errors to fixes with success rates
-
-**Capabilities:**
-- Error signature hashing and matching
-- Similarity search for past errors
-- Fix success rate tracking
-- Board and serial pattern learning
+JSON-file memory of past errors, fixes and tool executions, used to suggest fixes that worked before.
 
 ### 5. Configuration (`config/apiKeyManager.js`)
 
-Secure API key storage using `electron-store`:
-- Encrypted storage
-- Provider-specific key management
-- Key validation
+API keys are encrypted with the OS credential store through Electron `safeStorage` (macOS Keychain, Windows DPAPI, libsecret) and kept in the main process; the renderer only sees the last four characters.
 - Secure retrieval
 
 ### 6. Prompts (`prompts/systemPrompt.js`)

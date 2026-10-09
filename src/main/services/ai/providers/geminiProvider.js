@@ -51,8 +51,8 @@ class GeminiProvider extends BaseProvider {
       const modelConfig = { 
         model: modelName,
         generationConfig: {
-          temperature: options.temperature || 0.7,
-          maxOutputTokens: options.max_tokens || 2000,
+          temperature: options.temperature ?? 0.7,
+          maxOutputTokens: options.max_tokens ?? 8192,
         }
       };
 

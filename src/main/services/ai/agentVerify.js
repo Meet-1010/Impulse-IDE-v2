@@ -8,13 +8,16 @@
 
 const SYSTEM_PROMPT = `You are the verification engine of Impulse IDE — an AI-native
 embedded IDE. You are given an Arduino sketch and REAL observations from running
-its compiled machine code in a cycle-accurate ATmega328P simulator (avr8js).
+its compiled machine code in a cycle-accurate AVR simulator (avr8js) of the board
+named in BOARD, with the parts wired as listed in CIRCUIT.
 
 Your job: decide whether the sketch behaves correctly, and if it clearly does
 not, return a corrected sketch. Judge behavior against what the code evidently
 intends (comments, function names, pin usage, serial messages).
 
 You receive:
+- BOARD: the simulated board and its microcontroller.
+- CIRCUIT: what is wired to each board pin (may be empty if nothing is wired).
 - COMPILE: "ok" or the compiler error text.
 - SERIAL: the exact bytes the sketch printed to Serial during the run (may be
   empty if the sketch prints nothing — that is fine, not an error by itself).
@@ -55,6 +58,8 @@ async function verifyExecution(aiAgent, obs) {
   }
 
   const user = [
+    `BOARD: ${String(obs.board || 'Arduino Uno (ATmega328P)').slice(0, 80)}`,
+    `CIRCUIT:\n${String(obs.circuit || '(nothing wired)').slice(0, 4000)}`,
     `COMPILE: ${obs.compile || 'ok'}`,
     `RUN_SECONDS: ${obs.runSeconds ?? 0}`,
     `PINS: ${obs.pins || '(none observed)'}`,
@@ -70,7 +75,7 @@ async function verifyExecution(aiAgent, obs) {
         { role: 'system', content: SYSTEM_PROMPT },
         { role: 'user', content: user },
       ],
-      { temperature: 0, max_tokens: 4000 }
+      { temperature: 0, max_tokens: 8000, effort: 'medium', tools: [] }
     );
     raw = res?.content ?? '';
   } catch (err) {

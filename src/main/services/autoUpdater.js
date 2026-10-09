@@ -72,7 +72,15 @@ class AutoUpdaterService {
   /**
    * Check for updates (called on app start and periodically)
    */
+  /** Release builds ship app-update.yml; unpacked dev/test builds don't. */
+  static canUpdate() {
+    const { app } = require('electron');
+    if (!app.isPackaged) return false;
+    return require('fs').existsSync(require('path').join(process.resourcesPath, 'app-update.yml'));
+  }
+
   async checkForUpdates() {
+    if (!AutoUpdaterService.canUpdate()) return { available: false, reason: 'not-a-release-build' };
     try {
       await autoUpdater.checkForUpdates();
     } catch (err) {

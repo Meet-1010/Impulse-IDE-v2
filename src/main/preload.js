@@ -16,7 +16,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     coreInstall: (coreId) => ipcRenderer.invoke('arduino:core-install', coreId),
     coreUninstall: (coreId) => ipcRenderer.invoke('arduino:core-uninstall', coreId),
     libExamples: (libraryName) => ipcRenderer.invoke('arduino:lib-examples', libraryName),
-    libExamplesWithPaths: (libraryFilter) => ipcRenderer.invoke('arduino:lib-examples-with-paths', libraryFilter)
+    libExamplesWithPaths: (libraryFilter) => ipcRenderer.invoke('arduino:lib-examples-with-paths', libraryFilter),
+    exportBinaries: (sketchPath, boardFQBN) => ipcRenderer.invoke('arduino:export-binaries', sketchPath, boardFQBN),
+    archiveSketch: (sketchPath) => ipcRenderer.invoke('arduino:archive-sketch', sketchPath),
+    listProgrammers: (boardFQBN) => ipcRenderer.invoke('arduino:list-programmers', boardFQBN),
+    uploadWithProgrammer: (sketchPath, boardFQBN, programmerId, port) => ipcRenderer.invoke('arduino:upload-programmer', sketchPath, boardFQBN, programmerId, port),
+    boardInfo: (port) => ipcRenderer.invoke('arduino:board-info', port)
   },
   
   // Serial Monitor methods
@@ -73,7 +78,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     openFile: () => ipcRenderer.invoke('dialog:open-file'),
     openFolder: () => ipcRenderer.invoke('dialog:open-folder'),
     saveNewSketch: () => ipcRenderer.invoke('dialog:save-new-sketch'),
-    saveAsSketch: (content) => ipcRenderer.invoke('dialog:save-as-sketch', content)
+    saveAsSketch: (content) => ipcRenderer.invoke('dialog:save-as-sketch', content),
+    openDiagram: () => ipcRenderer.invoke('dialog:open-diagram'),
+    saveDiagram: (content, suggestedName) => ipcRenderer.invoke('dialog:save-diagram', content, suggestedName)
+  },
+
+  // Simulator projects
+  sketch: {
+    createExample: (spec) => ipcRenderer.invoke('sketch:create-example', spec)
   },
 
   // Shell (e.g. show in folder)
@@ -86,6 +98,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     list: (dirPath) => ipcRenderer.invoke('folder:list', dirPath)
   },
   
+  workspace: {
+    migrateLegacySession: (folderPaths) => ipcRenderer.invoke('workspace:migrate-legacy-session', folderPaths)
+  },
+
   // File operations
   file: {
     read: (filePath) => ipcRenderer.invoke('file:read', filePath),
@@ -105,7 +121,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   ai: {
     setProvider: (providerName, apiKey, model) => ipcRenderer.invoke('ai:set-provider', providerName, apiKey, model),
     processQuery: (query, context, mode) => ipcRenderer.invoke('ai:process-query', query, context, mode),
-    generateCircuit: (sketchCode) => ipcRenderer.invoke('ai:generate-circuit', sketchCode),
+    generateCircuit: (sketchCode, options) => ipcRenderer.invoke('ai:generate-circuit', sketchCode, options),
     verifyExecution: (obs) => ipcRenderer.invoke('ai:verify-execution', obs),
     setModel: (modelId, manual) => ipcRenderer.invoke('ai:set-model', modelId, manual),
     getModelSuggestion: () => ipcRenderer.invoke('ai:get-model-suggestion'),
@@ -131,26 +147,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     list: () => ipcRenderer.invoke('api-keys:list')
   },
   
-  // Terminal integration
-  terminal: {
-    isAvailable: () => ipcRenderer.invoke('terminal:available'),
-    create: (options) => ipcRenderer.invoke('terminal:create', options),
-    write: (id, data) => ipcRenderer.invoke('terminal:write', id, data),
-    resize: (id, cols, rows) => ipcRenderer.invoke('terminal:resize', id, cols, rows),
-    kill: (id) => ipcRenderer.invoke('terminal:kill', id),
-    list: () => ipcRenderer.invoke('terminal:list'),
-    onData: (callback) => {
-      const handler = (event, id, data) => callback(id, data);
-      ipcRenderer.on('terminal:data', handler);
-      return () => ipcRenderer.removeListener('terminal:data', handler);
-    },
-    onExit: (callback) => {
-      const handler = (event, id, exitCode) => callback(id, exitCode);
-      ipcRenderer.on('terminal:exit', handler);
-      return () => ipcRenderer.removeListener('terminal:exit', handler);
-    }
-  },
-
   // Auto-updater
   updater: {
     check: () => ipcRenderer.invoke('updater:check'),
@@ -170,49 +166,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     }
   },
 
-  // Collaboration
-  collab: {
-    createRoom: (content, userName) => ipcRenderer.invoke('collab:create-room', content, userName),
-    joinRoom: (roomId, userName) => ipcRenderer.invoke('collab:join-room', roomId, userName),
-    leaveRoom: () => ipcRenderer.invoke('collab:leave-room'),
-    applyChange: (index, deleteCount, insertText) => ipcRenderer.invoke('collab:apply-change', index, deleteCount, insertText),
-    getText: () => ipcRenderer.invoke('collab:get-text'),
-    getPeers: () => ipcRenderer.invoke('collab:get-peers'),
-    getStatus: () => ipcRenderer.invoke('collab:get-status'),
-    updateCursor: (pos, selStart, selEnd) => ipcRenderer.invoke('collab:update-cursor', pos, selStart, selEnd),
-    observe: () => ipcRenderer.invoke('collab:observe'),
-    onRemoteChange: (callback) => {
-      const handler = (event, change) => callback(change);
-      ipcRenderer.on('collab:remote-change', handler);
-      return () => ipcRenderer.removeListener('collab:remote-change', handler);
-    },
-    onPeerJoined: (callback) => {
-      const handler = (event, info) => callback(info);
-      ipcRenderer.on('collab:peer-joined', handler);
-      return () => ipcRenderer.removeListener('collab:peer-joined', handler);
-    },
-    onPeerLeft: (callback) => {
-      const handler = (event, info) => callback(info);
-      ipcRenderer.on('collab:peer-left', handler);
-      return () => ipcRenderer.removeListener('collab:peer-left', handler);
-    },
-    onAwareness: (callback) => {
-      const handler = (event, info) => callback(info);
-      ipcRenderer.on('collab:awareness', handler);
-      return () => ipcRenderer.removeListener('collab:awareness', handler);
-    }
-  },
-
-  // Plugin system
-  plugins: {
-    list: () => ipcRenderer.invoke('plugins:list'),
-    commands: () => ipcRenderer.invoke('plugins:commands'),
-    executeCommand: (cmdId, ...args) => ipcRenderer.invoke('plugins:execute-command', cmdId, ...args),
-    boards: () => ipcRenderer.invoke('plugins:boards')
-  },
-
   app: {
-    quit: () => ipcRenderer.send('app:quit')
+    quit: () => ipcRenderer.send('app:quit'),
+    getVersion: () => ipcRenderer.invoke('app:get-version'),
+    logError: (entry) => ipcRenderer.send('app:log-renderer-error', entry)
   },
   clipboard: {
     readText: () => ipcRenderer.invoke('clipboard:read-text'),
@@ -221,7 +178,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openExternal: (url) => ipcRenderer.invoke('shell:open-external', url),
   menu: {
     onAction: (callback) => {
-      const handler = (event, action) => callback(action);
+      const handler = (event, action, payload) => callback(action, payload);
       ipcRenderer.on('menu:action', handler);
       return () => ipcRenderer.removeListener('menu:action', handler);
     }
@@ -265,6 +222,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Notification system
   onNotification: (channel, callback) => {
+    if (typeof channel !== 'string' || !channel.startsWith('notification:')) return () => {};
     const handler = (event, data) => callback(data);
     ipcRenderer.on(channel, handler);
     return () => ipcRenderer.removeListener(channel, handler);

@@ -414,8 +414,22 @@ function getTool(name) {
 /**
  * Validate tool call structure
  */
+const JSON_TYPES = {
+  string: v => typeof v === 'string',
+  number: v => typeof v === 'number' && Number.isFinite(v),
+  integer: v => Number.isInteger(v),
+  boolean: v => typeof v === 'boolean',
+  array: v => Array.isArray(v),
+  object: v => v !== null && typeof v === 'object' && !Array.isArray(v)
+};
+
+/**
+ * Validate a model-produced tool call against the tool's JSON schema
+ * (required fields, primitive types, enums). Model output is untrusted, and
+ * streamed tool inputs can arrive truncated.
+ */
 function validateToolCall(toolCall) {
-  if (!toolCall.name) {
+  if (!toolCall || !toolCall.name) {
     return { valid: false, error: 'Tool name is required' };
   }
 
@@ -424,12 +438,27 @@ function validateToolCall(toolCall) {
     return { valid: false, error: `Unknown tool: ${toolCall.name}` };
   }
 
-  // Validate required parameters
-  if (tool.parameters.required) {
-    for (const param of tool.parameters.required) {
-      if (!(param in toolCall.arguments)) {
-        return { valid: false, error: `Missing required parameter: ${param}` };
-      }
+  const args = toolCall.arguments ?? {};
+  if (!JSON_TYPES.object(args)) {
+    return { valid: false, error: `Arguments for ${toolCall.name} must be an object` };
+  }
+
+  for (const param of tool.parameters.required || []) {
+    if (args[param] === undefined || args[param] === null) {
+      return { valid: false, error: `Missing required parameter: ${param}` };
+    }
+  }
+
+  const props = tool.parameters.properties || {};
+  for (const [key, value] of Object.entries(args)) {
+    const spec = props[key];
+    if (!spec || value === undefined || value === null) continue;
+    const types = Array.isArray(spec.type) ? spec.type : (spec.type ? [spec.type] : []);
+    if (types.length && !types.some(t => JSON_TYPES[t] ? JSON_TYPES[t](value) : true)) {
+      return { valid: false, error: `Parameter "${key}" must be ${types.join(' or ')}` };
+    }
+    if (Array.isArray(spec.enum) && !spec.enum.includes(value)) {
+      return { valid: false, error: `Parameter "${key}" must be one of: ${spec.enum.join(', ')}` };
     }
   }
 

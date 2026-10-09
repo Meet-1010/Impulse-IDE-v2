@@ -5,10 +5,16 @@
 
 import { getCodeMirror } from './codemirror-ref.js';
 import { SimulationManager } from './simulation/index.js';
+import { askDialog, confirmDialog, preferencesDialog } from './dialog.js';
+import { runSimulatorCheck, renderTestReport, renderVerifyCard, isSimulatableBoard, simulationContext } from './verify.js';
+import { boardForFqbn } from './simulation/boards.js';
+import { attachPinInsights } from './pin-insights.js';
+import { detectBaud, diffSerial, captureBoardSerial, renderCompareReport } from './compare.js';
+import { runHeadless } from './simulation/headless.js';
 
 // UI State — exposed on window so other modules (validation.js, etc.) can access it
 // without relying on bundler scope-hoisting accidents.
-let state = window.state = {
+const state = window.state = {
     cliInstalled: false,
     boards: [],
     ports: [],
@@ -77,6 +83,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     try {
         initializeCodeMirror();
+        restoreEditorPrefs();
+        attachPinInsights(state.editor, {
+            getWiring: () => window.simManager?.getWiring?.() ?? null,
+            onIssues: (issues) => window.dispatchEvent(new CustomEvent('impulse:pin-issues', { detail: issues }))
+        });
         await checkArduinoCLI();
         await loadBoards();
         await loadPorts();
@@ -221,58 +232,17 @@ function toggleSidebar() {
 // ============================================
 // Keyboard Shortcuts
 // ============================================
-function setupKeyboardShortcuts() {
-    document.addEventListener('keydown', (e) => {
-        // Ctrl+Shift+E: Explorer
-        if (e.ctrlKey && e.shiftKey && e.key === 'E') {
-            e.preventDefault();
-            if (state.sidebarCollapsed) toggleSidebar();
-            switchPanel('explorer');
-        }
-        // Ctrl+Shift+B: Boards
-        if (e.ctrlKey && e.shiftKey && e.key === 'B') {
-            e.preventDefault();
-            if (state.sidebarCollapsed) toggleSidebar();
-            switchPanel('boards');
-        }
-        // Ctrl+Shift+L: Libraries
-        if (e.ctrlKey && e.shiftKey && e.key === 'L') {
-            e.preventDefault();
-            if (state.sidebarCollapsed) toggleSidebar();
-            switchPanel('libraries');
-        }
-        // Ctrl+Shift+M: Serial Monitor (switch panel + click button)
-        if (e.ctrlKey && e.shiftKey && e.key === 'M') {
-            e.preventDefault();
-            if (state.sidebarCollapsed) toggleSidebar();
-            switchPanel('serial');
-            document.getElementById('serialMonitorBtn')?.click();
-        }
-        // Ctrl+Shift+A: AI Panel
-        if (e.ctrlKey && e.shiftKey && e.key === 'A') {
-            e.preventDefault();
-            toggleAIPanel();
-        }
-        // Ctrl+R: Verify/Compile
-        if (e.ctrlKey && !e.shiftKey && e.key === 'r') {
-            e.preventDefault();
-            compileSketch();
-        }
-        // Ctrl+U: Upload
-        if (e.ctrlKey && !e.shiftKey && e.key === 'u') {
-            e.preventDefault();
-            uploadSketch();
-        }
-    });
-}
+// Shortcuts live in the native application menu (main.js) so they work with
+// Cmd on macOS and never fire twice. Nothing to bind here.
+function setupKeyboardShortcuts() {}
 
 // ============================================
 // Native application menu (File, Edit, Sketch, Tools, Help)
 // ============================================
 function setupNativeMenuListener() {
     if (window.electronAPI?.menu?.onAction) {
-        window.electronAPI.menu.onAction((action) => {
-            handleMenuAction(action);
+        window.electronAPI.menu.onAction((action, payload) => {
+            handleMenuAction(action, payload);
         });
     }
 }
@@ -322,7 +292,7 @@ async function editClipboardAction(kind) {
     if (selected) await window.electronAPI.clipboard.writeText(selected);
 }
 
-function handleMenuAction(action) {
+function handleMenuAction(action, payload) {
     switch (action) {
         // File
         case 'file-new':
@@ -332,7 +302,7 @@ function handleMenuAction(action) {
             openFile();
             break;
         case 'file-open-recent':
-            notifyNotYet('Open Recent isn’t available yet.');
+            if (typeof payload === 'string') loadFolder(payload);
             break;
         case 'file-open-folder':
             openFolder();
@@ -364,23 +334,29 @@ function handleMenuAction(action) {
             break;
         // Edit
         case 'edit-undo':
+            if (window.simManager?.handleEditAction('undo')) break;
             if (focusedTextField()) document.execCommand('undo');
             else if (state.editor) state.editor.undo();
             break;
         case 'edit-redo':
+            if (window.simManager?.handleEditAction('redo')) break;
             if (focusedTextField()) document.execCommand('redo');
             else if (state.editor) state.editor.redo();
             break;
         case 'edit-cut':
+            if (window.simManager?.handleEditAction('cut')) break;
             editClipboardAction('cut');
             break;
         case 'edit-copy':
+            if (window.simManager?.handleEditAction('copy')) break;
             editClipboardAction('copy');
             break;
         case 'edit-paste':
+            if (window.simManager?.handleEditAction('paste')) break;
             editClipboardAction('paste');
             break;
         case 'edit-select-all': {
+            if (window.simManager?.handleEditAction('select-all')) break;
             const field = focusedTextField();
             if (field) field.select();
             else if (state.editor) state.editor.execCommand('selectAll');
@@ -410,6 +386,27 @@ function handleMenuAction(action) {
         case 'edit-find-prev':
             if (state.editor) findPrev();
             break;
+        case 'edit-replace':
+            if (state.editor) state.editor.execCommand('replace');
+            break;
+        // View
+        case 'view-explorer':
+            if (state.sidebarCollapsed) toggleSidebar();
+            switchPanel('explorer');
+            break;
+        case 'view-boards':
+            if (state.sidebarCollapsed) toggleSidebar();
+            switchPanel('boards');
+            break;
+        case 'view-simulator':
+            toggleSimView();
+            break;
+        case 'view-ai':
+            toggleAIPanel();
+            break;
+        case 'view-toggle-theme':
+            document.getElementById('themeToggleBtn')?.click();
+            break;
         case 'edit-font-increase':
             increaseEditorFontSize();
             break;
@@ -424,7 +421,13 @@ function handleMenuAction(action) {
             uploadSketch();
             break;
         case 'sketch-upload-programmer':
-            notifyNotYet('Upload Using Programmer isn’t available yet.');
+            uploadUsingProgrammer();
+            break;
+        case 'sketch-run-tests':
+            runHardwareTests();
+            break;
+        case 'sketch-compare-board':
+            compareSimulatorWithBoard();
             break;
         case 'sketch-export-binary':
             exportCompiledBinary();
@@ -511,7 +514,7 @@ async function newSketch() {
         showWelcomeState();
         state.folderRoot = null;
         const label = document.getElementById('folderLabel');
-        if (label) label.innerHTML = '<span class="folder-icon">📁</span><span>No folder open</span>';
+        if (label) label.innerHTML = `<span class="folder-icon">${ICONS.folder}</span><span>No folder open</span>`;
         document.getElementById('fileTree').innerHTML = '';
         logToConsole('New sketch — open a folder to start', 'info');
         return;
@@ -526,7 +529,7 @@ async function newSketch() {
         state.expandedDirs.clear();
         const label = document.getElementById('folderLabel');
         const name = result.folderPath.split(/[/\\]/).pop() || result.folderPath;
-        if (label) label.innerHTML = `<span class="folder-icon">📁</span><span>${escapeHtml(name)}</span>`;
+        if (label) label.innerHTML = `<span class="folder-icon">${ICONS.folder}</span><span>${escapeHtml(name)}</span>`;
         await renderFileTree(result.folderPath);
         const fileResult = await window.electronAPI.file.read(result.filePath);
         const content = fileResult.success ? fileResult.content : '';
@@ -663,21 +666,29 @@ function setupAutoSave() {
     }, 30000);
 }
 
-function saveFile() {
+async function saveFile({ quiet = false } = {}) {
     if (!state.currentFile) {
-        logToConsole('No file open to save', 'warning');
-        return;
+        if (!quiet) logToConsole('No file open to save', 'warning');
+        return false;
     }
     const target = state.currentSketch || state.currentFile;
-    if (state.editor && target) {
-        const code = state.editor.getValue();
-        window.electronAPI.file.save(target, code).then(() => {
-            if (state.activeTabIndex >= 0 && state.openFiles[state.activeTabIndex]) {
-                state.openFiles[state.activeTabIndex].content = code;
-                state.openFiles[state.activeTabIndex].dirty = false;
-            }
-            logToConsole('Saved', 'success');
-        }).catch(e => logToConsole(`Save error: ${e.message}`, 'error'));
+    if (!state.editor || !target) return false;
+    const code = state.editor.getValue();
+    try {
+        const result = await window.electronAPI.file.save(target, code);
+        if (!result?.success) {
+            logToConsole(`Save failed: ${result?.error || 'unknown error'}`, 'error');
+            return false;
+        }
+        if (state.activeTabIndex >= 0 && state.openFiles[state.activeTabIndex]) {
+            state.openFiles[state.activeTabIndex].content = code;
+            state.openFiles[state.activeTabIndex].dirty = false;
+        }
+        if (!quiet) logToConsole('Saved', 'success');
+        return true;
+    } catch (e) {
+        logToConsole(`Save error: ${e.message}`, 'error');
+        return false;
     }
 }
 
@@ -701,7 +712,7 @@ async function saveFileAs() {
         state.expandedDirs.clear();
         const label = document.getElementById('folderLabel');
         const name = result.folderPath.split(/[/\\]/).pop() || result.folderPath;
-        if (label) label.innerHTML = `<span class="folder-icon">📁</span><span>${escapeHtml(name)}</span>`;
+        if (label) label.innerHTML = `<span class="folder-icon">${ICONS.folder}</span><span>${escapeHtml(name)}</span>`;
         await renderFileTree(result.folderPath);
         const fileName = result.sketchName || result.filePath.split(/[/\\]/).pop();
         showEditor();
@@ -714,9 +725,21 @@ async function saveFileAs() {
     }
 }
 
-function showPreferences() {
-    openHelpUrl('https://docs.arduino.cc/software/ide-v1/tutorials/ide-v1-setting-up-the-arduino-ide');
-    logToConsole('Preferences: see Arduino docs. Editor font size: Edit menu', 'info');
+async function showPreferences() {
+    const result = await preferencesDialog({
+        theme: document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark',
+        fontSize: editorFontSize,
+        tabSize: state.editor?.getOption('indentUnit') || 2
+    });
+    if (!result) return;
+    const currentTheme = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+    if (result.theme !== currentTheme) document.getElementById('themeToggleBtn')?.click();
+    setEditorFontSize(result.fontSize);
+    if (state.editor) {
+        state.editor.setOption('indentUnit', result.tabSize);
+        state.editor.setOption('tabSize', result.tabSize);
+    }
+    try { localStorage.setItem('impulse-editor-prefs', JSON.stringify({ fontSize: result.fontSize, tabSize: result.tabSize })); } catch { /* storage unavailable */ }
 }
 
 function closeCurrentTab() {
@@ -725,11 +748,9 @@ function closeCurrentTab() {
 }
 
 function gotoLine() {
-    const line = prompt('Go to line number:');
-    if (line != null && state.editor) {
-        const n = parseInt(line, 10);
-        if (!isNaN(n) && n >= 1) state.editor.setCursor(n - 1, 0);
-    }
+    if (!state.editor) return;
+    state.editor.focus();
+    state.editor.execCommand('jumpToLine');
 }
 
 function toggleComment() {
@@ -752,21 +773,22 @@ function toggleComment() {
     });
 }
 
+// Re-indent every line from the C/C++ mode's own rules (CodeMirror 5 has no
+// full formatter). Idempotent: pressing it twice changes nothing.
 function autoFormat() {
-    if (!state.editor) return;
-    const lineCount = state.editor.lineCount();
-    state.editor.setSelection({ line: 0, ch: 0 }, { line: lineCount - 1, ch: state.editor.getLine(lineCount - 1).length });
-    if (typeof state.editor.autoFormatRange === 'function') {
-        state.editor.autoFormatRange({ line: 0, ch: 0 }, { line: lineCount - 1, ch: state.editor.getLine(lineCount - 1).length });
-    } else {
-        state.editor.indentSelection('add');
-    }
+    const ed = state.editor;
+    if (!ed) return;
+    const cursor = ed.getCursor();
+    ed.operation(() => {
+        for (let i = 0; i < ed.lineCount(); i++) ed.indentLine(i, 'smart');
+    });
+    ed.setCursor(cursor);
 }
 
 function findInEditor() {
     if (!state.editor) return;
-    const q = prompt('Find:');
-    if (q != null && q.length) state.editor.execCommand('find');
+    state.editor.focus();
+    state.editor.execCommand('find');
 }
 
 function findNext() {
@@ -777,23 +799,200 @@ function findPrev() {
     if (state.editor) state.editor.execCommand('findPrev');
 }
 
-let editorFontSize = 14;
-function increaseEditorFontSize() {
-    editorFontSize = Math.min(24, (editorFontSize || 14) + 1);
+let editorFontSize = 13;
+function setEditorFontSize(px) {
+    editorFontSize = Math.max(10, Math.min(24, Math.round(px) || 13));
     document.querySelector('.CodeMirror')?.style.setProperty('font-size', `${editorFontSize}px`);
+    state.editor?.refresh();
+    try {
+        const prefs = JSON.parse(localStorage.getItem('impulse-editor-prefs') || '{}');
+        localStorage.setItem('impulse-editor-prefs', JSON.stringify({ ...prefs, fontSize: editorFontSize }));
+    } catch { /* storage unavailable */ }
+}
+function increaseEditorFontSize() { setEditorFontSize(editorFontSize + 1); }
+function decreaseEditorFontSize() { setEditorFontSize(editorFontSize - 1); }
+
+function restoreEditorPrefs() {
+    try {
+        const prefs = JSON.parse(localStorage.getItem('impulse-editor-prefs') || '{}');
+        if (prefs.fontSize) setEditorFontSize(prefs.fontSize);
+        if (prefs.tabSize && state.editor) {
+            state.editor.setOption('indentUnit', prefs.tabSize);
+            state.editor.setOption('tabSize', prefs.tabSize);
+        }
+    } catch { /* storage unavailable */ }
 }
 
-function decreaseEditorFontSize() {
-    editorFontSize = Math.max(10, (editorFontSize || 14) - 1);
-    document.querySelector('.CodeMirror')?.style.setProperty('font-size', `${editorFontSize}px`);
+function requireSketchAndBoard() {
+    if (!state.currentSketch) {
+        logToConsole('Open a sketch first', 'warning');
+        return false;
+    }
+    if (!state.selectedBoard) {
+        logToConsole('Select a board first', 'warning');
+        document.getElementById('boardPortDropdown')?.click();
+        return false;
+    }
+    return true;
 }
 
 async function exportCompiledBinary() {
+    if (!requireSketchAndBoard()) return;
+    if (!await saveFile({ quiet: true })) return;
+    logToConsole('Exporting compiled binary…', 'info');
+    const res = await window.electronAPI.arduino.exportBinaries(state.currentSketch, state.selectedBoard);
+    if (!res?.success) {
+        logToConsole(res?.error || 'Export failed', 'error');
+        return;
+    }
+    logToConsole(`Exported ${res.files.length} file(s) to ${res.outputDir}`, 'success');
+    window.electronAPI.shell?.showItemInFolder(res.outputDir);
+}
+
+// The simulator compiles from disk, so it saves the open file first.
+window.saveActiveFile = () => saveFile({ quiet: true });
+
+function showOutputTab(name) {
+    const outputPanel = document.getElementById('outputPanel');
+    if (outputPanel && outputPanel.style.display === 'none') outputPanel.style.display = '';
+    document.querySelector(`.output-tab[data-tab="${name}"]`)?.click();
+}
+
+let hardwareTestsRunning = false;
+async function runHardwareTests() {
+    if (hardwareTestsRunning) return;
     if (!state.currentSketch) {
         logToConsole('Open a sketch first', 'warning');
         return;
     }
-    notifyNotYet('Export Compiled Binary isn’t available yet.');
+    const container = document.getElementById('testsOutput');
+    showOutputTab('tests');
+    hardwareTestsRunning = true;
+    try {
+        if (!await saveFile({ quiet: true })) return;
+        const context = simulationContext();
+        container.innerHTML = `<p class="tests-hint">Compiling for the simulated ${escapeHtml(context.label)}…</p>`;
+        const result = await runSimulatorCheck({
+            sketchPath: state.currentSketch,
+            code: state.editor.getValue(),
+            context,
+            onStage: (stage) => {
+                if (stage === 'run') container.innerHTML = `<p class="tests-hint">Running on the simulated ${escapeHtml(context.label)} with your circuit…</p>`;
+            }
+        });
+        renderTestReport(container, result);
+        if (!isSimulatableBoard(state.selectedBoard)) {
+            const note = document.createElement('p');
+            note.className = 'tests-hint';
+            note.textContent = `Your upload board can't be simulated, so these checks ran on the simulator's ${context.label}.`;
+            container.prepend(note);
+        }
+        logToConsole(`Hardware tests: ${result.ok ? 'passed' : 'failed'}`, result.ok ? 'success' : 'warning');
+    } finally {
+        hardwareTestsRunning = false;
+    }
+}
+
+const COMPARE_SECONDS = 4;
+async function compareSimulatorWithBoard() {
+    if (hardwareTestsRunning) return;
+    if (!requireSketchAndBoard()) return;
+    const simBoard = boardForFqbn(state.selectedBoard);
+    if (!simBoard) {
+        logToConsole('The simulator runs the Arduino Uno, Nano and Mega 2560, so only those boards can be compared.', 'warning');
+        return;
+    }
+    if (!state.selectedPort) {
+        logToConsole('Connect the board and select its port first', 'warning');
+        document.getElementById('boardPortDropdown')?.click();
+        return;
+    }
+    const mode = await askDialog({
+        title: 'Compare simulator with board',
+        message: `Runs the sketch for ${COMPARE_SECONDS} s in the simulator and on the board at ${state.selectedPort}, then compares the serial output line by line.`,
+        options: [
+            { value: 'upload', label: 'Upload this sketch, then compare' },
+            { value: 'as-is', label: 'The board already runs this sketch' }
+        ],
+        confirmLabel: 'Compare'
+    });
+    if (!mode) return;
+
+    const container = document.getElementById('testsOutput');
+    showOutputTab('tests');
+    hardwareTestsRunning = true;
+    try {
+        if (!await saveFile({ quiet: true })) return;
+        const code = state.editor.getValue();
+        const baud = detectBaud(code);
+        container.innerHTML = '<p class="tests-hint">Running in the simulator…</p>';
+        const compiled = await window.electronAPI.arduino.compileHex(state.currentSketch, state.selectedBoard);
+        if (!compiled?.success) {
+            container.innerHTML = '';
+            const pre = document.createElement('pre');
+            pre.className = 'tests-error';
+            pre.textContent = compiled?.error || 'Compilation failed';
+            container.appendChild(pre);
+            return;
+        }
+        const context = simulationContext();
+        const circuit = context.board === simBoard.id ? context.circuit : null;
+        const sim = await runHeadless(compiled.hex, { seconds: COMPARE_SECONDS, board: simBoard.id, circuit });
+
+        if (mode === 'upload') {
+            container.innerHTML = '<p class="tests-hint">Uploading to the board…</p>';
+            await window.electronAPI.serial.disconnect().catch(() => {});
+            const up = await window.electronAPI.arduino.upload(state.currentSketch, state.selectedBoard, state.selectedPort);
+            if (!up?.success) {
+                container.innerHTML = '';
+                const pre = document.createElement('pre');
+                pre.className = 'tests-error';
+                pre.textContent = up?.error || 'Upload failed';
+                container.appendChild(pre);
+                return;
+            }
+            await new Promise(r => setTimeout(r, 1500));
+        }
+
+        container.innerHTML = `<p class="tests-hint">Listening to the board at ${baud} baud…</p>`;
+        let boardText;
+        try {
+            // Opening the port resets an UNO, so both runs start from power-on.
+            boardText = await captureBoardSerial(state.selectedPort, baud, COMPARE_SECONDS);
+        } catch (err) {
+            container.innerHTML = '';
+            const pre = document.createElement('pre');
+            pre.className = 'tests-error';
+            pre.textContent = err.message;
+            container.appendChild(pre);
+            return;
+        }
+        renderCompareReport(container, { diff: diffSerial(sim.serial, boardText), baud, seconds: COMPARE_SECONDS, port: state.selectedPort });
+    } finally {
+        hardwareTestsRunning = false;
+    }
+}
+
+async function uploadUsingProgrammer() {
+    if (!requireSketchAndBoard()) return;
+    const list = await window.electronAPI.arduino.listProgrammers(state.selectedBoard);
+    const programmers = list?.data || [];
+    if (programmers.length === 0) {
+        logToConsole('This board has no programmers listed. Install its core in Board Manager.', 'warning');
+        return;
+    }
+    const programmerId = await askDialog({
+        title: 'Upload using programmer',
+        message: 'Burns the sketch through an ISP programmer and overwrites the bootloader.',
+        options: programmers.map(p => ({ value: p.id, label: p.name, hint: p.id })),
+        confirmLabel: 'Upload'
+    });
+    if (!programmerId) return;
+    if (!await saveFile({ quiet: true })) return;
+    logToConsole(`Uploading with programmer ${programmerId}…`, 'info');
+    const res = await window.electronAPI.arduino.uploadWithProgrammer(state.currentSketch, state.selectedBoard, programmerId, state.selectedPort || '');
+    if (res?.success) logToConsole('Upload using programmer finished', 'success');
+    else logToConsole(res?.error || 'Upload using programmer failed', 'error');
 }
 
 function showSketchFolder() {
@@ -809,12 +1008,31 @@ function showSketchFolder() {
     }
 }
 
-function addFileToSketch() {
+async function addFileToSketch() {
     if (!state.folderRoot) {
         logToConsole('Open a sketch folder first', 'warning');
         return;
     }
-    logToConsole('Add File: use File > Open to add an existing file, or Add Tab for a new .ino tab', 'info');
+    const result = await window.electronAPI.dialog.openFile();
+    if (!result?.success || !result.filePath) return;
+    const read = await window.electronAPI.file.read(result.filePath);
+    if (!read?.success) {
+        logToConsole(read?.error || 'Could not read file', 'error');
+        return;
+    }
+    const name = result.filePath.split(/[/\\]/).pop();
+    const sep = state.folderRoot.includes('\\') ? '\\' : '/';
+    const target = state.folderRoot.replace(/[/\\]$/, '') + sep + name;
+    const saved = await window.electronAPI.file.save(target, read.content);
+    if (!saved?.success) {
+        logToConsole(saved?.error || 'Could not copy file into the sketch', 'error');
+        return;
+    }
+    showEditor();
+    addOrFocusFile(target, read.content, name);
+    switchToTab(state.openFiles.length - 1);
+    await renderFileTree(state.folderRoot);
+    logToConsole(`Added ${name} to the sketch`, 'success');
 }
 
 async function addTabToSketch() {
@@ -830,10 +1048,22 @@ async function addTabToSketch() {
             break;
         }
     }
-    const name = prompt('New tab name (.ino):', defaultName);
-    if (name == null || !name.trim()) return;
+    const name = await askDialog({
+        title: 'New tab',
+        input: {
+            value: defaultName,
+            validate: (v) => {
+                if (!v) return 'Enter a file name.';
+                if (/[\\/:*?"<>|]/.test(v)) return 'File names can’t contain \\ / : * ? " < > |';
+                const finalName = /\.(ino|h|hpp|c|cpp)$/i.test(v) ? v : v + '.ino';
+                return existingNames.includes(finalName) ? 'A tab with that name already exists.' : null;
+            }
+        },
+        confirmLabel: 'Create'
+    });
+    if (!name) return;
     let base = name.trim();
-    if (!base.toLowerCase().endsWith('.ino')) base += '.ino';
+    if (!/\.(ino|h|hpp|c|cpp)$/i.test(base)) base += '.ino';
     const sep = state.folderRoot.includes('\\') ? '\\' : '/';
     const root = state.folderRoot.endsWith(sep) ? state.folderRoot : state.folderRoot + sep;
     const filePath = root + base;
@@ -854,26 +1084,52 @@ async function addTabToSketch() {
     }
 }
 
-function archiveSketch() {
+async function archiveSketch() {
     if (!state.currentSketch) {
         logToConsole('Open a sketch first', 'warning');
         return;
     }
-    notifyNotYet('Archive Sketch isn’t available yet.');
+    if (!await saveFile({ quiet: true })) return;
+    const res = await window.electronAPI.arduino.archiveSketch(state.currentSketch);
+    if (res?.canceled) return;
+    if (res?.success) {
+        logToConsole(`Archived to ${res.archivePath}`, 'success');
+        window.electronAPI.shell?.showItemInFolder(res.archivePath);
+    } else {
+        logToConsole(res?.error || 'Archive failed', 'error');
+    }
 }
 
-function getBoardInfo() {
-    const port = document.getElementById('portSelectSidebar')?.value;
+async function getBoardInfo() {
+    const port = state.selectedPort || document.getElementById('portSelectSidebar')?.value;
     if (!port) {
         logToConsole('Select a port first (Board Manager or Tools > Port)', 'warning');
         document.getElementById('boardPortDropdown')?.click();
         return;
     }
-    logToConsole(`Board info for ${port}: use Arduino CLI or device manager for VID/PID details`, 'info');
+    const res = await window.electronAPI.arduino.boardInfo(port);
+    if (!res?.success) {
+        logToConsole(res?.error || 'Could not read board info', 'error');
+        return;
+    }
+    const { info } = res;
+    const lines = [
+        `Port: ${info.port} (${info.protocol})`,
+        info.vid ? `VID: ${info.vid}   PID: ${info.pid}` : 'VID/PID: not reported',
+        info.serialNumber ? `Serial number: ${info.serialNumber}` : null,
+        info.boards.length ? `Detected: ${info.boards.map(b => `${b.name} (${b.fqbn})`).join(', ')}` : 'Detected board: unknown (generic USB serial)'
+    ].filter(Boolean);
+    await askDialog({ title: 'Board info', message: lines.join('\n'), confirmLabel: 'Done', cancelLabel: 'Close' });
 }
 
-function showAbout() {
-    logToConsole('Impulse IDE — hybrid Arduino IDE with AI assistant', 'info');
+async function showAbout() {
+    const version = await window.electronAPI.app?.getVersion?.().catch(() => null);
+    await askDialog({
+        title: 'Impulse',
+        message: `${version ? `Version ${version}\n` : ''}Write it, wire it, simulate it, ship it to the board.\nAI-assisted Arduino development with a built-in AVR simulator.`,
+        confirmLabel: 'Done',
+        cancelLabel: 'Close'
+    });
 }
 
 function openHelpUrl(url) {
@@ -907,13 +1163,8 @@ function setupFooterThemeToggle() {
 
     // Restore saved theme (icons toggled via CSS [data-theme])
     const saved = localStorage.getItem('arduino-ide-theme');
-    if (saved === 'dark') {
-        state.darkMode = true;
-        document.documentElement.setAttribute('data-theme', 'dark');
-    } else {
-        state.darkMode = false;
-        document.documentElement.setAttribute('data-theme', 'light');
-    }
+    state.darkMode = saved !== 'light';
+    document.documentElement.setAttribute('data-theme', state.darkMode ? 'dark' : 'light');
 
     btn.addEventListener('click', () => {
         state.darkMode = !state.darkMode;
@@ -951,7 +1202,7 @@ function setupUpdater() {
         banner.classList.add('hidden');
     }
 
-    const unsubscribe = window.electronAPI.updater.onStatus((status, data) => {
+    window.electronAPI.updater.onStatus((status, data) => {
         if (status === 'available') {
             const version = data?.version ? ` (${data.version})` : '';
             showBanner(`Update available${version}.`, true, false);
@@ -1082,7 +1333,7 @@ function setupUserApiKeys() {
             const saveBtn = document.createElement('button');
             saveBtn.className = 'user-key-save-btn';
             saveBtn.textContent = 'Save';
-            saveBtn.addEventListener('click', () => saveKey(prov.id, input, badge));
+            saveBtn.addEventListener('click', () => saveKey(prov.id, input));
 
             input.addEventListener('keydown', (e) => {
                 if (e.key === 'Enter') saveBtn.click();
@@ -1109,7 +1360,7 @@ function setupUserApiKeys() {
     }
 
     // --- Save a key ---
-    async function saveKey(providerId, inputEl, badgeEl) {
+    async function saveKey(providerId, inputEl) {
         const key = inputEl.value.trim();
         if (!key) {
             showStatus('Enter a key first.', 'error');
@@ -1191,6 +1442,7 @@ function syncDropdowns() {
         boardSelectSidebar.addEventListener('change', (e) => {
             state.selectedBoard = e.target.value;
             state.context.selectedBoard = e.target.value;
+            announceBoard();
             window.electronAPI.ui.updateBoard(e.target.value);
             const board = state.boards.find(b => b.fqbn === e.target.value);
             updateBoardPortDisplay(board?.name || null, state.selectedPort || null);
@@ -1295,7 +1547,7 @@ function initializeCodeMirror() {
     registerArduinoHint(CodeMirror);
 
     state.editor = CodeMirror.fromTextArea(textarea, {
-        mode: 'text/x-csrc',
+        mode: 'text/x-arduino',
         theme: 'default',
         lineNumbers: true,
         indentUnit: 2,
@@ -1333,6 +1585,7 @@ function showWelcomeState() {
     state.activeTabIndex = -1;
     state.currentFile = null;
     state.currentSketch = null;
+    announceSketch();
     renderFileTabs();
 }
 
@@ -1746,11 +1999,13 @@ async function refreshPortsQuiet() {
 
     const ports = result.data;
     const sig = ports.map(p => p.port).sort().join('|');
-    if (_lastPortsSignature === null) { _lastPortsSignature = sig; return; } // first poll: baseline only
     if (sig === _lastPortsSignature) return; // no change
+    // The first successful poll is the baseline: sync the list without
+    // announcing ports that were already plugged in at launch.
+    const isBaseline = _lastPortsSignature === null;
 
-    const added = ports.filter(p => !state.ports.some(o => o.port === p.port));
-    const removed = state.ports.filter(o => !ports.some(p => p.port === o.port));
+    const added = isBaseline ? [] : ports.filter(p => !state.ports.some(o => o.port === p.port));
+    const removed = isBaseline ? [] : state.ports.filter(o => !ports.some(p => p.port === o.port));
     _lastPortsSignature = sig;
     state.ports = ports;
 
@@ -1784,8 +2039,6 @@ function startPortAutoRefresh() {
 function setupBoardManagerPanel() {
     const searchInput = document.getElementById('coreSearchInput');
     const searchBtn = document.getElementById('coreSearchBtn');
-    const resultsEl = document.getElementById('coreSearchResults');
-    const installedEl = document.getElementById('coreInstalledList');
 
     if (searchBtn) searchBtn.addEventListener('click', runCoreSearch);
     if (searchInput) searchInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') runCoreSearch(); });
@@ -1875,7 +2128,7 @@ async function coreInstallClick(coreId) {
 
 async function coreUninstallClick(coreId) {
     if (!coreId) return;
-    if (!confirm(`Uninstall core "${coreId}"?`)) return;
+    if (!await confirmDialog('Uninstall core', `Remove "${coreId}" and its boards from this computer?`, { confirmLabel: 'Uninstall', danger: true })) return;
     logToConsole(`Uninstalling: ${coreId}...`, 'info');
     try {
         const result = await window.electronAPI.arduino.coreUninstall(coreId);
@@ -2027,7 +2280,7 @@ async function openExampleAtPath(exampleFolderPath) {
         state.expandedDirs.clear();
         const label = document.getElementById('folderLabel');
         const name = exampleFolderPath.split(/[/\\]/).pop() || 'Example';
-        if (label) label.innerHTML = `<span class="folder-icon">📁</span><span>${escapeHtml(name)}</span>`;
+        if (label) label.innerHTML = `<span class="folder-icon">${ICONS.folder}</span><span>${escapeHtml(name)}</span>`;
         await renderFileTree(exampleFolderPath);
         const fileResult = await window.electronAPI.file.read(inoFile.path);
         const content = fileResult.success ? fileResult.content : '';
@@ -2048,29 +2301,49 @@ function escapeHtml(s) {
     return div.innerHTML;
 }
 
+const svgIcon = (body) => `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
+const ICONS = {
+    folder: svgIcon('<path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>'),
+    sketch: svgIcon('<path d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8z"/><path d="M14 3v5h5"/><path d="M10 13l-2 2 2 2M14 13l2 2-2 2"/>'),
+    file: svgIcon('<path d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8z"/><path d="M14 3v5h5"/>'),
+    chevron: svgIcon('<path d="M9 6l6 6-6 6"/>'),
+    chip: svgIcon('<rect x="5" y="5" width="14" height="14" rx="2"/><rect x="9" y="9" width="6" height="6" rx="1"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/>'),
+};
+
+function fileIcon(name, isDirectory = false) {
+    if (isDirectory) return ICONS.folder;
+    return /\.(ino|cpp|c|h|hpp)$/i.test(name) ? ICONS.sketch : ICONS.file;
+}
+
 // ============================================
 // File Explorer Functions
 // ============================================
 async function openFolder() {
     try {
         const result = await window.electronAPI.dialog.openFolder();
-        if (result.success && result.folderPath) {
-            state.folderRoot = result.folderPath;
-            state.expandedDirs.clear();
-
-            const label = document.getElementById('folderLabel');
-            const name = result.folderPath.split(/[/\\]/).pop() || result.folderPath;
-            if (label) {
-                label.innerHTML = `<span class="folder-icon">📁</span><span>${escapeHtml(name)}</span>`;
-            }
-
-            await renderFileTree(result.folderPath);
-            saveSession();
-            logToConsole(`Opened folder: ${name}`, 'success');
-        }
+        if (result.success && result.folderPath) await loadFolder(result.folderPath);
     } catch (error) {
         logToConsole(`Error opening folder: ${error.message}`, 'error');
     }
+}
+
+async function loadFolder(folderPath) {
+    const res = await window.electronAPI.folder.list(folderPath);
+    if (!res?.success) {
+        logToConsole(res?.error || `Could not open ${folderPath}`, 'error');
+        return false;
+    }
+    state.folderRoot = folderPath;
+    state.expandedDirs.clear();
+    const label = document.getElementById('folderLabel');
+    const name = folderPath.split(/[/\\]/).pop() || folderPath;
+    if (label) label.innerHTML = `<span class="folder-icon">${ICONS.folder}</span><span>${escapeHtml(name)}</span>`;
+    if (state.sidebarCollapsed) toggleSidebar();
+    switchPanel('explorer');
+    await renderFileTree(folderPath);
+    saveSession();
+    logToConsole(`Opened folder: ${name}`, 'success');
+    return true;
 }
 
 async function renderFileTree(dirPath) {
@@ -2079,7 +2352,7 @@ async function renderFileTree(dirPath) {
 
     const res = await window.electronAPI.folder.list(dirPath);
     if (!res.success) {
-        container.innerHTML = `<div class="lib-msg">${res.error || 'Failed to list'}</div>`;
+        container.innerHTML = `<div class="lib-msg">${escapeHtml(res.error || 'Failed to list')}</div>`;
         return;
     }
 
@@ -2091,8 +2364,8 @@ async function renderFileTree(dirPath) {
         row.dataset.path = e.path;
         row.dataset.isDir = e.isDirectory;
 
-        const icon = e.isDirectory ? '📁' : (e.name.endsWith('.ino') ? '📄' : '📃');
-        const chev = e.isDirectory ? '<span class="tree-chevron">▶</span>' : '<span class="tree-spacer"></span>';
+        const icon = fileIcon(e.name, e.isDirectory);
+        const chev = e.isDirectory ? `<span class="tree-chevron">${ICONS.chevron}</span>` : '<span class="tree-spacer"></span>';
         row.innerHTML = `${chev}<span class="tree-icon">${icon}</span><span class="tree-name">${escapeHtml(e.name)}</span>`;
 
         if (e.isDirectory) {
@@ -2114,10 +2387,10 @@ function toggleTreeDir(dirPath, rowEl) {
         state.expandedDirs.delete(dirPath);
         const child = rowEl.nextElementSibling;
         if (child?.classList.contains('tree-children')) child.remove();
-        rowEl.querySelector('.tree-chevron').textContent = '▶';
+        rowEl.querySelector('.tree-chevron').classList.remove('open');
     } else {
         state.expandedDirs.add(dirPath);
-        rowEl.querySelector('.tree-chevron').textContent = '▼';
+        rowEl.querySelector('.tree-chevron').classList.add('open');
 
         const wrap = document.createElement('div');
         wrap.className = 'tree-children';
@@ -2133,8 +2406,8 @@ function toggleTreeDir(dirPath, rowEl) {
                     sub.className = 'tree-item' + (e.isDirectory ? ' tree-dir' : ' tree-file');
                     sub.dataset.path = e.path;
 
-                    const icon = e.isDirectory ? '📁' : (e.name.endsWith('.ino') ? '📄' : '📃');
-                    const chev = e.isDirectory ? '<span class="tree-chevron">▶</span>' : '<span class="tree-spacer"></span>';
+                    const icon = fileIcon(e.name, e.isDirectory);
+                    const chev = e.isDirectory ? `<span class="tree-chevron">${ICONS.chevron}</span>` : '<span class="tree-spacer"></span>';
                     sub.innerHTML = `${chev}<span class="tree-icon">${icon}</span><span class="tree-name">${escapeHtml(e.name)}</span>`;
 
                     if (e.isDirectory) {
@@ -2169,12 +2442,9 @@ function renderFileTabs() {
         tab.className = 'tab' + (index === state.activeTabIndex ? ' active' : '');
         tab.dataset.tabIndex = String(index);
 
-        const ext = (file.name.split('.').pop() || '').toLowerCase();
-        const icon = ext === 'ino' ? '📄' : '📃';
-
         tab.innerHTML = `
-            <span class="tab-icon">${icon}</span>
-            <span class="tab-name">${file.name}</span>
+            <span class="tab-icon">${fileIcon(file.name)}</span>
+            <span class="tab-name">${escapeHtml(file.name)}</span>
             <button type="button" class="tab-close" data-tab-index="${index}" title="Close">×</button>
         `;
 
@@ -2228,6 +2498,7 @@ function switchToTab(index) {
     const ext = (file.path.split('.').pop() || '').toLowerCase();
     state.currentSketch = ext === 'ino' ? file.path : (state.currentSketch && state.openFiles.some(f => f.path === state.currentSketch) ? state.currentSketch : null);
     if (ext === 'ino') window.electronAPI.ui.updateSketchPath(file.path);
+    announceSketch();
 
     if (state.editor) {
         state.editor.setValue(file.content);
@@ -2253,6 +2524,7 @@ function closeTab(index) {
         state.activeTabIndex = -1;
         state.currentFile = null;
         state.currentSketch = null;
+        announceSketch();
         showWelcomeState();
         saveSession();
         return;
@@ -2268,6 +2540,7 @@ function closeTab(index) {
     state.currentFile = file.path;
     const ext = (file.path.split('.').pop() || '').toLowerCase();
     state.currentSketch = ext === 'ino' ? file.path : (state.openFiles.find(f => (f.path.split('.').pop() || '').toLowerCase() === 'ino')?.path || null);
+    announceSketch();
     if (ext === 'ino') window.electronAPI.ui.updateSketchPath(file.path);
 
     if (state.editor) {
@@ -2655,7 +2928,6 @@ async function sendSerialData() {
 function updateSerialUI(connected) {
     const toggleBtn = document.getElementById('toggleSerial');
     const portSelectSidebar = document.getElementById('portSelectSidebar');
-    const baudSelect = document.getElementById('baudRate');
     const statusDot = document.getElementById('serialStatusDot');
     const statusText = document.getElementById('serialStatusText');
 
@@ -3178,6 +3450,7 @@ async function restoreSession() {
                 boardSelectSidebar.value = session.boardFQBN;
                 state.selectedBoard = session.boardFQBN;
                 state.context.selectedBoard = session.boardFQBN;
+                announceBoard();
             }
             const board = state.boards.find(b => b.fqbn === session.boardFQBN);
             if (board) restoredBoardName = board.name;
@@ -3205,6 +3478,14 @@ async function restoreSession() {
             loadSavedBoardPortOptions();
         }
 
+        // Sessions saved before folder approvals were persisted need a one-time
+        // approval (no-op on every later launch).
+        const legacyFolders = [
+            session.folderPath,
+            ...(Array.isArray(session.openFiles) ? session.openFiles.map(f => f?.path?.replace(/[/\\][^/\\]*$/, '')) : [])
+        ].filter(p => typeof p === 'string' && p);
+        if (legacyFolders.length) await window.electronAPI.workspace?.migrateLegacySession(legacyFolders);
+
         // Restore folder: only if path still exists (list succeeds)
         if (session.folderPath && typeof session.folderPath === 'string') {
             const res = await window.electronAPI.folder.list(session.folderPath);
@@ -3214,7 +3495,7 @@ async function restoreSession() {
                 const label = document.getElementById('folderLabel');
                 const name = session.folderPath.split(/[/\\]/).pop() || session.folderPath;
                 if (label) {
-                    label.innerHTML = `<span class="folder-icon">📁</span><span>${escapeHtml(name)}</span>`;
+                    label.innerHTML = `<span class="folder-icon">${ICONS.folder}</span><span>${escapeHtml(name)}</span>`;
                 }
                 await renderFileTree(session.folderPath);
             }
@@ -3334,7 +3615,7 @@ function syncPinButton() {
 
 // Build a dropdown label with badges: ✦ newest of its provider, ★ most-used.
 function modelOptionLabel(m, suggestion) {
-    let label = m.displayName || m.id;
+    const label = m.displayName || m.id;
     const badges = [];
     if (m.latest) badges.push('✦');
     if (suggestion && suggestion.mostUsed === m.id) badges.push('★');
@@ -3696,6 +3977,42 @@ async function compactConversation() {
     }
 }
 
+const CODE_EDIT_TOOLS = new Set(['set_editor_code', 'edit_code', 'replace_in_code']);
+
+// After the AI changes the sketch, run it in the simulator before the user
+// trusts it. Boards the simulator can't run (ESP32, …) are skipped.
+async function verifyAiEdit() {
+    const container = document.getElementById('aiMessages');
+    if (!container || !state.currentSketch || !isSimulatableBoard(state.selectedBoard)) return;
+    const pending = document.createElement('div');
+    pending.className = 'verify-card pending';
+    pending.innerHTML = '<div class="verify-head"><span class="verify-dot"></span><span class="verify-title">Checking in simulator…</span></div>';
+    container.appendChild(pending);
+    container.scrollTop = container.scrollHeight;
+    try {
+        if (!await saveFile({ quiet: true })) {
+            pending.remove();
+            return;
+        }
+        const result = await runSimulatorCheck({ sketchPath: state.currentSketch, code: state.editor.getValue() });
+        const card = renderVerifyCard(result, {
+            onFix: (failures) => {
+                const input = document.getElementById('aiInput');
+                if (!input) return;
+                input.value = `The simulator check failed:\n${failures.join('\n')}\nFix the sketch so it compiles and these checks pass.`;
+                sendAIMessage();
+            }
+        });
+        pending.replaceWith(card);
+        container.scrollTop = container.scrollHeight;
+        const report = document.getElementById('testsOutput');
+        if (report) renderTestReport(report, result, { title: 'AI edit check' });
+    } catch (err) {
+        pending.remove();
+        logToConsole(`Simulator check failed to run: ${err.message}`, 'error');
+    }
+}
+
 async function sendAIMessage() {
     const input = document.getElementById('aiInput');
     const message = input?.value?.trim();
@@ -3725,10 +4042,13 @@ async function sendAIMessage() {
         }
     };
 
-    const timeoutId = setTimeout(() => {
-        safeRemoveThinking();
-        addAIMessage('assistant', 'Request timed out. Please try again.');
-    }, 120000);
+    // Agent turns can legitimately take minutes; show progress instead of a
+    // client-side timeout (the SDK enforces the real network timeout).
+    const startedAt = Date.now();
+    const timeoutId = setInterval(() => {
+        const label = document.querySelector(`#${CSS.escape(thinkingId)} .shimmer-text`);
+        if (label) label.textContent = `Working… ${Math.round((Date.now() - startedAt) / 1000)}s`;
+    }, 1000);
 
     try {
         const context = {
@@ -3741,12 +4061,14 @@ async function sendAIMessage() {
         const mode = state.aiMode || 'agent';
         const result = await window.electronAPI.ai.processQuery(message, context, mode);
 
-        clearTimeout(timeoutId);
+        clearInterval(timeoutId);
         safeRemoveThinking();
 
         if (result.success && result.data) {
             const response = result.data.response || result.data.content || 'No response received';
             addAIMessage('assistant', response);
+            const editedCode = (result.data.toolResults || []).some(t => t && t.success && CODE_EDIT_TOOLS.has(t.tool));
+            if (editedCode) verifyAiEdit();
 
             if (result.data.toolResults && result.data.toolResults.length > 0) {
                 const toolSummary = result.data.toolResults
@@ -3770,7 +4092,7 @@ async function sendAIMessage() {
             logToConsole(`AI Error: ${errorMsg}`, 'error');
         }
     } catch (error) {
-        clearTimeout(timeoutId);
+        clearInterval(timeoutId);
         safeRemoveThinking();
 
         const errorMsg = error.message || 'An unexpected error occurred';
@@ -4060,7 +4382,7 @@ function showProblem(message) {
         const match = msgLine.match(/^(.+?):(\d+):(\d+):\s*(\w+):\s*(.*)$/);
 
         if (match) {
-            const [_, file, line, col, type, text] = match;
+            const [, file, line, col, type, text] = match;
 
             // Location Link
             const locSpan = document.createElement('span');
@@ -4203,6 +4525,7 @@ function setupBoardPortSelector() {
                 document.getElementById('boardSelectSidebar').value = boardFQBN;
                 state.selectedBoard = boardFQBN;
                 state.context.selectedBoard = boardFQBN;
+                announceBoard();
                 updateBoardPortDisplay(boardName, null);
                 if (window.electronAPI?.ui?.updateBoard) {
                     window.electronAPI.ui.updateBoard(boardFQBN);
@@ -4282,8 +4605,8 @@ function renderBoardList() {
         }
 
         item.innerHTML = `
-            <img src="../../assets/chip.svg" alt="" class="board-port-list-item-icon board-port-list-item-icon-chip" width="16" height="16">
-            <span>${board.name}</span>
+            <span class="board-port-list-item-icon">${ICONS.chip}</span>
+            <span>${escapeHtml(board.name)}</span>
         `;
 
         item.addEventListener('click', () => {
@@ -4371,6 +4694,7 @@ function loadSavedBoardPortOptions() {
                     document.getElementById('boardSelectSidebar').value = board.fqbn;
                     state.selectedBoard = board.fqbn;
                     state.context.selectedBoard = board.fqbn;
+                    announceBoard();
                 }
                 if (port) {
                     document.getElementById('portSelectSidebar').value = port.port;
@@ -4403,6 +4727,20 @@ function updateBoardPortDisplay(boardName, port) {
 // ============================================
 // Helper Functions
 // ============================================
+
+// The simulator keeps each sketch's circuit in diagram.json next to it, so it
+// needs to know when the open sketch or the upload board changes.
+let announcedSketch;
+function announceSketch() {
+    if (announcedSketch === state.currentSketch) return;
+    announcedSketch = state.currentSketch;
+    window.dispatchEvent(new CustomEvent('impulse:sketch-changed', { detail: { sketch: state.currentSketch } }));
+}
+
+function announceBoard() {
+    window.dispatchEvent(new CustomEvent('impulse:board-changed', { detail: { fqbn: state.selectedBoard } }));
+}
+
 function setButtonState(buttonId, disabled, text) {
     const btn = document.getElementById(buttonId);
     if (!btn) return;
@@ -4426,7 +4764,34 @@ function setupSimulation() {
 
     simManager = new SimulationManager();
     window.simManager = simManager;
+    // The Serial Plotter also graphs what the simulated board prints.
+    window.addEventListener('impulse:sim-serial-line', (e) => {
+        if (state.plotter.running) feedPlotterData(e.detail);
+    });
 }
+
+// Small API the simulator uses to open example sketches.
+window.impulse = {
+    async openSketch(folderPath, filePath) {
+        if (folderPath) await loadFolder(folderPath);
+        const res = await window.electronAPI.file.read(filePath);
+        if (!res?.success) {
+            logToConsole(res?.error || `Could not open ${filePath}`, 'error');
+            return false;
+        }
+        showEditor();
+        addOrFocusFile(filePath, res.content, filePath.split(/[/\\]/).pop());
+        switchToTab(state.openFiles.findIndex(f => f.path === filePath));
+        saveSession();
+        return true;
+    },
+    showSimulator() {
+        const view = document.getElementById('simView');
+        if (simActive && view && view.style.display === 'flex') return;
+        simActive = false;
+        toggleSimView();
+    }
+};
 
 document.addEventListener('DOMContentLoaded', () => {
     // Delay to let renderer.js initialize first
@@ -4481,6 +4846,7 @@ function toggleSimView() {
 
         // Refresh editor layout after the move
         setTimeout(() => window.state?.editor?.refresh?.(), 50);
+        simManager?.onShow?.();
     } else {
         // Move editor back into the main workspace area
         if (workspaceRow) {
@@ -4497,10 +4863,4 @@ function toggleSimView() {
     }
 }
 
-// Keyboard shortcut Ctrl+Shift+S
-document.addEventListener('keydown', (e) => {
-    if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'S') {
-        e.preventDefault();
-        toggleSimView();
-    }
-});
+

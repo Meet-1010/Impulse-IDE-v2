@@ -64,7 +64,7 @@ function register(ipcMain, ctx) {
     const parsed = parseOrDefault(schemas.fileSave, { filePath: filePath ?? '', content: content ?? '' }, defaultFail);
     if (!parsed.ok) return parsed.defaultResult;
 
-    const pathCheck = validatePath(parsed.data.filePath);
+    const pathCheck = validatePath(parsed.data.filePath, { write: true });
     if (!pathCheck.valid) return { success: false, error: pathCheck.error };
 
     try {

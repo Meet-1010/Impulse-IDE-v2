@@ -320,7 +320,7 @@ class AccessibilityManager {
     // Arrow key navigation within tablists
     document.addEventListener('keydown', (e) => {
       const target = e.target;
-      if (target.getAttribute('role') !== 'tab') return;
+      if (!(target instanceof Element) || target.getAttribute('role') !== 'tab') return;
 
       const tablist = target.closest('[role="tablist"]');
       if (!tablist) return;

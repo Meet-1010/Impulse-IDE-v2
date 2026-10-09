@@ -27,7 +27,12 @@ const defaultFail = { success: false, error: 'Invalid input' };
  * @param {{ mainWindow: import('electron').BrowserWindow | null, dialog: import('electron').Dialog, fsp: import('fs').promises, path: typeof path }} ctx
  */
 function register(ipcMain, ctx) {
-  const { mainWindow, dialog, fsp } = ctx;
+  const { mainWindow, dialog, fsp, workspace } = ctx;
+  const remember = (folder) => { if (workspace) workspace.addRecent(folder); };
+
+  ipcMain.handle('workspace:migrate-legacy-session', withDebugLog('workspace:migrate-legacy-session', async (event, folderPaths) => {
+    return { success: true, approved: workspace ? workspace.migrateLegacySession(folderPaths) : [] };
+  }));
 
   ipcMain.handle('dialog:open-file', withDebugLog('dialog:open-file', async () => {
     try {
@@ -42,7 +47,10 @@ function register(ipcMain, ctx) {
       if (result.canceled) return { success: false, canceled: true };
       const filePath = result.filePaths?.[0] ?? null;
       // Approve the parent directory of the opened file
-      if (filePath) approveDirectory(path.dirname(filePath));
+      if (filePath) {
+        approveDirectory(path.dirname(filePath));
+        remember(path.dirname(filePath));
+      }
       return { success: true, filePath };
     } catch (error) {
       return { success: false, error: error?.message ?? 'Dialog failed' };
@@ -58,7 +66,10 @@ function register(ipcMain, ctx) {
       if (result.canceled) return { success: false, canceled: true };
       const folderPath = result.filePaths?.[0] ?? null;
       // Approve the opened folder for subsequent file operations
-      if (folderPath) approveDirectory(folderPath);
+      if (folderPath) {
+        approveDirectory(folderPath);
+        remember(folderPath);
+      }
       return { success: true, folderPath };
     } catch (error) {
       return { success: false, error: error?.message ?? 'Dialog failed' };
@@ -87,6 +98,7 @@ function register(ipcMain, ctx) {
       const mainInoPath = path.join(folderPath, sketchName + '.ino');
       await fsp.writeFile(mainInoPath, DEFAULT_SKETCH_TEMPLATE, 'utf8');
       approveDirectory(folderPath);
+      remember(folderPath);
       return { success: true, folderPath, filePath: mainInoPath, sketchName: sketchName + '.ino' };
     } catch (error) {
       return { success: false, error: error?.message ?? 'Save failed' };
@@ -115,6 +127,7 @@ function register(ipcMain, ctx) {
       const text = typeof parsed.data.content === 'string' ? parsed.data.content : DEFAULT_SKETCH_TEMPLATE;
       await fsp.writeFile(mainInoPath, text, 'utf8');
       approveDirectory(folderPath);
+      remember(folderPath);
       return { success: true, folderPath, filePath: mainInoPath, sketchName: sketchName + '.ino' };
     } catch (error) {
       return { success: false, error: error?.message ?? 'Save failed' };

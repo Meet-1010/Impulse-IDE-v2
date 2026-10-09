@@ -1,77 +1,78 @@
 /**
  * AI circuit generator — turns an Arduino sketch into a wired circuit spec.
  * Single-shot completion against the user's configured provider; the renderer
- * validates the result against the parts catalog before placing anything.
+ * sends its parts catalog (so the model only uses parts that exist) and
+ * validates the result before placing anything.
  * @module main/services/ai/circuitGenerator
  */
 
-const SYSTEM_PROMPT = `You are the circuit synthesis engine of Impulse IDE's 2D hardware simulator.
+const BOARD_NOTES = {
+  uno: 'Arduino Uno (type "wokwi-arduino-uno", id "uno"). Pins "0".."13", "A0".."A5", power "5V", "3.3V", "VIN", grounds "GND.1", "GND.2", "GND.3". PWM: 3, 5, 6, 9, 10, 11. I2C: SDA = "A4", SCL = "A5". SPI: SS 10, MOSI 11, MISO 12, SCK 13. Interrupts: 2, 3.',
+  nano: 'Arduino Nano (type "wokwi-arduino-nano", id "nano"). Pins "0".."13", "A0".."A7" (A6/A7 analog only), power "5V", "3.3V", "VIN", grounds "GND.1", "GND.2". PWM: 3, 5, 6, 9, 10, 11. I2C: SDA = "A4", SCL = "A5". SPI: SS 10, MOSI 11, MISO 12, SCK 13.',
+  mega: 'Arduino Mega 2560 (type "wokwi-arduino-mega", id "mega"). Pins "0".."53", "A0".."A15", power "5V", "3.3V", "VIN", grounds "GND.1".."GND.5". PWM: 2-13, 44-46. I2C: SDA = "20", SCL = "21". SPI: SS 53, MOSI 51, MISO 50, SCK 52. Serial1 18/19, Serial2 16/17, Serial3 14/15. Interrupts: 2, 3, 18, 19, 20, 21.',
+};
+
+const FALLBACK_CATALOG = `wokwi-led — LED. attrs {"color": "red"}. Pins: A (anode), C (cathode).
+wokwi-resistor — attrs {"value": "220"}. Pins: 1, 2.
+wokwi-pushbutton — Pins: 1.l, 1.r (side 1), 2.l, 2.r (side 2). Pressing joins side 1 to side 2.
+wokwi-potentiometer — Pins: GND, SIG, VCC.
+wokwi-servo — Pins: GND, V+, PWM.
+wokwi-buzzer — Pins: 1 (−), 2 (+).
+wokwi-lcd1602 — I2C LCD, attrs {"pins": "i2c"}. Pins: GND, VCC, SDA, SCL.
+wokwi-ssd1306 — I2C OLED. Pins: DATA (SDA), CLK (SCL), VIN, GND.
+wokwi-hc-sr04 — Pins: VCC, TRIG, ECHO, GND.
+wokwi-dht22 — Pins: VCC, SDA (data), NC, GND.`;
+
+function systemPrompt(board, catalog) {
+  return `You are the circuit synthesis engine of Impulse IDE's 2D hardware simulator.
 Given an Arduino sketch, output the EXACT physical circuit it needs, as JSON.
-The circuit must be electrically correct: if a human wired a real Arduino UNO
-exactly as you output and flashed the same sketch, it would work identically.
+The circuit must be electrically correct: if a human wired the real parts exactly
+as you output and flashed the same sketch, it would work identically.
+
+BOARD
+${BOARD_NOTES[board] || BOARD_NOTES.uno}
 
 AVAILABLE PARTS (use these exact "type" strings and pin names, nothing else):
-
-wokwi-arduino-uno — the board. id MUST be "uno". Pins: "0".."13" (digital), "A0".."A5" (analog), "5V", "3.3V", "GND.1", "GND.2", "GND.3" (grounds).
-wokwi-led — attrs: {"color": "red"|"green"|"blue"|"yellow"|"orange"|"white"}. Pins: "A" (anode), "C" (cathode).
-wokwi-rgb-led — common-cathode RGB LED. Pins: "R", "COM", "G", "B".
-wokwi-resistor — attrs: {"value": "220"} (ohms, string). Pins: "1", "2".
-wokwi-pushbutton — attrs: {"color": "green"}. Pins: "1.l", "1.r" (side 1), "2.l", "2.r" (side 2). Pressing bridges side 1 to side 2.
-wokwi-pushbutton-6mm — same pins as wokwi-pushbutton.
-wokwi-buzzer — Pins: "1" (negative), "2" (positive).
-wokwi-servo — Pins: "GND", "V+", "PWM".
-wokwi-potentiometer — Pins: "GND", "SIG", "VCC".
-wokwi-slide-potentiometer — Pins: "VCC", "SIG", "GND".
-wokwi-slide-switch — Pins: "1", "2" (common), "3".
-wokwi-led-bar-graph — 10 LEDs. Pins: "A1".."A10" (anodes), "C1".."C10" (cathodes).
-wokwi-7segment — Pins: "A".."G", "DP", "COM".
-wokwi-lcd1602 — attrs: {"pins": "i2c"} strongly preferred. I2C pins: "GND", "VCC", "SDA", "SCL". (Parallel mode pins "VSS","VDD","V0","RS","RW","E","D0".."D7" exist but avoid unless the sketch uses LiquidCrystal in 4-bit mode.)
-wokwi-lcd2004 — same pin scheme as wokwi-lcd1602.
-wokwi-ssd1306 — I2C OLED. Pins: "DATA" (SDA), "CLK" (SCL), "DC", "RST", "CS", "3V3", "VIN", "GND".
-wokwi-hc-sr04 — Pins: "VCC", "TRIG", "ECHO", "GND".
-wokwi-dht22 — Pins: "VCC", "SDA" (data), "NC", "GND".
-wokwi-pir-motion-sensor — Pins: "VCC", "OUT", "GND".
-wokwi-photoresistor-sensor — Pins: "VCC", "GND", "DO" (digital out), "AO" (analog out).
-wokwi-ky-040 — rotary encoder. Pins: "CLK", "DT", "SW", "VCC", "GND".
-wokwi-membrane-keypad — Pins: "R1".."R4", "C1".."C4".
-wokwi-neopixel — Pins: "VDD", "DOUT", "VSS", "DIN".
-wokwi-analog-joystick — Pins: "VCC", "VERT", "HORZ", "SEL", "GND".
+${catalog || FALLBACK_CATALOG}
 
 WIRING RULES (mandatory — real-hardware correctness):
 1. Read the sketch's pin constants/defines carefully. Wire each component to the EXACT pin number used in the code.
-2. Every LED anode path needs a series resistor: uno:<pin> → resistor:1, resistor:2 → led:A, led:C → uno:GND.x. Resistor value "220".
-3. Pushbutton with pinMode INPUT_PULLUP: one side to the digital pin, other side to GND (button press = LOW). With plain INPUT and external logic expecting HIGH on press: wire to 5V instead and note a pull-down would be needed physically — prefer the INPUT_PULLUP pattern the code uses.
-4. Potentiometer: SIG → the analog pin the code reads, VCC → uno:5V, GND → uno:GND.x.
-5. Servo: PWM → the attach() pin, V+ → uno:5V, GND → uno:GND.x.
-6. Buzzer: "2" (positive) → the tone/digital pin, "1" → uno:GND.x.
-7. I2C devices (LCD with i2c pins, SSD1306): SDA → uno:A4, SCL → uno:A5, VCC/VIN → uno:5V, GND → uno:GND.x.
-8. Sensors: power VCC from uno:5V, ground to uno:GND.x, data pins to the pins the code uses.
-9. Distribute ground connections across GND.1, GND.2, GND.3 to keep wiring readable.
-10. Only include parts the sketch actually uses. Do not invent extra components.
-11. If the sketch only uses pin 13 / LED_BUILTIN with no other hardware, still add an external LED+resistor on pin 13 so the user sees a component (the board also has its built-in L LED).
+2. Every discrete LED needs a series resistor: board:<pin> → resistor:1, resistor:2 → led:A, led:C → board:GND.x. Value "220".
+3. Pushbutton with INPUT_PULLUP: one side to the digital pin, the other side to GND. With plain INPUT: other side to 5V plus a 10k resistor from the pin to GND.
+4. Analog parts (potentiometer, sensors with analog outputs): signal → the analog pin the code reads, power from 5V, ground to GND.
+5. Servo: PWM → the attach() pin, V+ → 5V, GND → GND.
+6. I2C devices: SDA/SCL (or DATA/CLK on the OLED) to the board's I2C pins listed above, power and ground too.
+7. SPI devices: MOSI/MISO/SCK to the board's SPI pins; CS/DC/RST to the pins the code uses.
+8. Motors are driven through a driver (L293D, A4988, relay module or transistor), never straight from a pin.
+9. Use the part whose library the sketch includes (e.g. LiquidCrystal_I2C → I2C LCD with matching address attr, Adafruit_SSD1306 → OLED, Adafruit_NeoPixel → NeoPixel parts with the right pixel count, Keypad → keypad).
+10. Spread ground connections across the board's GND pins to keep wiring readable.
+11. Only include parts the sketch actually uses. Do not invent extra components.
+12. If the sketch only blinks LED_BUILTIN with no other hardware, still add an LED + resistor on pin 13 so the user sees a component.
 
 OUTPUT FORMAT — respond with ONLY this JSON, no markdown fences, no commentary:
 {
   "parts": [
-    {"type": "wokwi-arduino-uno", "id": "uno"},
+    {"type": "<board type>", "id": "<board id>"},
     {"type": "wokwi-led", "id": "led1", "attrs": {"color": "red"}},
     {"type": "wokwi-resistor", "id": "r1", "attrs": {"value": "220"}}
   ],
   "connections": [
-    ["uno:13", "r1:1"],
+    ["<board id>:13", "r1:1"],
     ["r1:2", "led1:A"],
-    ["led1:C", "uno:GND.1"]
+    ["led1:C", "<board id>:GND.1"]
   ]
 }
-ids: short lowercase (led1, btn1, r1, pot1, servo1, buzzer1, lcd1). Every connection endpoint is "<id>:<pin>".`;
+ids: short lowercase (led1, btn1, r1, pot1, servo1, lcd1). Every connection endpoint is "<id>:<pin>".`;
+}
 
 /**
  * Generate a circuit spec for the given sketch using the active AI provider.
  * @param {import('./agent')} aiAgent
  * @param {string} sketchCode
+ * @param {{ board?: string, catalog?: string }} [options]
  * @returns {Promise<{success: boolean, circuit?: object, error?: string}>}
  */
-async function generateCircuit(aiAgent, sketchCode) {
+async function generateCircuit(aiAgent, sketchCode, options = {}) {
   if (!aiAgent || !aiAgent.currentProvider) {
     return { success: false, error: 'No AI provider configured. Add an API key in the AI panel first.' };
   }
@@ -80,13 +81,13 @@ async function generateCircuit(aiAgent, sketchCode) {
   }
 
   const messages = [
-    { role: 'system', content: SYSTEM_PROMPT },
+    { role: 'system', content: systemPrompt(options.board, options.catalog) },
     { role: 'user', content: `Generate the circuit for this Arduino sketch:\n\n${sketchCode}` },
   ];
 
   let raw;
   try {
-    const res = await aiAgent.currentProvider.chat(messages, { temperature: 0, max_tokens: 3000 });
+    const res = await aiAgent.currentProvider.chat(messages, { temperature: 0, max_tokens: 8000, effort: 'medium', tools: [] });
     raw = res?.content ?? '';
   } catch (err) {
     return { success: false, error: `AI request failed: ${err.message}` };
@@ -116,4 +117,4 @@ function extractJson(text) {
   }
 }
 
-module.exports = { generateCircuit };
+module.exports = { generateCircuit, systemPrompt, extractJson };

@@ -11,23 +11,6 @@
     box-sizing: border-box;
 }
 
-/* BB Manual Mono Pro Font */
-@font-face {
-    font-family: "BB Manual Mono Pro";
-    src: url("../../bb-manual-mono-pro/BB Manual Mono Pro Text/BB Manual Mono (Pro) Text Regular.otf") format("opentype");
-    font-weight: 400;
-    font-style: normal;
-    font-display: swap;
-}
-
-@font-face {
-    font-family: "BB Manual Mono Pro";
-    src: url("../../bb-manual-mono-pro/BB Manual Mono Pro Text/BB Manual Mono (Pro) Text Bold.otf") format("opentype");
-    font-weight: 700;
-    font-style: normal;
-    font-display: swap;
-}
-
 :root {
     /* ── Core palette (light) ── */
     --background: #ffffff;
@@ -2267,7 +2250,7 @@ body::after {
     border: none;
     padding: 16px;
     font-size: 14px;
-    font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+    font-family: var(--font-mono);
     resize: none;
     outline: none;
 }

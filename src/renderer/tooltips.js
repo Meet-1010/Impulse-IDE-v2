@@ -30,8 +30,12 @@ class TooltipManager {
 
   setupEventListeners() {
     // Use mouseenter/mouseleave on individual elements instead of document
+    // Capture-phase listeners also see the document itself and text nodes,
+    // which have no closest(); only elements can carry a tooltip.
+    const tooltipHost = (target) => (target instanceof Element ? target.closest('[title], [data-tooltip]') : null);
+
     document.addEventListener('mouseenter', (e) => {
-      const element = e.target.closest('[title], [data-tooltip]');
+      const element = tooltipHost(e.target);
       if (element && element !== this.currentElement) {
         this.hide(); // Hide any existing tooltip first
         this.currentElement = element;
@@ -40,7 +44,7 @@ class TooltipManager {
     }, true);
 
     document.addEventListener('mouseleave', (e) => {
-      const element = e.target.closest('[title], [data-tooltip]');
+      const element = tooltipHost(e.target);
       if (element && element === this.currentElement) {
         this.scheduleHide();
         this.currentElement = null;
@@ -50,7 +54,7 @@ class TooltipManager {
     // Only update position if tooltip is visible and we're still over the same element
     document.addEventListener('mousemove', (e) => {
       if (this.activeTooltip && this.currentElement) {
-        const elementUnderMouse = e.target.closest('[title], [data-tooltip]');
+        const elementUnderMouse = tooltipHost(e.target);
         if (elementUnderMouse === this.currentElement) {
           this.updatePosition(e);
         } else {

@@ -1,481 +1,1228 @@
-// Simulation manager — Wokwi-style UI orchestrating the AVR runner + circuit canvas.
+// Simulation manager: the simulator view. Owns the canvas, the AVR runner and
+// the circuit engine, and the UI around them (toolbar, part picker, inspector,
+// examples, serial monitor, logic analyzer, circuit checks).
+//
+// The circuit belongs to the open sketch and is saved next to it as
+// diagram.json (Wokwi format). Without a saved sketch it lives in local storage.
 
 import { AvrRunner, F_CPU } from './avr-runner.js';
+import { CircuitEngine, staticTopology } from './engine.js';
 import { CircuitCanvas } from './canvas.js';
-import { PARTS, CATEGORY_ORDER, unoPinToArduino, isGndPin, isPowerPin } from './parts-catalog.js';
-import { validateCircuit, placeCircuit } from './circuit-ai.js';
+import { PARTS, partDef } from './parts/catalog.js';
+import { BOARDS, BOARD_ORDER, boardByTag, boardForFqbn, boardPinNumber, boardPowerPin, pinLabel } from './boards.js';
+import { circuitChecks } from './checks.js';
+import { toDiagram, fromDiagram, hintsToPoints, remapBoardWires } from './diagram.js';
+import { validateCircuit, layoutCircuit, catalogText } from './circuit-ai.js';
+import { LogicAnalyzer } from './logic-analyzer.js';
+import { PartPicker } from './ui/picker.js';
+import { Inspector } from './ui/inspector.js';
+import { ExamplesGallery } from './ui/gallery.js';
+import { exampleDiagram, EXAMPLES } from './examples.js';
+import { h, icon, iconSvg, mod } from './ui/dom.js';
+import { isMuted, setMuted, onMuteChange } from './audio.js';
+import { confirmDialog } from '../dialog.js';
 
-const STORAGE_KEY = 'impulse-sim-diagram';
+const SCRATCH_KEY = 'impulse-sim-diagram';
+const DIAGRAM_FILE = 'diagram.json';
+const HISTORY_LIMIT = 100;
+const SERIAL_LIMIT = 200_000;
+const LINE_ENDINGS = { newline: '\n', none: '', cr: '\r', both: '\r\n' };
+
+const sketchFolder = (p) => p.replace(/[/\\][^/\\]+$/, '');
+const joinPath = (folder, name) => `${folder}${folder.includes('\\') && !folder.includes('/') ? '\\' : '/'}${name}`;
 
 export class SimulationManager {
   constructor() {
     this.runner = new AvrRunner();
+    this.engine = new CircuitEngine(this.runner);
     this.canvas = null;
     this.running = false;
     this.paused = false;
-    this._netMap = {};        // arduinoPin → [{partId, pin}] (parts wired to that UNO pin)
-    this._partNets = {};      // partId → { pinName → arduinoPin }
-    this._servoState = {};    // partId → { lastRise, pin }
-    this._serialBuffer = '';
-    this._statsTimer = null;
-    this._captureBuf = '';    // rolling serial capture for the agent loop
-    this._pinActivity = {};   // arduinoPin → toggle count (for the agent loop)
+    this.sketchPath = null;
+    this._history = [];
+    this._future = [];
+    this._loading = false;
+    this._saveTimer = null;
+    this._historyTimer = null;
+    this._serialLines = ['', '', '', ''];
+    this._captureBuf = '';
+    this._pinActivity = {};
     this._agentRunning = false;
+    this._shorts = [];
+    this._libCache = null;
 
     this._buildUI();
     this._bindRunner();
+    this._bindGlobalKeys();
     this._restore();
   }
 
-  // ── UI scaffolding ────────────────────────────────────────────────────────
+  // ── UI ───────────────────────────────────────────────────────────────────
 
   _buildUI() {
     const panel = document.getElementById('simPanel');
     if (!panel) return;
+    panel.innerHTML = '';
 
-    panel.innerHTML = `
-      <div class="sim-stage">
-        <div class="sim-canvas-wrap" id="simCanvasWrap"></div>
-
-        <div class="sim-fabs">
-          <button class="sim-fab sim-fab-play" id="simPlayBtn" title="Start the simulation">
-            <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
-          </button>
-          <button class="sim-fab sim-fab-stop" id="simStopBtn" title="Stop the simulation" style="display:none">
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
-          </button>
-          <button class="sim-fab sim-fab-pause" id="simPauseBtn" title="Pause the simulation" style="display:none">
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>
-          </button>
-          <button class="sim-fab sim-fab-add" id="simAddBtn" title="Add a new part">
-            <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z"/></svg>
-          </button>
-          <button class="sim-fab sim-fab-ai" id="simAiBtn" title="Build circuit from code (AI)">
-            <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
-              <path d="M12 2l1.7 5.2L19 9l-5.3 1.8L12 16l-1.7-5.2L5 9l5.3-1.8L12 2z"/>
-              <path d="M19 14l.9 2.6L22.5 18l-2.6.9L19 21.5l-.9-2.6L15.5 18l2.6-.9L19 14z" opacity="0.8"/>
-              <path d="M5 15l.7 2L7.5 18l-1.8.7L5 20.5l-.7-1.8L2.5 18l1.8-1L5 15z" opacity="0.6"/>
-            </svg>
-          </button>
-          <button class="sim-fab sim-fab-agent" id="simAgentBtn" title="Run AI agent: build, simulate, observe & fix">
-            <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <rect x="4" y="8" width="16" height="12" rx="2"/>
-              <path d="M12 8V4M9 4h6"/>
-              <circle cx="9" cy="14" r="1.2" fill="currentColor" stroke="none"/>
-              <circle cx="15" cy="14" r="1.2" fill="currentColor" stroke="none"/>
-              <path d="M2 13v3M22 13v3"/>
-            </svg>
-          </button>
-          <button class="sim-fab sim-fab-menu" id="simMenuBtn" title="More options">
-            <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
-          </button>
-        </div>
-
-        <div class="sim-stats" id="simStats" style="display:none">
-          <span class="sim-stats-time" title="Simulation time">
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5M9 2h6"/></svg>
-            <span id="simTimeLabel">00:00.000</span>
-          </span>
-          <span class="sim-stats-speed" title="Simulation speed vs real time">
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20a8 8 0 1 1 8-8"/><path d="M12 12l4-4"/></svg>
-            <span id="simSpeedLabel">0%</span>
-          </span>
-        </div>
-
-        <div class="sim-picker" id="simPicker" style="display:none">
-          <div class="sim-picker-search">
-            <input type="text" id="simPickerSearch" placeholder="Search parts…" autocomplete="off">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-          </div>
-          <div class="sim-picker-list" id="simPickerList"></div>
-        </div>
-
-        <div class="sim-menu" id="simMenu" style="display:none">
-          <button class="sim-menu-item" id="simMenuClear">Clear circuit</button>
-          <button class="sim-menu-item" id="simMenuZoomFit">Reset view</button>
-        </div>
-      </div>
-
-      <div class="sim-serial-pane" id="simSerialPane">
-        <div id="simSerialOut" class="sim-serial-out"></div>
-        <div class="sim-serial-inputrow">
-          <input type="text" id="simSerialInput" placeholder="Type here to send data to the serial port…">
-          <button class="sim-serial-btn" id="simSerialClear" title="Clear the serial monitor output">
-            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/></svg>
-          </button>
-        </div>
-      </div>
-    `;
-
-    const wrap = document.getElementById('simCanvasWrap');
-    this.canvas = new CircuitCanvas(wrap);
-    this.canvas.onChange = () => {
-      this._rebuildNets();
-      this._save();
+    const btn = (id, iconName, title, cls = '') => {
+      const b = h('button', { type: 'button', id, class: `sim-tb-btn ${cls}`.trim(), title, 'aria-label': title });
+      b.innerHTML = iconSvg(iconName, iconName === 'play' ? 18 : 16);
+      return b;
     };
-    // The canvas hands off part interactions here (its pointer handlers fire
-    // reliably; listeners on the shadow element do not under the drag layer).
-    this.canvas.onPartPointerDown = (part) => this._onPartPress(part);
-    this.canvas.onPartPointerUp = (part) => this._onPartRelease(part);
 
-    this._buildPicker();
+    this.playBtn = btn('simPlayBtn', 'play', 'Start the simulation', 'go');
+    this.stopBtn = btn('simStopBtn', 'stop', 'Stop the simulation');
+    this.pauseBtn = btn('simPauseBtn', 'pause', 'Pause');
+    this.stopBtn.hidden = true;
+    this.pauseBtn.hidden = true;
+    this.boardBtn = h('button', { type: 'button', id: 'simBoardBtn', class: 'sim-board-chip', title: 'Choose the simulated board', 'aria-haspopup': 'menu' },
+      icon('chip', 15), h('span', { id: 'simBoardLabel' }, 'Arduino Uno'), icon('chevron', 13));
+    this.addBtn = h('button', { type: 'button', id: 'simAddBtn', class: 'sim-tb-btn labeled', title: 'Add a part (A)' }, icon('plus', 16), h('span', {}, 'Add part'));
+    this.examplesBtn = h('button', { type: 'button', id: 'simExamplesBtn', class: 'sim-tb-btn labeled', title: 'Open an example project' }, icon('book', 15), h('span', {}, 'Examples'));
+    this.aiBtn = btn('simAiBtn', 'sparkle', 'Build the circuit from your code with AI');
+    this.agentBtn = btn('simAgentBtn', 'agent', 'AI agent: build, simulate, check and fix');
+    this.undoBtn = btn('simUndoBtn', 'undo', `Undo (${mod}Z)`);
+    this.redoBtn = btn('simRedoBtn', 'redo', `Redo (${mod}⇧Z)`);
+    this.menuBtn = btn('simMenuBtn', 'more', 'More');
 
-    // FAB handlers
-    document.getElementById('simPlayBtn').addEventListener('click', () => {
-      if (this.running) this.restart(); else this.run();
-    });
-    document.getElementById('simStopBtn').addEventListener('click', () => this.stop());
-    document.getElementById('simPauseBtn').addEventListener('click', () => this.togglePause());
-    document.getElementById('simAddBtn').addEventListener('click', () => this._togglePicker());
-    document.getElementById('simAiBtn').addEventListener('click', () => this.buildCircuitFromCode());
-    document.getElementById('simAgentBtn').addEventListener('click', () => this.runAgent());
-    document.getElementById('simMenuBtn').addEventListener('click', () => this._toggleMenu());
-    document.getElementById('simMenuClear').addEventListener('click', () => {
-      this._toggleMenu(false);
-      if (confirm('Clear the whole circuit?')) {
-        this.stop();
-        this.canvas.clear();
-        this.canvas.addPart('wokwi-arduino-uno', 60, 60);
-        this._save();
-      }
-    });
-    document.getElementById('simMenuZoomFit').addEventListener('click', () => {
-      this._toggleMenu(false);
-      this.canvas.zoomFit();
-    });
+    const toolbar = h('div', { class: 'sim-toolbar', role: 'toolbar', 'aria-label': 'Simulator' },
+      h('div', { class: 'sim-tb-group' }, this.playBtn, this.pauseBtn, this.stopBtn),
+      h('span', { class: 'sim-tb-sep' }),
+      this.boardBtn,
+      h('span', { class: 'sim-tb-sep' }),
+      this.addBtn, this.examplesBtn, this.aiBtn, this.agentBtn,
+      h('span', { class: 'sim-tb-sep' }),
+      this.undoBtn, this.redoBtn, this.menuBtn);
 
-    // Serial input → AVR RX
-    const serialInput = document.getElementById('simSerialInput');
-    serialInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && this.running) {
-        const text = serialInput.value + '\n';
-        serialInput.value = '';
-        this.runner.serialWrite(text);
-      }
-    });
-    document.getElementById('simSerialClear').addEventListener('click', () => this._clearSerial());
+    this.timeLabel = h('span', { id: 'simTimeLabel', class: 'mono' }, '00:00.000');
+    this.speedLabel = h('span', { id: 'simSpeedLabel', class: 'mono' }, '0%');
+    this.muteBtn = h('button', { type: 'button', class: 'sim-icon-btn', title: 'Mute buzzers' });
+    const renderMute = () => {
+      this.muteBtn.innerHTML = iconSvg(isMuted() ? 'mute' : 'sound', 15);
+      this.muteBtn.title = isMuted() ? 'Unmute buzzers' : 'Mute buzzers';
+      this.muteBtn.setAttribute('aria-pressed', isMuted() ? 'true' : 'false');
+    };
+    renderMute();
+    onMuteChange(renderMute);
+    this.muteBtn.addEventListener('click', () => setMuted(!isMuted()));
+    this.stats = h('div', { class: 'sim-hud', id: 'simStats', hidden: true },
+      h('span', { class: 'sim-live-dot' }),
+      h('span', { class: 'sim-hud-item', title: 'Simulated time' }, icon('clock', 13), this.timeLabel),
+      h('span', { class: 'sim-hud-item', title: 'Speed compared with real time' }, icon('gauge', 13), this.speedLabel),
+      this.muteBtn);
 
-    // Close picker/menu on outside click
+    this.zoomLabel = h('button', { type: 'button', class: 'sim-zoom-label', title: 'Fit the circuit (0)' }, '100%');
+    const zoomOut = h('button', { type: 'button', class: 'sim-icon-btn', title: 'Zoom out (−)', 'aria-label': 'Zoom out' }, icon('minus', 14));
+    const zoomIn = h('button', { type: 'button', class: 'sim-icon-btn', title: 'Zoom in (+)', 'aria-label': 'Zoom in' }, icon('plus', 14));
+    const fit = h('button', { type: 'button', class: 'sim-icon-btn', title: 'Fit the circuit (0)', 'aria-label': 'Fit the circuit' }, icon('fit', 14));
+    const zoom = h('div', { class: 'sim-zoom' }, zoomOut, this.zoomLabel, zoomIn, fit);
+
+    this.notice = h('div', { class: 'sim-notice', hidden: true, role: 'status' });
+    this.toasts = h('div', { class: 'sim-toasts', 'aria-live': 'polite' });
+    this.empty = h('div', { class: 'sim-empty', hidden: true });
+    this.wrap = h('div', { class: 'sim-canvas-wrap', id: 'simCanvasWrap', tabindex: '0', 'aria-label': 'Circuit canvas' });
+    this.stage = h('div', { class: 'sim-stage', id: 'simStage' }, this.wrap, toolbar, this.stats, zoom, this.notice, this.empty, this.toasts);
+
+    // Bottom pane: serial monitor, logic analyzer, circuit checks.
+    this.serialOut = h('div', { id: 'simSerialOut', class: 'sim-serial-out', role: 'log', 'aria-label': 'Simulated serial output' });
+    this.serialInput = h('input', { type: 'text', id: 'simSerialInput', placeholder: 'Message to send to the board — press Enter', autocomplete: 'off', spellcheck: 'false' });
+    this.lineEnding = h('select', { class: 'sim-select small', title: 'Line ending', 'aria-label': 'Line ending' },
+      h('option', { value: 'newline' }, 'Newline'), h('option', { value: 'none' }, 'No line ending'), h('option', { value: 'cr' }, 'Carriage return'), h('option', { value: 'both' }, 'Both NL & CR'));
+    try { this.lineEnding.value = localStorage.getItem('impulse-sim-line-ending') || 'newline'; } catch { /* default */ }
+    this.lineEnding.addEventListener('change', () => { try { localStorage.setItem('impulse-sim-line-ending', this.lineEnding.value); } catch { /* ignore */ } });
+    const clearBtn = h('button', { type: 'button', class: 'sim-serial-btn', id: 'simSerialClear', title: 'Clear the output', 'aria-label': 'Clear the output' }, icon('trash', 14));
+    this.inputRow = h('div', { class: 'sim-serial-inputrow' }, this.serialInput, this.lineEnding, clearBtn);
+    this.logicPane = h('div', { id: 'simLogicPane', class: 'sim-logic-pane', hidden: true });
+    this.checksPane = h('div', { id: 'simChecksPane', class: 'sim-checks-pane', hidden: true });
+    const tab = (pane, label, active = false) => h('button', { type: 'button', class: `sim-pane-tab${active ? ' active' : ''}`, dataset: { pane }, role: 'tab' }, label);
+    this.checksTab = tab('checks', 'Circuit check');
+    const tabs = h('div', { class: 'sim-pane-tabs', role: 'tablist' }, tab('serial', 'Serial', true), tab('logic', 'Logic analyzer'), this.checksTab);
+    this.pane = h('div', { class: 'sim-serial-pane', id: 'simSerialPane' }, tabs, this.serialOut, this.logicPane, this.checksPane, this.inputRow);
+
+    panel.append(this.stage, this.pane);
+
+    // Canvas
+    this.canvas = new CircuitCanvas(this.wrap, {
+      isInteractive: (part) => this.running && !!partDef(part.type)?.interactive,
+    });
+    this.canvas.onChange = (kind) => this._onCanvasChange(kind);
+    this.canvas.onSelect = (sel) => { this.inspector.show(sel); this._updateEmpty(); this._revealSelection(sel); };
+    this.canvas.onPartPointerDown = (part) => this._partPress(part);
+    this.canvas.onPartPointerUp = (part) => this._partRelease(part);
+    this.canvas.onPartDoubleClick = (part) => this.canvas.select([part]);
+    this.canvas.onContextMenu = (target, e) => this._contextMenu(target, e);
+    this.canvas.onPinHover = (part, pin) => this._pinHoverText(part, pin);
+    this.canvas.onZoom = (s) => { this.zoomLabel.textContent = `${Math.round(s * 100)}%`; };
+    this.wrap.addEventListener('pointerdown', () => this.wrap.focus({ preventScroll: true }));
+    window.addEventListener('pointerdown', () => { this._pointerHeld = true; }, true);
+    window.addEventListener('pointerup', () => { this._pointerHeld = false; }, true);
+
+    this.picker = new PartPicker(this.stage, {
+      onAdd: (type, at) => this.addPart(type, at),
+      onAskAi: () => this.buildCircuitFromCode(),
+      canDropAt: (x, y) => {
+        const r = this.wrap.getBoundingClientRect();
+        return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+      },
+    });
+    this.inspector = new Inspector(this.stage, {
+      canvas: this.canvas,
+      isRunning: () => this.running,
+      getStatus: (part) => this.engine.behaviorOf(part.id)?.status?.() ?? null,
+      onAttr: (part, key, value) => this._setAttr(part, key, value),
+      onControl: (part, key, value) => this._setControl(part, key, value),
+      onAction: (name) => this._selectionAction(name),
+      connectionsOf: (part, pin) => this._connectionsOf(part, pin),
+      libraries: () => this._installedLibraries(),
+      installLibrary: (name) => this._installLibrary(name),
+    });
+    this.gallery = new ExamplesGallery({ onOpen: (ex) => this.openExample(ex) });
+    this.analyzer = new LogicAnalyzer(this.logicPane);
+
+    // Toolbar
+    this.playBtn.addEventListener('click', () => (this.running ? this.restart() : this.run()));
+    this.stopBtn.addEventListener('click', () => this.stop());
+    this.pauseBtn.addEventListener('click', () => this.togglePause());
+    this.boardBtn.addEventListener('click', (e) => this._boardMenu(e));
+    this.addBtn.addEventListener('click', () => this.picker.toggle());
+    this.examplesBtn.addEventListener('click', () => this.gallery.open());
+    this.aiBtn.addEventListener('click', () => this.buildCircuitFromCode());
+    this.agentBtn.addEventListener('click', () => this.runAgent());
+    this.undoBtn.addEventListener('click', () => this.undo());
+    this.redoBtn.addEventListener('click', () => this.redo());
+    this.menuBtn.addEventListener('click', (e) => this._moreMenu(e));
+    zoomIn.addEventListener('click', () => this.canvas.zoomBy(1.2));
+    zoomOut.addEventListener('click', () => this.canvas.zoomBy(1 / 1.2));
+    fit.addEventListener('click', () => this.fit());
+    this.zoomLabel.addEventListener('click', () => this.fit());
+
+    // Bottom pane
+    tabs.querySelectorAll('.sim-pane-tab').forEach(t => t.addEventListener('click', () => this._showPane(t.dataset.pane)));
+    this.serialInput.addEventListener('keydown', (e) => {
+      e.stopPropagation();
+      if (e.key !== 'Enter') return;
+      if (!this.running) { this.toast('Start the simulation to send serial data.'); return; }
+      const text = this.serialInput.value + LINE_ENDINGS[this.lineEnding.value];
+      this.serialInput.value = '';
+      this.runner.serialWrite(text);
+      this._systemLine(`→ ${text.replace(/\r?\n$/, '').replace(/\r/g, '')}`, 'sent');
+      this._blink('ledRX');
+    });
+    clearBtn.addEventListener('click', () => this._clearSerial());
+
     document.addEventListener('pointerdown', (e) => {
-      const picker = document.getElementById('simPicker');
-      const menu = document.getElementById('simMenu');
-      if (picker && picker.style.display !== 'none' &&
-          !picker.contains(e.target) && e.target.id !== 'simAddBtn' &&
-          !e.target.closest('#simAddBtn')) {
-        picker.style.display = 'none';
-      }
-      if (menu && menu.style.display !== 'none' &&
-          !menu.contains(e.target) && !e.target.closest('#simMenuBtn')) {
-        menu.style.display = 'none';
-      }
+      if (this.picker.open && !this.picker.el.contains(e.target) && !this.addBtn.contains(e.target)) this.picker.toggle(false);
+    });
+
+    this._updateHistoryButtons();
+  }
+
+  _showPane(name) {
+    this.pane.querySelectorAll('.sim-pane-tab').forEach(t => t.classList.toggle('active', t.dataset.pane === name));
+    this.serialOut.hidden = name !== 'serial';
+    this.inputRow.hidden = name !== 'serial';
+    this.logicPane.hidden = name !== 'logic';
+    this.checksPane.hidden = name !== 'checks';
+    this.pane.classList.toggle('logic', name === 'logic');
+    if (name === 'logic') this.analyzer.render();
+    if (name === 'checks') this._renderChecks();
+  }
+
+  // ── Board ────────────────────────────────────────────────────────────────
+
+  get boardPart() {
+    return this.canvas?.parts.find(p => partDef(p.type)?.board) || null;
+  }
+
+  get board() {
+    const part = this.boardPart;
+    return (part && boardByTag(partDef(part.type).tag)) || BOARDS.uno;
+  }
+
+  _updateBoardLabel() {
+    const label = document.getElementById('simBoardLabel');
+    if (label) label.textContent = this.boardPart ? this.board.label : 'No board';
+    this.analyzer?.setBoard(this.board.id);
+  }
+
+  _boardMenu(e) {
+    const items = BOARD_ORDER.map((id) => {
+      const b = BOARDS[id];
+      return { label: b.label, detail: b.description, checked: this.boardPart && this.board.id === id, action: () => this.setBoard(id) };
+    });
+    this._menu(e.currentTarget, items);
+  }
+
+  /** Swap the board on the canvas, keeping wires where the new board has the same pins. */
+  setBoard(boardId, { quiet = false } = {}) {
+    const target = BOARDS[boardId];
+    if (!target) return;
+    const old = this.boardPart;
+    if (old && old.type === target.tag) return;
+    if (this.running) this.stop();
+    const model = this.canvas.model();
+    const types = Object.fromEntries(model.parts.map(p => [p.id, p.type]));
+    let wires = model.wires;
+    let report = null;
+    if (old) {
+      const remap = remapBoardWires(model.wires, old.id, old.type, target.tag, types);
+      wires = remap.wires;
+      report = remap;
+      const idx = model.parts.findIndex(p => p.id === old.id);
+      model.parts[idx] = { ...model.parts[idx], type: target.tag, attrs: {}, ...this._boardSpot(model.parts[idx], old.type, target.tag, model.parts) };
+    } else {
+      model.parts.unshift({ id: target.id, type: target.tag, x: 0, y: 160, rotate: 0, attrs: {} });
+    }
+    this._applyModel({ parts: model.parts, wires }, { record: true });
+    if (!quiet) {
+      const bits = [`Switched to ${target.label}.`];
+      if (report?.moved.length) bits.push(`Moved I²C wires (${[...new Set(report.moved)].join(', ')}).`);
+      if (report?.dropped.length) bits.push(`Removed ${report.dropped.length} wire${report.dropped.length === 1 ? '' : 's'} on pins the ${target.short} doesn't have.`);
+      this.toast(bits.join(' '), report?.dropped.length ? 'warn' : 'info');
+    }
+    this._checkToolbarBoard();
+  }
+
+  /** Where to put a swapped board so a bigger one doesn't land on other parts. */
+  _boardSpot(oldPart, oldType, newType, parts) {
+    const sizeOf = (type) => PARTS[type]?.size || { w: 120, h: 120 };
+    const oldSize = sizeOf(oldType);
+    const newSize = sizeOf(newType);
+    const others = parts.filter(p => p.id !== oldPart.id).map(p => ({ x: p.x, y: p.y, ...sizeOf(p.type) }));
+    const hits = (x, y) => others.some(o => x < o.x + o.w && x + newSize.w > o.x && y < o.y + o.h && y + newSize.h > o.y);
+    const dw = newSize.w - oldSize.w;
+    const dh = newSize.h - oldSize.h;
+    const candidates = [
+      [oldPart.x, oldPart.y],
+      [oldPart.x - dw, oldPart.y],
+      [oldPart.x, oldPart.y - dh],
+      [oldPart.x - dw, oldPart.y - dh],
+      [oldPart.x, oldPart.y + oldSize.h + 20],
+    ];
+    for (let step = 1; step <= 12; step++) candidates.push([oldPart.x - dw - step * 48, oldPart.y], [oldPart.x, oldPart.y + oldSize.h + step * 48]);
+    const spot = candidates.find(([x, y]) => !hits(x, y)) || candidates[0];
+    return { x: Math.round(spot[0] / 4.8) * 4.8, y: Math.round(spot[1] / 4.8) * 4.8 };
+  }
+
+  /** Hint when the upload board (toolbar) differs from the simulated one. */
+  _checkToolbarBoard() {
+    const fqbn = window.state?.selectedBoard;
+    if (!fqbn || this._noticeDismissed === fqbn) { this.notice.hidden = true; return; }
+    const target = boardForFqbn(fqbn);
+    const name = window.state?.boards?.find?.(b => b.fqbn === fqbn)?.name || fqbn;
+    this.notice.innerHTML = '';
+    const dismiss = h('button', { type: 'button', class: 'sim-icon-btn', 'aria-label': 'Dismiss' }, icon('close', 13));
+    dismiss.addEventListener('click', () => { this._noticeDismissed = fqbn; this.notice.hidden = true; });
+    if (!target) {
+      this.notice.append(icon('info', 15), h('span', {}, `${name} can't be simulated yet, so the simulator runs your sketch on the ${this.board.label}. Uno, Nano and Mega 2560 are supported.`), dismiss);
+      this.notice.hidden = false;
+      return;
+    }
+    if (target.id === this.board.id) { this.notice.hidden = true; return; }
+    const onlyBoard = this.canvas.parts.length <= 1;
+    if (onlyBoard) {
+      this.setBoard(target.id, { quiet: true });
+      this.notice.hidden = true;
+      return;
+    }
+    const sw = h('button', { type: 'button', class: 'sim-btn small' }, `Simulate on ${target.short}`);
+    sw.addEventListener('click', () => this.setBoard(target.id));
+    this.notice.append(icon('chip', 15), h('span', {}, `Your upload board is ${name}.`), sw, dismiss);
+    this.notice.hidden = false;
+  }
+
+  // ── Parts and selection ──────────────────────────────────────────────────
+
+  addPart(type, at = null) {
+    const def = partDef(type);
+    if (!def) return null;
+    if (def.board) {
+      this.setBoard(def.board);
+      return this.boardPart;
+    }
+    const size = def.size || { w: 80, h: 80 };
+    let pos;
+    if (at) {
+      const w = this.canvas.toWorld(at.clientX, at.clientY);
+      pos = { x: Math.round((w.x - size.w / 2) / 4.8) * 4.8, y: Math.round((w.y - size.h / 2) / 4.8) * 4.8 };
+    } else {
+      pos = this.canvas.freeSpot(size.w, size.h);
+    }
+    const part = this.canvas.addPart(type, pos.x, pos.y);
+    if (part) {
+      this.canvas.select([part]);
+      if (!at) this._ensureVisible(part);
+    }
+    return part;
+  }
+
+  /** Fit the circuit around the toolbar, inspector and empty-state card. */
+  fit() {
+    const insets = {};
+    if (!this.empty.hidden) insets.bottom = this.empty.offsetHeight + 76;
+    if (!this.inspector.el.hidden) insets.right = this.inspector.el.offsetWidth + 24;
+    this._needsFit = !this.canvas.zoomFit(insets);
+  }
+
+  /** The simulator view became visible. */
+  onShow() {
+    this._updateEmpty();
+    if (this._needsFit) requestAnimationFrame(() => this.fit());
+  }
+
+  _ensureVisible(part) {
+    requestAnimationFrame(() => {
+      const r = part.el.getBoundingClientRect();
+      const s = this.wrap.getBoundingClientRect();
+      if (r.right > s.right || r.bottom > s.bottom || r.left < s.left || r.top < s.top) this.fit();
     });
   }
 
-  _buildPicker() {
-    const list = document.getElementById('simPickerList');
-    const search = document.getElementById('simPickerSearch');
-    if (!list) return;
+  _setAttr(part, key, value) {
+    this.canvas.setPartAttr(part.id, key, value);
+    if (['digits', 'pins', 'columns', 'pixels', 'rows', 'cols', 'common', 'size', 'model', 'type'].includes(key)) this.inspector.render();
+    if (this.running) this.toast('Restart the simulation to apply this change.', 'info', 'restart-hint');
+  }
 
-    const render = (filter = '') => {
-      list.innerHTML = '';
-      const f = filter.trim().toLowerCase();
-      for (const cat of CATEGORY_ORDER) {
-        const items = Object.entries(PARTS).filter(([type, def]) =>
-          def.category === cat && (!f || def.label.toLowerCase().includes(f)));
-        if (!items.length) continue;
+  _setControl(part, key, value) {
+    if (value !== true) {
+      part.attrs[key] = String(value);
+      if (key === 'value' || key === 'label') this.canvas.setPartAttr(part.id, key, value);
+    }
+    this.engine.behaviorOf(part.id)?.control(key, value);
+    this._scheduleSave();
+  }
 
-        const header = document.createElement('div');
-        header.className = 'sim-picker-cat';
-        header.textContent = cat;
-        list.appendChild(header);
+  _selectionAction(name) {
+    if (name === 'rotate') this.canvas.rotateSelection(90);
+    else if (name === 'delete') this.canvas.deleteSelected();
+    else if (name === 'duplicate') this.duplicate();
+  }
 
-        for (const [type, def] of items) {
-          const item = document.createElement('div');
-          item.className = 'sim-picker-item';
-          const thumb = document.createElement('div');
-          thumb.className = 'sim-picker-thumb';
-          const el = document.createElement(def.tag);
-          if (def.defaultAttrs) {
-            for (const [k, v] of Object.entries(def.defaultAttrs)) el.setAttribute(k, v);
-          }
-          thumb.appendChild(el);
-          const name = document.createElement('span');
-          name.className = 'sim-picker-name';
-          name.textContent = def.label;
-          item.appendChild(thumb);
-          item.appendChild(name);
-          item.addEventListener('click', () => {
-            this._togglePicker(false);
-            // Place near center of visible canvas
-            const wrap = document.getElementById('simCanvasWrap');
-            const rect = wrap.getBoundingClientRect();
-            const world = this.canvas._toWorld(rect.left + rect.width / 2, rect.top + rect.height / 3);
-            this.canvas.addPart(type, world.x, world.y);
-            this._save();
-          });
-          list.appendChild(item);
+  duplicate() {
+    const clip = this._copySelection();
+    if (clip) this._paste(clip, 24);
+  }
+
+  _copySelection() {
+    const parts = this.canvas.selectedParts.filter(p => !partDef(p.type)?.board);
+    if (!parts.length) return null;
+    const ids = new Set(parts.map(p => p.id));
+    return {
+      parts: parts.map(p => ({ id: p.id, type: p.type, x: p.x, y: p.y, rotate: p.rotate, attrs: { ...p.attrs } })),
+      wires: this.canvas.wires.filter(w => ids.has(w.from.partId) && ids.has(w.to.partId))
+        .map(w => ({ from: { ...w.from }, to: { ...w.to }, color: w.color, points: w.points.map(pt => ({ ...pt })) })),
+    };
+  }
+
+  _paste(clip, offset = 24) {
+    const map = new Map();
+    const added = [];
+    for (const p of clip.parts) {
+      const part = this.canvas.addPart(p.type, p.x + offset, p.y + offset, p.attrs, null, p.rotate);
+      if (part) { map.set(p.id, part.id); added.push(part); }
+    }
+    requestAnimationFrame(() => {
+      for (const w of clip.wires) {
+        const from = { partId: map.get(w.from.partId), pin: w.from.pin };
+        const to = { partId: map.get(w.to.partId), pin: w.to.pin };
+        if (from.partId && to.partId) this.canvas.addWire(from, to, w.color, null, w.points.map(pt => ({ x: pt.x + offset, y: pt.y + offset })));
+      }
+      this.canvas.select(added);
+    });
+  }
+
+  _connectionsOf(part, pin) {
+    const node = `${part.id}:${pin}`;
+    const out = [];
+    for (const w of this.canvas.wires) {
+      if (`${w.from.partId}:${w.from.pin}` === node) out.push(this._nodeLabel(w.to));
+      else if (`${w.to.partId}:${w.to.pin}` === node) out.push(this._nodeLabel(w.from));
+    }
+    for (const [a, b] of this.canvas.overlapLinks) {
+      if (a === node) out.push(`breadboard ${b.split(':')[1]}`);
+    }
+    return out;
+  }
+
+  _nodeLabel({ partId, pin }) {
+    const part = this.canvas.getPart(partId);
+    if (part && partDef(part.type)?.board) {
+      const num = boardPinNumber(this.board, pin);
+      return num !== null ? `${this.board.short} ${pinLabel(this.board, num)}` : `${this.board.short} ${pin}`;
+    }
+    return `${partId}:${pin}`;
+  }
+
+  _pinHoverText(part, pin) {
+    if (!partDef(part.type)?.board) return null;
+    const num = boardPinNumber(this.board, pin);
+    if (num === null) {
+      const power = boardPowerPin(pin);
+      if (!power) return pin.startsWith('AREF') ? 'Analog reference voltage' : null;
+      if (power.kind === 'gnd') return 'Ground (0 V)';
+      if (power.kind === 'reset') return 'RESET — pull LOW to restart the board';
+      return `${power.volts} V supply`;
+    }
+    const bits = [];
+    if (this.board.pwmSet.has(num)) bits.push('PWM');
+    if (this.board.byPin.get(num)?.analog) bits.push('analog in');
+    if (num === this.board.i2c.sda) bits.push('I²C SDA');
+    if (num === this.board.i2c.scl) bits.push('I²C SCL');
+    for (const [role, n] of Object.entries(this.board.spi)) if (n === num) bits.push(`SPI ${role.toUpperCase()}`);
+    if (this.board.interrupts.includes(num)) bits.push(`interrupt ${this.board.interrupts.indexOf(num)}`);
+    if (this.running) bits.push(this.runner.isOutput(num) ? (this.runner.getPinState(num) ? 'output HIGH' : 'output LOW') : 'input');
+    return `${pinLabel(this.board, num)}${bits.length ? ` · ${bits.join(' · ')}` : ''}`;
+  }
+
+  async _installedLibraries() {
+    // Short-lived: libraries can also be installed from the Library Manager.
+    if (this._libCache && Date.now() - this._libCacheAt < 20000) return this._libCache;
+    const res = await window.electronAPI?.lib?.list?.().catch(() => null);
+    if (!res?.success) return new Set(); // not cached: retry on the next call
+    const list = res.data?.installed_libraries || [];
+    const names = new Set();
+    for (const l of Array.isArray(list) ? list : []) {
+      const name = l?.library?.name || l?.name;
+      if (name) names.add(String(name).toLowerCase());
+    }
+    this._libCache = names;
+    this._libCacheAt = Date.now();
+    return names;
+  }
+
+  async _installLibrary(name) {
+    const res = await window.electronAPI?.lib?.install?.(name).catch(e => ({ success: false, error: e.message }));
+    const ok = !!res && res.success !== false;
+    this._libCache = null;
+    this.toast(ok ? `Installed ${name}.` : `Could not install ${name}: ${res?.error || 'unknown error'}`, ok ? 'success' : 'error');
+    return ok;
+  }
+
+  // ── Interaction while running ────────────────────────────────────────────
+
+  _partPress(part) {
+    if (!this.running) return;
+    this.engine.behaviorOf(part.id)?.press?.();
+  }
+
+  _partRelease(part) {
+    if (!this.running) return;
+    this.engine.behaviorOf(part.id)?.release?.();
+  }
+
+  _bindGlobalKeys() {
+    const isTyping = () => {
+      const el = document.activeElement;
+      return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable || !!el.closest?.('.CodeMirror'));
+    };
+    const keyMatches = (attr, e) => {
+      if (!attr) return false;
+      const k = String(attr);
+      if (/^space$/i.test(k)) return e.key === ' ';
+      return k.length === 1 ? e.key.toLowerCase() === k.toLowerCase() : e.key.toLowerCase() === k.toLowerCase();
+    };
+    document.addEventListener('keydown', (e) => {
+      if (!this.visible || isTyping() || document.querySelector('.sim-overlay, .impulse-dialog-overlay')) return;
+      // Keyboard-bound buttons and sensors while running.
+      if (this.running && !e.metaKey && !e.ctrlKey) {
+        const bound = this.canvas.parts.filter(p => keyMatches(p.attrs.key, e));
+        if (bound.length) {
+          e.preventDefault();
+          if (!e.repeat) bound.forEach(p => this.engine.behaviorOf(p.id)?.press?.());
+          return;
         }
       }
-    };
-
-    render();
-    search.addEventListener('input', () => render(search.value));
+      if (!this.stageFocused) return;
+      if (this.canvas.handleKey(e)) { e.preventDefault(); return; }
+      const cmd = e.metaKey || e.ctrlKey;
+      if (cmd && e.key.toLowerCase() === 'd') { e.preventDefault(); this.duplicate(); return; }
+      if (!cmd && (e.key === '+' || e.key === '=')) { this.canvas.zoomBy(1.2); e.preventDefault(); }
+      else if (!cmd && e.key === '-') { this.canvas.zoomBy(1 / 1.2); e.preventDefault(); }
+      else if (!cmd && e.key === '0') { this.fit(); e.preventDefault(); }
+      else if (!cmd && (e.key === 'a' || e.key === 'A')) { this.picker.toggle(true); e.preventDefault(); }
+    });
+    document.addEventListener('keyup', (e) => {
+      if (!this.running) return;
+      for (const p of this.canvas.parts) if (keyMatches(p.attrs.key, e)) this.engine.behaviorOf(p.id)?.release?.();
+    });
   }
 
-  _togglePicker(force) {
-    const picker = document.getElementById('simPicker');
-    if (!picker) return;
-    const show = force !== undefined ? force : picker.style.display === 'none';
-    picker.style.display = show ? 'flex' : 'none';
-    if (show) {
-      const search = document.getElementById('simPickerSearch');
-      search.value = '';
-      search.focus();
-      search.dispatchEvent(new Event('input'));
+  /** Keep a newly selected part from hiding behind the inspector (after any drag ends). */
+  _revealSelection(sel) {
+    const items = [...sel];
+    const part = items.length === 1 && items[0].el ? items[0] : null;
+    if (!part) return;
+    const reveal = () => {
+      if (this.canvas.selection.has(part) && !this.inspector.el.hidden) this.canvas.reveal(part, this.inspector.el.getBoundingClientRect());
+    };
+    if (this._pointerHeld) window.addEventListener('pointerup', () => requestAnimationFrame(reveal), { once: true });
+    else requestAnimationFrame(reveal);
+  }
+
+  get visible() {
+    return !!this.stage && this.stage.offsetParent !== null;
+  }
+
+  get stageFocused() {
+    const el = document.activeElement;
+    return !!el && (el === this.wrap || this.stage.contains(el)) && !this.picker.el.contains(el);
+  }
+
+  /**
+   * Edit-menu commands while the canvas has focus (the app menu owns the
+   * accelerators). Returns true when the simulator handled the command.
+   */
+  handleEditAction(kind) {
+    if (!this.visible || !this.stageFocused) return false;
+    switch (kind) {
+      case 'undo': this.undo(); return true;
+      case 'redo': this.redo(); return true;
+      case 'copy': this._clipboard = this._copySelection(); return true;
+      case 'cut': this._clipboard = this._copySelection(); this.canvas.deleteSelected(); return true;
+      case 'paste': if (this._clipboard) this._paste(this._clipboard); return true;
+      case 'select-all': this.canvas.select(this.canvas.parts); return true;
+      default: return false;
     }
   }
 
-  _toggleMenu(force) {
-    const menu = document.getElementById('simMenu');
-    if (!menu) return;
-    const show = force !== undefined ? force : menu.style.display === 'none';
-    menu.style.display = show ? 'block' : 'none';
+  // ── Menus ────────────────────────────────────────────────────────────────
+
+  _menu(anchor, items, at = null) {
+    document.querySelectorAll('.sim-popmenu').forEach(m => m.remove());
+    const menu = h('div', { class: 'sim-popmenu', role: 'menu' });
+    for (const item of items) {
+      if (item === '-') { menu.append(h('div', { class: 'sim-popmenu-sep' })); continue; }
+      const row = h('button', { type: 'button', class: `sim-popmenu-item${item.danger ? ' danger' : ''}${item.checked ? ' checked' : ''}`, role: 'menuitem', disabled: item.disabled },
+        h('span', { class: 'sim-popmenu-check' }, item.checked ? icon('check', 13) : null),
+        h('span', { class: 'sim-popmenu-text' }, h('span', {}, item.label), item.detail ? h('span', { class: 'sim-popmenu-detail' }, item.detail) : null),
+        item.shortcut ? h('kbd', { class: 'sim-kbd' }, item.shortcut) : null);
+      row.addEventListener('click', () => { menu.remove(); item.action(); });
+      menu.append(row);
+    }
+    document.body.append(menu);
+    const r = anchor ? anchor.getBoundingClientRect() : { left: at.x, bottom: at.y, right: at.x };
+    const mw = menu.offsetWidth;
+    const mh = menu.offsetHeight;
+    const left = Math.min(r.left, window.innerWidth - mw - 8);
+    let top = r.bottom + 6;
+    if (top + mh > window.innerHeight - 8) top = Math.max(8, (anchor ? r.top : at.y) - mh - 6);
+    menu.style.left = `${Math.max(8, left)}px`;
+    menu.style.top = `${top}px`;
+    const close = (ev) => {
+      if (menu.contains(ev.target)) return;
+      menu.remove();
+      document.removeEventListener('pointerdown', close, true);
+      document.removeEventListener('keydown', esc, true);
+    };
+    const esc = (ev) => { if (ev.key === 'Escape') { ev.stopPropagation(); close({ target: document.body }); } };
+    setTimeout(() => {
+      document.addEventListener('pointerdown', close, true);
+      document.addEventListener('keydown', esc, true);
+    }, 0);
+    menu.querySelector('.sim-popmenu-item:not([disabled])')?.focus();
   }
 
-  // ── Runner wiring ────────────────────────────────────────────────────────
+  _moreMenu(e) {
+    this._menu(e.currentTarget, [
+      { label: 'Import diagram.json…', detail: 'Open a Wokwi or Impulse circuit', action: () => this.importDiagram() },
+      { label: 'Export diagram.json…', action: () => this.exportDiagram() },
+      '-',
+      { label: 'Fit circuit to view', shortcut: '0', action: () => this.fit() },
+      { label: 'Select all', shortcut: `${mod}A`, action: () => this.canvas.select(this.canvas.parts) },
+      '-',
+      { label: 'Clear circuit…', danger: true, action: () => this.clearCircuit() },
+    ]);
+  }
+
+  _contextMenu(target, e) {
+    const at = { x: e.clientX, y: e.clientY };
+    if (target.part) {
+      const isBoard = !!partDef(target.part.type)?.board;
+      this._menu(null, [
+        { label: 'Rotate', shortcut: 'R', action: () => this.canvas.rotateSelection(90) },
+        { label: 'Duplicate', shortcut: `${mod}D`, disabled: isBoard, action: () => this.duplicate() },
+        { label: 'Copy', shortcut: `${mod}C`, disabled: isBoard, action: () => { this._clipboard = this._copySelection(); } },
+        '-',
+        { label: 'Delete', shortcut: '⌫', danger: true, action: () => this.canvas.deleteSelected() },
+      ], at);
+    } else if (target.wire) {
+      this._menu(null, [
+        { label: 'Delete wire', shortcut: '⌫', danger: true, action: () => this.canvas.deleteSelected() },
+      ], at);
+    } else {
+      this._menu(null, [
+        { label: 'Add part…', shortcut: 'A', action: () => this.picker.toggle(true) },
+        { label: 'Paste', shortcut: `${mod}V`, disabled: !this._clipboard, action: () => this._paste(this._clipboard) },
+        '-',
+        { label: 'Fit circuit to view', shortcut: '0', action: () => this.fit() },
+      ], at);
+    }
+  }
+
+  // ── Canvas changes, history, persistence ─────────────────────────────────
+
+  _onCanvasChange(kind) {
+    this._updateBoardLabel();
+    this._updateEmpty();
+    if (this.running && kind !== 'attr') {
+      this.engine.setModel(this._engineModel());
+    }
+    if (this._loading) return;
+    if (kind !== 'links' && kind !== 'load') this._recordHistory();
+    if (kind !== 'load') this._scheduleSave();
+    window.dispatchEvent(new CustomEvent('impulse:circuit-changed'));
+    clearTimeout(this._checkTimer);
+    this._checkTimer = setTimeout(() => this._renderChecks(), 250);
+  }
+
+  _engineModel() {
+    return { parts: this.canvas.parts, wires: this.canvas.wires, links: this.canvas.overlapLinks };
+  }
+
+  _snapshot() {
+    return JSON.stringify(this.canvas.model(), (k, v) => (k === 'start' ? undefined : v));
+  }
+
+  _recordHistory() {
+    clearTimeout(this._historyTimer);
+    this._historyTimer = setTimeout(() => {
+      const snap = this._snapshot();
+      if (this._history[this._history.length - 1] === snap) return;
+      this._history.push(snap);
+      if (this._history.length > HISTORY_LIMIT) this._history.shift();
+      this._future = [];
+      this._updateHistoryButtons();
+    }, 120);
+  }
+
+  _resetHistory() {
+    clearTimeout(this._historyTimer);
+    this._history = [this._snapshot()];
+    this._future = [];
+    this._updateHistoryButtons();
+  }
+
+  _updateHistoryButtons() {
+    if (this.undoBtn) this.undoBtn.disabled = this._history.length <= 1;
+    if (this.redoBtn) this.redoBtn.disabled = this._future.length === 0;
+  }
+
+  undo() {
+    if (this._history.length <= 1) return;
+    this._future.push(this._history.pop());
+    this._restoreSnapshot(this._history[this._history.length - 1]);
+  }
+
+  redo() {
+    if (!this._future.length) return;
+    const snap = this._future.pop();
+    this._history.push(snap);
+    this._restoreSnapshot(snap);
+  }
+
+  async _restoreSnapshot(snap) {
+    if (this.running) this.stop();
+    this._loading = true;
+    await this.canvas.load(JSON.parse(snap));
+    this._loading = false;
+    this._updateHistoryButtons();
+    this._scheduleSave();
+    this._updateBoardLabel();
+    this._renderChecks();
+    window.dispatchEvent(new CustomEvent('impulse:circuit-changed'));
+  }
+
+  /** Replace the canvas with a model (from a diagram, the AI, a board swap). */
+  async _applyModel(model, { record = true, fit = true } = {}) {
+    if (this.running) this.stop();
+    this._loading = true;
+    await this.canvas.load(model, hintsToPoints);
+    this._loading = false;
+    this._updateBoardLabel();
+    this._updateEmpty();
+    if (fit) this.fit();
+    if (record) {
+      this._recordHistory();
+      this._scheduleSave();
+    }
+    this._renderChecks();
+    window.dispatchEvent(new CustomEvent('impulse:circuit-changed'));
+  }
+
+  _diagram() {
+    return toDiagram(this.canvas.model(), { author: '' });
+  }
+
+  _scheduleSave() {
+    clearTimeout(this._saveTimer);
+    this._saveTimer = setTimeout(() => this._save(), 400);
+  }
+
+  async _save() {
+    clearTimeout(this._saveTimer);
+    if (!this.canvas) return;
+    const json = JSON.stringify(this._diagram(), null, 2);
+    if (this.sketchPath) {
+      const res = await window.electronAPI?.file?.save(joinPath(sketchFolder(this.sketchPath), DIAGRAM_FILE), json).catch(e => ({ success: false, error: e.message }));
+      if (res && !res.success && !this._saveErrorShown) {
+        this._saveErrorShown = true;
+        this.toast(`Couldn't save diagram.json next to the sketch: ${res.error}`, 'error');
+      }
+    } else {
+      try { localStorage.setItem(SCRATCH_KEY, json); } catch { /* storage full */ }
+    }
+  }
+
+  async _restore() {
+    this._loading = true;
+    let data = null;
+    try { data = JSON.parse(localStorage.getItem(SCRATCH_KEY) || 'null'); } catch { data = null; }
+    const model = data ? fromDiagram(data) : null;
+    if (model?.parts?.length) {
+      await this.canvas.load(model, hintsToPoints);
+    } else {
+      this.canvas.addPart('wokwi-arduino-uno', 0, 160);
+      await new Promise(r => requestAnimationFrame(r));
+    }
+    this._loading = false;
+    this._resetHistory();
+    this._updateBoardLabel();
+    this._updateEmpty();
+    requestAnimationFrame(() => this.fit());
+
+    window.addEventListener('impulse:sketch-changed', (e) => this.setSketch(e.detail?.sketch || null));
+    window.addEventListener('impulse:board-changed', () => this._checkToolbarBoard());
+    if (window.state?.currentSketch) this.setSketch(window.state.currentSketch);
+    this._checkToolbarBoard();
+  }
+
+  /** The open sketch changed: load its diagram.json (or keep/adopt the scratch circuit). */
+  async setSketch(sketchPath) {
+    if (sketchPath === this.sketchPath) return;
+    const previous = this.sketchPath;
+    if (this._saveTimer) await this._save();
+    if (this.running) this.stop();
+    this.sketchPath = sketchPath;
+    this._saveErrorShown = false;
+    if (!sketchPath) return;
+
+    const res = await window.electronAPI?.file?.read(joinPath(sketchFolder(sketchPath), DIAGRAM_FILE)).catch(() => null);
+    if (res?.success) {
+      let data = null;
+      try { data = JSON.parse(res.content); } catch { data = null; }
+      const model = data && fromDiagram(data);
+      if (model && !model.errors.length) {
+        await this._applyModel(model, { record: false });
+        this._resetHistory();
+        if (model.unsupported.length) this.toast(`This circuit uses parts Impulse doesn't simulate yet: ${model.unsupported.join(', ')}. They were left out.`, 'warn');
+        return;
+      }
+      this.toast('diagram.json next to this sketch could not be read, so the circuit starts fresh.', 'warn');
+    }
+    if (previous === null && this.canvas.parts.length > 1) {
+      // A circuit built before the sketch was saved now belongs to it.
+      this._scheduleSave();
+      return;
+    }
+    const board = boardForFqbn(window.state?.selectedBoard) || BOARDS.uno;
+    await this._applyModel({ parts: [{ id: board.id, type: board.tag, x: 0, y: 160, rotate: 0, attrs: {} }], wires: [] }, { record: false });
+    this._resetHistory();
+  }
+
+  async importDiagram() {
+    const res = await window.electronAPI?.dialog?.openDiagram?.();
+    if (!res?.success) {
+      if (res && !res.canceled) this.toast(res.error || 'Could not open the file.', 'error');
+      return;
+    }
+    let data;
+    try { data = JSON.parse(res.content); } catch { this.toast('That file is not valid JSON.', 'error'); return; }
+    const model = fromDiagram(data);
+    if (model.errors.length) { this.toast(model.errors[0], 'error'); return; }
+    if (!model.parts.some(p => partDef(p.type)?.board)) {
+      model.parts.unshift({ id: 'uno', type: 'wokwi-arduino-uno', x: -320, y: 0, rotate: 0, attrs: {} });
+    }
+    await this._applyModel(model);
+    const msg = [`Imported ${model.parts.length} parts and ${model.wires.length} wires.`];
+    if (model.unsupported.length) msg.push(`Not simulated yet: ${model.unsupported.join(', ')}.`);
+    this.toast(msg.join(' '), model.unsupported.length ? 'warn' : 'success');
+  }
+
+  async exportDiagram() {
+    const json = JSON.stringify(this._diagram(), null, 2);
+    const name = this.sketchPath ? `${sketchFolder(this.sketchPath).split(/[/\\]/).pop()}-diagram.json` : 'diagram.json';
+    const res = await window.electronAPI?.dialog?.saveDiagram?.(json, name);
+    if (res?.success) this.toast(`Saved ${res.filePath.split(/[/\\]/).pop()}.`, 'success');
+    else if (res && !res.canceled) this.toast(res.error || 'Could not save the file.', 'error');
+  }
+
+  async clearCircuit() {
+    if (!(await confirmDialog('Clear circuit', 'Remove every part and wire except the board? You can undo this.', { confirmLabel: 'Clear', danger: true }))) return;
+    const board = this.boardPart;
+    await this._applyModel({ parts: board ? [{ id: board.id, type: board.type, x: board.x, y: board.y, rotate: 0, attrs: {} }] : [], wires: [] });
+  }
+
+  async openExample(example) {
+    const diagram = JSON.stringify(exampleDiagram(example), null, 2);
+    const res = await window.electronAPI?.sketch?.createExample?.({ name: example.id, code: example.code, diagram }).catch(e => ({ success: false, error: e.message }));
+    if (!res?.success) {
+      this.toast(`Could not create the example: ${res?.error || 'unknown error'}`, 'error');
+      return;
+    }
+    await window.impulse?.openSketch?.(res.folderPath, res.filePath);
+    if (window.impulse?.showSimulator) window.impulse.showSimulator();
+    const missing = [];
+    if (example.libraries?.length) {
+      const installed = await this._installedLibraries();
+      for (const lib of example.libraries) if (!installed.has(lib.toLowerCase())) missing.push(lib);
+    }
+    this.toast(`Opened “${example.title}”. Press ▶ to run it.${missing.length ? ` It needs ${missing.join(', ')}, which installs automatically when you run it.` : ''}`, 'success');
+  }
+
+  // ── Empty state and checks ───────────────────────────────────────────────
+
+  _updateEmpty() {
+    if (!this.empty || !this.canvas) return;
+    const only = this.canvas.parts.length <= 1 && !this.running;
+    if (!only) { this.empty.hidden = true; return; }
+    if (!this.empty.childElementCount) {
+      const quick = ['blink', 'traffic-light', 'distance-meter', 'neopixel', 'keypad-lock'].map(id => EXAMPLES.find(e => e.id === id)).filter(Boolean);
+      const chips = quick.map((ex) => {
+        const b = h('button', { type: 'button', class: 'sim-empty-example', title: ex.summary }, ex.title);
+        b.addEventListener('click', () => this.openExample(ex));
+        return b;
+      });
+      const add = h('button', { type: 'button', class: 'sim-btn' }, icon('plus', 14), 'Add a part');
+      add.addEventListener('click', () => this.picker.toggle(true));
+      const all = h('button', { type: 'button', class: 'sim-btn ghost' }, icon('book', 14), `Browse ${EXAMPLES.length} examples`);
+      all.addEventListener('click', () => this.gallery.open());
+      const ai = h('button', { type: 'button', class: 'sim-btn ghost' }, icon('sparkle', 14), 'Build from my code');
+      ai.addEventListener('click', () => this.buildCircuitFromCode());
+      this.empty.append(
+        h('div', { class: 'sim-empty-card' },
+          h('h3', {}, 'Build a circuit'),
+          h('p', {}, 'Add parts, then click one pin and another to wire them. Press ▶ to run your sketch on the simulated board.'),
+          h('div', { class: 'sim-empty-actions' }, add, all, ai),
+          h('div', { class: 'sim-empty-try' }, h('span', { class: 'sim-empty-label' }, 'Try:'), chips)));
+    }
+    this.empty.hidden = false;
+  }
+
+  _checks() {
+    return circuitChecks(this._engineModel(), { shorts: this._shorts });
+  }
+
+  _renderChecks() {
+    if (!this.checksPane || !this.canvas) return;
+    let issues = [];
+    try { issues = this._checks(); } catch { issues = []; }
+    const errors = issues.filter(i => i.level !== 'info').length;
+    this.checksTab.textContent = 'Circuit check';
+    if (errors) this.checksTab.append(h('span', { class: 'sim-badge' }, String(errors)));
+    if (this.checksPane.hidden) return;
+    this.checksPane.innerHTML = '';
+    if (!issues.length) {
+      this.checksPane.append(h('div', { class: 'sim-check ok' }, icon('check', 15), h('span', {}, 'No wiring problems found.')));
+      return;
+    }
+    for (const issue of issues) {
+      const row = h('button', { type: 'button', class: `sim-check ${issue.level}` }, icon(issue.level === 'info' ? 'info' : 'warning', 15), h('span', {}, issue.text));
+      if (issue.part) row.addEventListener('click', () => { const p = this.canvas.getPart(issue.part); if (p) this.canvas.select([p]); });
+      this.checksPane.append(row);
+    }
+  }
+
+  // ── Runner ───────────────────────────────────────────────────────────────
 
   _bindRunner() {
-    this.runner.onSerial = (ch) => this._appendSerial(ch);
+    this.runner.onSerial = (ch, port) => this._appendSerial(ch, port);
     this.runner.onError = (msg) => {
-      this._appendSerial(`\n[simulator] ${msg}\n`);
+      this._systemLine(`Simulator: ${msg}`, 'error');
       this.stop();
     };
-    this.runner.onPinChange = (pin, high, cycles) => this._onPinChange(pin, high, cycles);
-  }
-
-  // ── Net mapping ──────────────────────────────────────────────────────────
-
-  _rebuildNets() {
-    this._netMap = {};
-    this._partNets = {};
-    if (!this.canvas) return;
-
-    const uno = this.canvas.parts.find(p => p.type === 'wokwi-arduino-uno');
-    if (!uno) return;
-
-    // Build adjacency: node = `${partId}:${pin}`
-    const adj = {};
-    const link = (a, b) => {
-      (adj[a] = adj[a] || []).push(b);
-      (adj[b] = adj[b] || []).push(a);
+    this.runner.onPinChange = (pin, high, cycles) => {
+      this._pinActivity[pin] = (this._pinActivity[pin] || 0) + 1;
+      this.analyzer?.push(pin, high, cycles / F_CPU);
     };
+    this.runner.onReset = () => this.engine.restartParts();
+    this.engine.log = (msg) => this._systemLine(msg.replace(/^\[sim\] /, 'Simulator: '), 'info');
+    this.engine.onShort = (short) => {
+      this._shorts.push(short);
+      this._systemLine(`Short circuit: ${short.tags.join(' and ')} are connected while driving different levels. On real hardware this can damage the board.`, 'error');
+      this._flagShort(short);
+      this._renderChecks();
+    };
+    this.engine.onAttrChange = () => this._scheduleSave();
+    this.engine.onPartStatus = (part) => { if (this.inspector.target === part) this.inspector.tick(); };
+    this.engine.onBoardReset = () => {
+      this._systemLine('Board reset.', 'info');
+      this.runner.reset();
+    };
+    this.engine.onResetPin = (held) => {
+      if (held) {
+        this.runner.stop();
+        this._systemLine('RESET is held LOW: the board is in reset.', 'info');
+      } else if (this.running && !this.paused) {
+        this.runner.reset();
+        this.runner.start();
+      }
+    };
+  }
+
+  _flagShort(short) {
+    const nodes = new Set(short.nodes);
     for (const w of this.canvas.wires) {
-      link(`${w.from.partId}:${w.from.pin}`, `${w.to.partId}:${w.to.pin}`);
+      if (nodes.has(`${w.from.partId}:${w.from.pin}`) || nodes.has(`${w.to.partId}:${w.to.pin}`)) w.groupEl.classList.add('short');
     }
-    // Resistors conduct: join their two terminals
-    for (const p of this.canvas.parts) {
-      if (p.type === 'wokwi-resistor') {
-        link(`${p.id}:1`, `${p.id}:2`);
-      }
-      if (p.type === 'wokwi-pushbutton' || p.type === 'wokwi-pushbutton-6mm') {
-        // Same-side terminals are internally connected
-        link(`${p.id}:1.l`, `${p.id}:1.r`);
-        link(`${p.id}:2.l`, `${p.id}:2.r`);
-      }
-    }
+  }
 
-    // BFS from each UNO digital/analog pin
-    for (const pinInfo of uno.el.pinInfo || []) {
-      const arduinoPin = unoPinToArduino(pinInfo.name);
-      if (arduinoPin === null) continue;
-      const startNode = `${uno.id}:${pinInfo.name}`;
-      const visited = new Set([startNode]);
-      const queue = [startNode];
-      while (queue.length) {
-        const node = queue.shift();
-        for (const next of adj[node] || []) {
-          if (!visited.has(next)) {
-            visited.add(next);
-            queue.push(next);
+  async run() {
+    const sketchPath = window.state?.currentSketch || window.state?.currentFile;
+    if (!sketchPath) {
+      this._systemLine('Open or save a sketch first (File › New Sketch), then press ▶ — or open an example.', 'info');
+      this.toast('Save your sketch first, or open an example.', 'info');
+      return;
+    }
+    if (!this.boardPart) {
+      this.toast('Add a board before running.', 'warn');
+      return;
+    }
+    this._setState('compiling');
+    if (window.saveActiveFile && !await window.saveActiveFile()) {
+      this._systemLine('Could not save the sketch, so the simulation would run old code. Fix the save error and try again.', 'error');
+      this._setState('idle');
+      return;
+    }
+    const board = this.board;
+    this._systemLine(`Compiling for ${board.label}…`, 'info');
+    const result = await this._compile(sketchPath, board);
+    if (!result.success) {
+      this._setState('idle');
+      this._systemLine('Compilation failed:', 'error');
+      this._appendRaw(`${(result.error || 'unknown error').trim()}\n`);
+      const consoleEl = document.getElementById('consoleOutput');
+      if (consoleEl) consoleEl.appendChild(h('div', { class: 'console-error' }, result.error || 'Compilation failed'));
+      return;
+    }
+    this._clearSerial();
+    this._shorts = [];
+    this.canvas.wires.forEach(w => w.groupEl.classList.remove('short'));
+    if (!this.runner.load(result.hex, board.id)) {
+      this._setState('idle');
+      return;
+    }
+    this.engine.setModel(this._engineModel());
+    this.engine.start();
+    this.analyzer?.reset();
+    this.analyzer?.setBoard(board.id);
+    this._pinActivity = {};
+    this._systemLine(`Running on ${board.label}.`, 'success');
+    this.running = true;
+    this.paused = false;
+    this.runner.start();
+    this._setState('running');
+    this._startLoop();
+    this.inspector.render();
+    this._updateEmpty();
+  }
+
+  /** Compile for the simulated board, installing a missing library once if needed. */
+  async _compile(sketchPath, board) {
+    let result;
+    try {
+      result = await window.electronAPI.arduino.compileHex(sketchPath, board.fqbn);
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+    if (!result.success) {
+      const lib = this._detectMissingLibrary(result.error || '');
+      if (lib) {
+        this._systemLine(`Missing library “${lib}”. Installing…`, 'info');
+        try {
+          const inst = await window.electronAPI.lib.install(lib);
+          if (inst && inst.success !== false) {
+            this._libCache = null;
+            this._systemLine(`Installed ${lib}. Compiling again…`, 'success');
+            result = await window.electronAPI.arduino.compileHex(sketchPath, board.fqbn);
+          } else {
+            this._systemLine(`Could not install ${lib}: ${inst?.error || 'unknown error'}`, 'error');
           }
+        } catch (err) {
+          this._systemLine(`Library install failed: ${err.message}`, 'error');
         }
       }
-      // Every non-UNO node reached is connected to this Arduino pin
-      for (const node of visited) {
-        const sep = node.indexOf(':');
-        const partId = node.slice(0, sep);
-        const pin = node.slice(sep + 1);
-        if (partId === uno.id) continue;
-        (this._netMap[arduinoPin] = this._netMap[arduinoPin] || []).push({ partId, pin });
-        (this._partNets[partId] = this._partNets[partId] || {})[pin] = arduinoPin;
-      }
+    }
+    return result;
+  }
+
+  restart() {
+    if (!this.running) return;
+    this._clearSerial();
+    this.analyzer?.reset();
+    this._shorts = [];
+    this.runner.reset();
+    this.engine.restartParts();
+    this.paused = false;
+    if (!this.runner.running) this.runner.start();
+    this._setState('running');
+  }
+
+  stop() {
+    this.runner.stop();
+    this.engine.stop();
+    const was = this.running;
+    this.running = false;
+    this.paused = false;
+    this._setState('idle');
+    cancelAnimationFrame(this._loopId);
+    this._loopId = null;
+    if (was) {
+      this.inspector.render();
+      this._updateEmpty();
     }
   }
 
-  // ── Pin change → component visuals ───────────────────────────────────────
+  togglePause() {
+    if (!this.running) return;
+    if (this.paused) this.runner.start();
+    else this.runner.stop();
+    this.paused = !this.paused;
+    this._setState(this.paused ? 'paused' : 'running');
+  }
 
-  _onPinChange(arduinoPin, high, cycles) {
-    // Record activity for the agent loop (count edges per pin)
-    this._pinActivity[arduinoPin] = (this._pinActivity[arduinoPin] || 0) + 1;
+  _setState(state) {
+    const running = state === 'running' || state === 'paused';
+    this.playBtn.innerHTML = iconSvg(running ? 'restart' : 'play', running ? 16 : 18);
+    this.playBtn.title = running ? 'Restart the simulation' : 'Start the simulation';
+    this.playBtn.setAttribute('aria-label', this.playBtn.title);
+    this.playBtn.classList.toggle('compiling', state === 'compiling');
+    this.playBtn.disabled = state === 'compiling';
+    this.stopBtn.hidden = !running;
+    this.pauseBtn.hidden = !running;
+    this.pauseBtn.innerHTML = iconSvg(state === 'paused' ? 'play' : 'pause', 16);
+    this.pauseBtn.title = state === 'paused' ? 'Resume' : 'Pause';
+    this.stats.hidden = !running;
+    this.stage.classList.toggle('running', running);
+    this.stage.classList.toggle('paused', state === 'paused');
+  }
 
-    // UNO built-in LED
-    const uno = this.canvas?.parts.find(p => p.type === 'wokwi-arduino-uno');
-    if (uno && arduinoPin === 13) uno.el.led13 = high;
-
-    const targets = this._netMap[arduinoPin];
-    if (!targets) return;
-
-    for (const { partId, pin } of targets) {
-      const part = this.canvas.getPart(partId);
-      if (!part) continue;
-
-      switch (part.type) {
-        case 'wokwi-led': {
-          // LED lights when its anode net is high (assumes cathode → GND)
-          if (pin === 'A') part.el.value = high;
-          break;
-        }
-        case 'wokwi-rgb-led': {
-          if (pin === 'R') part.el.ledRed = high ? 1 : 0;
-          if (pin === 'G') part.el.ledGreen = high ? 1 : 0;
-          if (pin === 'B') part.el.ledBlue = high ? 1 : 0;
-          break;
-        }
-        case 'wokwi-led-bar-graph': {
-          const m = /^A(\d+)$/.exec(pin);
-          if (m) {
-            const values = part.el.values || new Array(10).fill(0);
-            values[parseInt(m[1], 10) - 1] = high ? 1 : 0;
-            part.el.values = [...values];
-          }
-          break;
-        }
-        case 'wokwi-buzzer': {
-          // Pin "2" is positive; sound when its net is driven high
-          if (pin === '2') part.el.hasSignal = high;
-          break;
-        }
-        case 'wokwi-servo': {
-          if (pin === 'PWM' || pin === 'SIG') this._decodeServo(part, high, cycles);
-          break;
-        }
-        default:
-          break;
+  _startLoop() {
+    cancelAnimationFrame(this._loopId);
+    let lastStats = 0;
+    const loop = (now) => {
+      if (!this.running) return;
+      if (!this.paused) this.engine.frame();
+      if (now - lastStats > 100) {
+        lastStats = now;
+        const t = this.runner.time;
+        const mm = String(Math.floor(t / 60)).padStart(2, '0');
+        const ss = String(Math.floor(t % 60)).padStart(2, '0');
+        const ms = String(Math.floor((t % 1) * 1000)).padStart(3, '0');
+        this.timeLabel.textContent = `${mm}:${ss}.${ms}`;
+        this.speedLabel.textContent = `${Math.round(this.runner.speed * 100)}%`;
+        this.analyzer?.tick(t);
+        if (!this.logicPane.hidden) this.analyzer.render();
+        this.inspector.tick();
       }
-    }
+      this._flushSerial();
+      this._loopId = requestAnimationFrame(loop);
+    };
+    this._loopId = requestAnimationFrame(loop);
   }
 
-  _decodeServo(part, high, cycles) {
-    const st = this._servoState[part.id] || (this._servoState[part.id] = { lastRise: 0 });
-    if (high) {
-      st.lastRise = cycles;
-    } else if (st.lastRise) {
-      const pulseUs = ((cycles - st.lastRise) / F_CPU) * 1e6;
-      if (pulseUs >= 400 && pulseUs <= 2600) {
-        const angle = Math.max(0, Math.min(180, ((pulseUs - 1000) / 1000) * 180));
-        part.el.angle = angle;
-      }
-    }
-  }
+  // ── Serial ───────────────────────────────────────────────────────────────
 
-  // ── Input parts → AVR ────────────────────────────────────────────────────
-
-  _attachInputHandlers() {
-    if (!this.canvas) return;
-
-    for (const part of this.canvas.parts) {
-      if (part._simHandlersAttached) continue;
-      part._simHandlersAttached = true;
-
-      if (part.type === 'wokwi-potentiometer' || part.type === 'wokwi-slide-potentiometer') {
-        part.el.addEventListener('input', () => this._setPot(part));
-        part.el.addEventListener('pointerup', () => this._setPot(part));
-        part.el.addEventListener('pointermove', () => this._setPot(part));
-      }
-    }
-  }
-
-  // Called by the canvas when any part is pressed (pointerdown).
-  _onPartPress(part) {
-    if (part.type === 'wokwi-pushbutton' || part.type === 'wokwi-pushbutton-6mm') {
-      part._pressAt = performance.now();
-      if (part._releaseTimer) { clearTimeout(part._releaseTimer); part._releaseTimer = null; }
-      part.el.pressed = true;
-      this._setButton(part, true);
-    } else if (part.type === 'wokwi-slide-switch') {
-      // Toggle position on click
-      part.el.value = part.el.value ? 0 : 1;
-      this._setSlideSwitch(part);
-    }
-  }
-
-  // Called by the canvas when a part is released (pointerup / pointerleave).
-  _onPartRelease(part) {
-    if (part.type !== 'wokwi-pushbutton' && part.type !== 'wokwi-pushbutton-6mm') return;
-    if (!part._pressAt) return;
-    // Guarantee a minimum hold so a fast click still beats the sketch debounce.
-    const MIN_PRESS_MS = 120;
-    const held = performance.now() - part._pressAt;
-    const remaining = Math.max(0, MIN_PRESS_MS - held);
-    if (part._releaseTimer) clearTimeout(part._releaseTimer);
-    part._releaseTimer = setTimeout(() => {
-      part._releaseTimer = null;
-      part._pressAt = 0;
-      part.el.pressed = false;
-      this._setButton(part, false);
-    }, remaining);
-  }
-
-  _setButton(part, pressed) {
-    const nets = this._partNets[part.id] || {};
-    // Button bridges its two sides when pressed. GND-wired buttons pull the
-    // pin LOW when pressed; 5V-wired buttons pull it HIGH.
-    const gndConnected = this._sideConnectsTo(part, isGndPin);
-    for (const [pin, arduinoPin] of Object.entries(nets)) {
-      if (pressed) {
-        this.runner.setInputPin(arduinoPin, !gndConnected);
+  _appendSerial(ch, port = 0) {
+    if (port) {
+      // Serial1-3 on the Mega: show complete lines with a prefix.
+      if (ch === '\n') {
+        this._systemLine(`Serial${port} › ${this._serialLines[port].replace(/\r$/, '')}`, 'port');
+        this._serialLines[port] = '';
       } else {
-        // Released: the pin floats; the pull-up (if enabled) snaps it high.
-        this.runner.setPinFloating(arduinoPin);
+        this._serialLines[port] += ch;
       }
+      return;
+    }
+    if (this._capturing) {
+      this._captureBuf += ch;
+      if (this._captureBuf.length > 8000) this._captureBuf = this._captureBuf.slice(-8000);
+    }
+    this._pending = (this._pending || '') + ch;
+    if (ch === '\n') {
+      const line = this._serialLines[0];
+      this._serialLines[0] = '';
+      window.dispatchEvent(new CustomEvent('impulse:sim-serial-line', { detail: line.replace(/\r$/, '') }));
+    } else {
+      this._serialLines[0] += ch;
+    }
+    this._txPending = true;
+  }
+
+  _flushSerial() {
+    if (this._pending) {
+      this._appendRaw(this._pending);
+      this._pending = '';
+    }
+    if (this._txPending) {
+      this._txPending = false;
+      this._blink('ledTX');
     }
   }
 
-  _sideConnectsTo(part, predicate) {
-    // Check if any wire from this part goes to a matching UNO pin
-    const uno = this.canvas.parts.find(p => p.type === 'wokwi-arduino-uno');
-    if (!uno) return false;
-    for (const w of this.canvas.wires) {
-      const ends = [
-        { partId: w.from.partId, pin: w.from.pin, other: w.to },
-        { partId: w.to.partId, pin: w.to.pin, other: w.from },
-      ];
-      for (const end of ends) {
-        if (end.partId === part.id && end.other.partId === uno.id && predicate(end.other.pin)) {
-          return true;
-        }
-      }
+  _appendRaw(text) {
+    const out = this.serialOut;
+    const atBottom = out.scrollHeight - out.scrollTop - out.clientHeight < 40;
+    let last = out.lastChild;
+    if (!last || last.nodeType !== Node.TEXT_NODE) {
+      last = document.createTextNode('');
+      out.appendChild(last);
     }
-    return false;
+    last.appendData(text);
+    if (last.length > SERIAL_LIMIT) last.deleteData(0, last.length - SERIAL_LIMIT);
+    if (atBottom) out.scrollTop = out.scrollHeight;
   }
 
-  _setPot(part) {
-    const nets = this._partNets[part.id] || {};
-    for (const [pin, arduinoPin] of Object.entries(nets)) {
-      if ((pin === 'SIG' || pin === 'WIPER' || pin === 'OUT') && arduinoPin >= 14) {
-        this.runner.setAnalogPin(arduinoPin - 14, Number(part.el.value) || 0);
-      }
+  _systemLine(text, kind = 'info') {
+    if (!this.serialOut) return;
+    this._flushSerial();
+    const out = this.serialOut;
+    const line = h('div', { class: `sim-sys ${kind}` }, text);
+    const last = out.lastChild;
+    if (last && last.nodeType === Node.TEXT_NODE && last.length && !last.data.endsWith('\n')) {
+      // A sketch line is half printed: show the notice above it and let the line continue.
+      const partial = last.splitText(last.data.lastIndexOf('\n') + 1);
+      out.insertBefore(line, partial);
+    } else {
+      out.append(line);
     }
+    while (out.childNodes.length > 2000) out.firstChild.remove();
+    out.scrollTop = out.scrollHeight;
   }
 
-  _setSlideSwitch(part) {
-    // Slide switch: COM connects to L or R based on position (el.value: 0/1)
-    const nets = this._partNets[part.id] || {};
-    for (const [pin, arduinoPin] of Object.entries(nets)) {
-      if (arduinoPin !== undefined && arduinoPin >= 0) {
-        this.runner.setInputPin(arduinoPin, !!part.el.value);
-      }
-    }
+  _blink(led) {
+    const board = this.boardPart?.el;
+    if (!board || !this.running) return;
+    board[led] = true;
+    clearTimeout(this[`_${led}Timer`]);
+    this[`_${led}Timer`] = setTimeout(() => { board[led] = false; }, 60);
+  }
+
+  _clearSerial() {
+    if (this.serialOut) this.serialOut.textContent = '';
+    this._pending = '';
+    this._serialLines = ['', '', '', ''];
+  }
+
+  // ── Toasts ───────────────────────────────────────────────────────────────
+
+  toast(message, kind = 'info', key = null) {
+    if (!this.toasts) return;
+    if (key) this.toasts.querySelector(`[data-key="${key}"]`)?.remove();
+    const t = h('div', { class: `sim-toast ${kind}`, dataset: key ? { key } : {} }, icon(kind === 'error' || kind === 'warn' ? 'warning' : kind === 'success' ? 'check' : 'info', 15), h('span', {}, message));
+    this.toasts.append(t);
+    while (this.toasts.childElementCount > 3) this.toasts.firstChild.remove();
+    setTimeout(() => { t.classList.add('leaving'); setTimeout(() => t.remove(), 300); }, kind === 'error' ? 8000 : 5000);
   }
 
   // ── AI circuit builder ───────────────────────────────────────────────────
@@ -483,163 +1230,134 @@ export class SimulationManager {
   async buildCircuitFromCode() {
     const code = window.state?.editor?.getValue?.() || '';
     if (!code.trim()) {
-      this._appendSerial('[circuit-ai] The editor is empty — open or write a sketch first.\n');
-      return;
+      this.toast('The editor is empty — open or write a sketch first.', 'info');
+      return false;
     }
-
-    const btn = document.getElementById('simAiBtn');
-    if (btn?.classList.contains('working')) return; // already running
-    btn?.classList.add('working');
-    this._appendSerial('[circuit-ai] Analyzing your sketch and building the circuit…\n');
-
+    if (this.aiBtn.classList.contains('working')) return false;
+    this.aiBtn.classList.add('working');
+    this._systemLine('AI is reading your sketch and wiring the circuit…', 'info');
     let result;
     try {
-      result = await window.electronAPI.ai.generateCircuit(code);
+      result = await window.electronAPI.ai.generateCircuit(code, { board: this.board.id, catalog: catalogText() });
     } catch (err) {
       result = { success: false, error: err.message };
     }
-    btn?.classList.remove('working');
-
-    if (!result.success) {
-      this._appendSerial(`[circuit-ai] ${result.error}\n`);
-      return;
+    this.aiBtn.classList.remove('working');
+    if (!result?.success) {
+      this._systemLine(`AI circuit builder: ${result?.error || 'failed'}`, 'error');
+      this.toast(result?.error || 'The AI could not build the circuit.', 'error');
+      return false;
     }
-
     const check = validateCircuit(result.circuit);
     if (!check.ok) {
-      this._appendSerial('[circuit-ai] The generated circuit failed validation:\n');
-      check.errors.forEach(e => this._appendSerial(`  ✗ ${e}\n`));
-      this._appendSerial('[circuit-ai] Nothing was changed. Try again.\n');
-      return;
+      this._systemLine('The generated circuit failed validation, so nothing was changed:', 'error');
+      check.errors.slice(0, 8).forEach(e => this._systemLine(`  ✗ ${e}`, 'error'));
+      this.toast('The AI produced an invalid circuit. Try again.', 'error');
+      return false;
     }
-
-    this.stop();
-    const count = placeCircuit(this.canvas, result.circuit);
-    check.warnings.forEach(w => this._appendSerial(`[circuit-ai] ⚠ ${w}\n`));
-    this._appendSerial(`[circuit-ai] Done — placed ${count} parts, fully wired. Press ▶ to simulate.\n`);
-
-    // Nets depend on wires, which land next frame; save + fit view after that
-    setTimeout(() => {
-      this._rebuildNets();
-      this.canvas.zoomFit();
-      this._save();
-    }, 150);
+    await this._applyModel(layoutCircuit(check.circuit));
+    check.warnings.forEach(w => this._systemLine(`AI circuit builder: ${w}`, 'warn'));
+    this._systemLine(`Placed ${check.circuit.parts.length} parts with ${check.circuit.wires.length} wires. Press ▶ to simulate (${mod}Z undoes).`, 'success');
+    return true;
   }
 
-  // ── Agentic loop: build → simulate → observe → fix ────────────────────────
+  // ── Agent: build → simulate → observe → fix ──────────────────────────────
 
   async runAgent() {
     if (this._agentRunning) return;
-    const sketchPath = window.state?.currentFile;
+    const sketchPath = window.state?.currentSketch || window.state?.currentFile;
     if (!sketchPath) {
-      this._agentLog('Save your sketch first (Ctrl+S), then run the agent.');
+      this._agentLog('Save your sketch first, then run the agent.');
       return;
     }
-    const btn = document.getElementById('simAgentBtn');
     this._agentRunning = true;
-    btn?.classList.add('working');
+    this.agentBtn.classList.add('working');
     this.stop();
-
     const MAX_ITERS = 4;
     try {
-      // Ensure a circuit exists before we start observing behavior.
-      if (!this._hasBoard()) {
+      if (this.canvas.parts.length <= 1) {
         this._agentLog('No circuit yet — generating one from your code…');
         await this.buildCircuitFromCode();
-        await this._delay(300);
       }
-
+      if (window.saveActiveFile) await window.saveActiveFile();
       for (let iter = 1; iter <= MAX_ITERS; iter++) {
-        this._agentLog(`── Iteration ${iter}/${MAX_ITERS} ──`);
-        let code = window.state?.editor?.getValue?.() || '';
-
-        // 1) Compile (auto-installing a missing library if that's the blocker)
+        this._agentLog(`Iteration ${iter} of ${MAX_ITERS}`);
+        const code = window.state?.editor?.getValue?.() || '';
         this._agentLog('Compiling…');
-        let comp = await window.electronAPI.arduino.compileHex(sketchPath, 'arduino:avr:uno');
-        if (!comp.success) {
-          const lib = this._detectMissingLibrary(comp.error || '');
-          if (lib) {
-            this._agentLog(`Installing missing library "${lib}"…`);
-            await window.electronAPI.lib.install(lib).catch(() => {});
-            comp = await window.electronAPI.arduino.compileHex(sketchPath, 'arduino:avr:uno');
-          }
-        }
-
-        // 2) Compile still failing → ask the model to fix the code
+        const comp = await this._compile(sketchPath, this.board);
         if (!comp.success) {
           this._agentLog('Compile failed — asking AI to fix the code…');
           const fixed = await this._verify({ code, compile: comp.error || 'compile error', serial: '', pins: '', runSeconds: 0 });
-          if (fixed && fixed.fixedCode) {
+          if (fixed?.fixedCode) {
             await this._applyCode(sketchPath, fixed.fixedCode);
             this._agentLog(`Applied fix: ${fixed.summary || 'code updated'}`);
-            continue; // recompile next iteration
+            continue;
           }
-          this._agentLog('Could not auto-fix the compile error. Stopping.');
+          this._agentLog('Could not fix the compile error automatically. Stopping.');
           return;
         }
-
-        // 3) Run the compiled program and observe real behavior
-        this._agentLog('Compiled ✓  Running simulation to observe behavior…');
-        if (!this.runner.load(comp.hex)) { this._agentLog('Failed to load program.'); return; }
-        this._rebuildNets();
-        const obs = await this._captureRun(3);
-        this._agentLog(`Observed: pins → ${obs.pins}`);
+        this._agentLog('Compiled. Running the simulation to observe behavior…');
+        const obs = await this._captureRun(comp.hex, 3);
+        this._agentLog(`Pins: ${obs.pins}`);
         const firstLine = (obs.serial.split('\n').find(l => l.trim()) || '(no serial output)').slice(0, 80);
-        this._agentLog(`Serial → ${firstLine}${obs.serial.length > 80 ? ' …' : ''}`);
-
-        // 4) Verify behavior against intent
-        this._agentLog('Verifying behavior with AI…');
+        this._agentLog(`Serial: ${firstLine}${obs.serial.length > 80 ? ' …' : ''}`);
+        this._agentLog('Checking behavior with AI…');
         const verdict = await this._verify({ code, compile: 'ok', serial: obs.serial, pins: obs.pins, runSeconds: 3 });
         if (!verdict) { this._agentLog('Verification unavailable. Stopping.'); return; }
-
         if (verdict.status === 'pass') {
-          this._agentLog(`✓ PASS — ${verdict.summary || 'behaves as intended.'}`);
-          this._agentLog('Agent finished. The circuit is live; press ▶ to keep running.');
+          this._agentLog(`PASS — ${verdict.summary || 'behaves as intended.'}`);
           return;
         }
-
-        // 5) Failed — report and, if offered, apply the fix and loop
-        this._agentLog(`✗ Issue — ${verdict.summary || 'behavior does not match intent.'}`);
-        (verdict.issues || []).forEach(i => this._agentLog(`   • ${i}`));
+        this._agentLog(`Issue — ${verdict.summary || 'behavior does not match the intent.'}`);
+        (verdict.issues || []).forEach(i => this._agentLog(`  • ${i}`));
         if (verdict.fixedCode && iter < MAX_ITERS) {
           await this._applyCode(sketchPath, verdict.fixedCode);
-          this._agentLog('Applied fix, re-verifying…');
+          this._agentLog('Applied a fix, checking again…');
           continue;
         }
-        this._agentLog(verdict.fixedCode ? 'Reached iteration limit.' : 'No automatic fix available. Stopping.');
+        this._agentLog(verdict.fixedCode ? 'Reached the iteration limit.' : 'No automatic fix available. Stopping.');
         return;
       }
     } catch (err) {
       this._agentLog(`Agent error: ${err.message}`);
     } finally {
       this._agentRunning = false;
-      btn?.classList.remove('working');
+      this.agentBtn.classList.remove('working');
     }
   }
 
-  // Run the loaded program for `seconds`, capturing serial + pin activity.
-  async _captureRun(seconds) {
+  async _captureRun(hex, seconds) {
     this._captureBuf = '';
     this._pinActivity = {};
     this._capturing = true;
-    this._attachInputHandlers();
-    this._initInputLevels();
-    this.runner.start();
+    if (!this.runner.load(hex, this.board.id)) return { serial: '', pins: 'failed to load' };
+    this.engine.setModel(this._engineModel());
+    this.engine.start();
     this.running = true;
-    this._setFabState('running');
-    this._startStats();
-    await this._delay(seconds * 1000);
-    this.runner.stop();
-    this.running = false;
+    this.runner.start();
+    this._setState('running');
+    this._startLoop();
+    await new Promise(r => setTimeout(r, seconds * 1000));
     this._capturing = false;
-    this._stopStats();
-    this._setFabState('idle');
+    this.stop();
     return { serial: this._captureBuf, pins: this._summarizePins() };
+  }
+
+  /** One line per wired board pin, e.g. "D13 → LED led1:A, Resistor r1:2". */
+  _wiringSummary() {
+    const { pins } = this.getWiring();
+    return Object.entries(pins)
+      .map(([num, list]) => `${pinLabel(this.board, Number(num))} → ${list.map(p => `${p.label}:${p.pin}`).join(', ')}`)
+      .join('\n');
   }
 
   async _verify(obs) {
     try {
-      const res = await window.electronAPI.ai.verifyExecution(obs);
+      const res = await window.electronAPI.ai.verifyExecution({
+        ...obs,
+        board: `${this.board.label} (${this.board.mcu === 'atmega2560' ? 'ATmega2560' : 'ATmega328P'})`,
+        circuit: this._wiringSummary(),
+      });
       if (!res || !res.success) {
         this._agentLog(`Verify error: ${res?.error || 'unknown'}`);
         return null;
@@ -653,295 +1371,82 @@ export class SimulationManager {
 
   async _applyCode(sketchPath, code) {
     if (window.state?.editor) window.state.editor.setValue(code);
-    // Keep the open-file tab's cached content in sync so a later save isn't stale
     const tab = (window.state?.openFiles || []).find(f => f.path === sketchPath);
     if (tab) tab.content = code;
-    try { await window.electronAPI.file.save(sketchPath, code); } catch (_) {}
+    const saved = await window.electronAPI.file.save(sketchPath, code).catch(e => ({ success: false, error: e.message }));
+    if (!saved?.success) this._agentLog(`Could not save the sketch: ${saved?.error || 'unknown error'}`);
   }
-
-  _hasBoard() {
-    return !!this.canvas?.parts.find(p => p.type === 'wokwi-arduino-uno');
-  }
-
-  _delay(ms) { return new Promise(r => setTimeout(r, ms)); }
 
   _agentLog(msg) {
-    this._appendSerial(`[agent] ${msg}\n`);
+    this._systemLine(`Agent: ${msg}`, 'agent');
   }
 
-  // Map a compiler "No such file: X.h" error to an installable library name.
+  _summarizePins() {
+    const entries = Object.entries(this._pinActivity).map(([p, n]) => [Number(p), n]).sort((a, b) => b[1] - a[1]);
+    if (!entries.length) return 'no digital pin activity observed';
+    return entries.map(([pin, n]) => `${pinLabel(this.board, pin)}:${n} edges`).join(', ');
+  }
+
+  /** Map a compiler "No such file: X.h" error to an installable library name. */
   _detectMissingLibrary(errorText) {
-    const m = /(\w[\w\-.]*\.h):?\s+No such file or directory/i.exec(errorText)
-      || /fatal error:\s*(\w[\w\-.]*\.h)/i.exec(errorText);
+    const m = /(\w[\w\-.]*\.h):?\s+No such file or directory/i.exec(errorText) || /fatal error:\s*(\w[\w\-.]*\.h)/i.exec(errorText);
     if (!m) return null;
-    const header = m[1];
-    // Common header → Library Manager name. Falls back to the header stem.
     const KNOWN = {
-      'Servo.h': 'Servo',
-      'LiquidCrystal.h': 'LiquidCrystal',
-      'LiquidCrystal_I2C.h': 'LiquidCrystal I2C',
-      'Adafruit_GFX.h': 'Adafruit GFX Library',
-      'Adafruit_SSD1306.h': 'Adafruit SSD1306',
-      'DHT.h': 'DHT sensor library',
-      'FastLED.h': 'FastLED',
-      'Adafruit_NeoPixel.h': 'Adafruit NeoPixel',
-      'IRremote.h': 'IRremote',
-      'Wire.h': null,   // bundled with the core, not installable
-      'SPI.h': null,
-      'SoftwareSerial.h': null,
-      'EEPROM.h': null,
+      'Servo.h': 'Servo', 'LiquidCrystal.h': 'LiquidCrystal', 'LiquidCrystal_I2C.h': 'LiquidCrystal I2C',
+      'Adafruit_GFX.h': 'Adafruit GFX Library', 'Adafruit_SSD1306.h': 'Adafruit SSD1306', 'DHT.h': 'DHT sensor library',
+      'DHT_U.h': 'DHT sensor library', 'Adafruit_Sensor.h': 'Adafruit Unified Sensor', 'FastLED.h': 'FastLED',
+      'Adafruit_NeoPixel.h': 'Adafruit NeoPixel', 'IRremote.h': 'IRremote', 'IRremote.hpp': 'IRremote', 'Keypad.h': 'Keypad',
+      'RTClib.h': 'RTClib', 'HX711.h': 'HX711', 'LedControl.h': 'LedControl', 'MD_MAX72xx.h': 'MD_MAX72XX', 'MD_Parola.h': 'MD_Parola',
+      'Adafruit_ILI9341.h': 'Adafruit ILI9341', 'Adafruit_MPU6050.h': 'Adafruit MPU6050', 'MPU6050.h': 'MPU6050',
+      'SevSeg.h': 'SevSeg', 'AccelStepper.h': 'AccelStepper', 'Stepper.h': 'Stepper', 'NewPing.h': 'NewPing',
+      'U8g2lib.h': 'U8g2', 'U8x8lib.h': 'U8g2', 'TM1637Display.h': 'TM1637', 'Encoder.h': 'Encoder', 'Bounce2.h': 'Bounce2',
+      'OneWire.h': 'OneWire', 'DallasTemperature.h': 'DallasTemperature', 'ArduinoJson.h': 'ArduinoJson',
+      'Wire.h': null, 'SPI.h': null, 'SoftwareSerial.h': null, 'EEPROM.h': null,
     };
-    if (header in KNOWN) return KNOWN[header];
-    return header.replace(/\.h$/i, '');
+    if (m[1] in KNOWN) return KNOWN[m[1]];
+    return m[1].replace(/\.(h|hpp)$/i, '');
   }
 
-  // ── Simulation control ───────────────────────────────────────────────────
+  // ── Integration ──────────────────────────────────────────────────────────
 
-  async run() {
-    const sketchPath = window.state?.currentFile;
-    if (!sketchPath) {
-      this._appendSerial('[simulator] Save your sketch first (Ctrl+S), then press play.\n');
-      return;
-    }
+  /** Board, FQBN and circuit for headless runs (hardware tests, AI verify, compare). */
+  simulationContext() {
+    const board = this.board;
+    const model = this.canvas ? this.canvas.model() : { parts: [], wires: [] };
+    return { board: board.id, fqbn: board.fqbn, label: board.label, circuit: model };
+  }
 
-    this._setFabState('compiling');
-    this._appendSerial('[simulator] Compiling sketch…\n');
-
-    let result;
-    try {
-      result = await window.electronAPI.arduino.compileHex(sketchPath, 'arduino:avr:uno');
-    } catch (err) {
-      this._appendSerial(`[simulator] Compile failed: ${err.message}\n`);
-      this._setFabState('idle');
-      return;
-    }
-
-    // If compilation failed on a missing library header, offer to install it
-    // and retry automatically — the sim shouldn't dead-end on a one-click fix.
-    if (!result.success) {
-      const lib = this._detectMissingLibrary(result.error || '');
-      if (lib) {
-        this._appendSerial(`[simulator] Missing library "${lib}". Installing…\n`);
-        this._setFabState('compiling');
-        try {
-          const inst = await window.electronAPI.lib.install(lib);
-          if (inst && inst.success !== false) {
-            this._appendSerial(`[simulator] Installed ${lib}. Recompiling…\n`);
-            result = await window.electronAPI.arduino.compileHex(sketchPath, 'arduino:avr:uno');
-          } else {
-            this._appendSerial(`[simulator] Could not install ${lib}: ${inst?.error || 'unknown error'}\n`);
-          }
-        } catch (err) {
-          this._appendSerial(`[simulator] Library install failed: ${err.message}\n`);
+  /**
+   * Which parts each Arduino pin reaches through the current wiring.
+   * @returns {{ hasCircuit: boolean, board: string, pins: Record<number, {id: string, type: string, label: string, pin: string}[]> }}
+   */
+  getWiring() {
+    const board = this.board;
+    const boardPart = this.boardPart;
+    const pins = {};
+    if (!this.canvas || !boardPart) return { hasCircuit: false, board: board.id, pins };
+    const circuit = staticTopology(this._engineModel());
+    for (const name of (boardPart.el.pinInfo || []).map(p => p.name)) {
+      const num = boardPinNumber(board, name);
+      if (num === null || pins[num]) continue;
+      const net = circuit.netOf(`${boardPart.id}:${name}`);
+      if (net < 0) continue;
+      const nets = [net, ...circuit.resistiveNeighbors(net, 2).map(n => n.net)];
+      const list = [];
+      for (const n of nets) {
+        for (const node of circuit.nodesOf(n)) {
+          const sep = node.lastIndexOf(':');
+          const partId = node.slice(0, sep);
+          const part = this.canvas.getPart(partId);
+          if (!part || part === boardPart || partDef(part.type)?.category === 'Breadboards') continue;
+          list.push({ id: partId, type: part.type, label: `${partDef(part.type)?.label || part.type} ${partId}`, pin: node.slice(sep + 1) });
         }
       }
+      if (list.length) pins[num] = list;
     }
-
-    if (!result.success) {
-      this._appendSerial('[simulator] Compilation error:\n');
-      this._appendSerial((result.error || 'unknown error') + '\n');
-      this._setFabState('idle');
-      // Also surface in Problems/console
-      const consoleEl = document.getElementById('consoleOutput');
-      if (consoleEl) {
-        const div = document.createElement('div');
-        div.className = 'console-error';
-        div.textContent = result.error || 'Compilation failed';
-        consoleEl.appendChild(div);
-      }
-      document.querySelector('.output-tab[data-tab="console"]')?.click();
-      return;
-    }
-
-    this._clearSerial();
-    if (!this.runner.load(result.hex)) {
-      this._setFabState('idle');
-      return;
-    }
-
-    this._rebuildNets();
-    this._attachInputHandlers();
-    this._initInputLevels();
-
-    const uno = this.canvas?.parts.find(p => p.type === 'wokwi-arduino-uno');
-    if (uno) uno.el.ledPower = true;
-
-    this.runner.start();
-    this.running = true;
-    this.paused = false;
-    this._setFabState('running');
-    this._startStats();
-  }
-
-  restart() {
-    if (!this.running) return;
-    this.runner.reset();
-    this._resetPartVisuals();
-    this._clearSerial();
-    this.runner.start();
-    this.paused = false;
-    this._setFabState('running');
-  }
-
-  stop() {
-    this.runner.stop();
-    this.runner.reset();
-    this.running = false;
-    this.paused = false;
-    this._resetPartVisuals();
-    this._setFabState('idle');
-    this._stopStats();
-  }
-
-  togglePause() {
-    if (!this.running) return;
-    if (this.paused) {
-      this.runner.start();
-      this.paused = false;
-    } else {
-      this.runner.stop();
-      this.paused = true;
-    }
-    this._setFabState(this.paused ? 'paused' : 'running');
-  }
-
-  _initInputLevels() {
-    // Buttons idle: high if wired to GND (INPUT_PULLUP convention), low otherwise
-    for (const part of this.canvas?.parts || []) {
-      if (part.type === 'wokwi-pushbutton' || part.type === 'wokwi-pushbutton-6mm') {
-        this._setButton(part, false);
-      }
-      if (part.type === 'wokwi-potentiometer' || part.type === 'wokwi-slide-potentiometer') {
-        this._setPot(part);
-      }
-    }
-  }
-
-  _resetPartVisuals() {
-    for (const part of this.canvas?.parts || []) {
-      switch (part.type) {
-        case 'wokwi-led': part.el.value = false; break;
-        case 'wokwi-rgb-led': part.el.ledRed = 0; part.el.ledGreen = 0; part.el.ledBlue = 0; break;
-        case 'wokwi-buzzer': part.el.hasSignal = false; break;
-        case 'wokwi-arduino-uno': part.el.led13 = false; part.el.ledPower = false; part.el.ledRX = false; part.el.ledTX = false; break;
-        default: break;
-      }
-    }
-  }
-
-  _setFabState(state) {
-    const play = document.getElementById('simPlayBtn');
-    const stop = document.getElementById('simStopBtn');
-    const pause = document.getElementById('simPauseBtn');
-    const stats = document.getElementById('simStats');
-    if (!play) return;
-
-    if (state === 'running' || state === 'paused') {
-      // Play becomes restart
-      play.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>';
-      play.title = 'Restart the simulation';
-      stop.style.display = '';
-      pause.style.display = '';
-      pause.innerHTML = state === 'paused'
-        ? '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>'
-        : '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>';
-      pause.title = state === 'paused' ? 'Resume the simulation' : 'Pause the simulation';
-      stats.style.display = 'flex';
-      play.classList.remove('compiling');
-    } else if (state === 'compiling') {
-      play.classList.add('compiling');
-    } else {
-      play.innerHTML = '<svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>';
-      play.title = 'Start the simulation';
-      stop.style.display = 'none';
-      pause.style.display = 'none';
-      stats.style.display = 'none';
-      play.classList.remove('compiling');
-    }
-  }
-
-  _startStats() {
-    this._stopStats();
-    const timeLabel = document.getElementById('simTimeLabel');
-    const speedLabel = document.getElementById('simSpeedLabel');
-    this._statsTimer = setInterval(() => {
-      if (!this.running) return;
-      const t = this.runner.time;
-      const mm = String(Math.floor(t / 60)).padStart(2, '0');
-      const ss = String(Math.floor(t % 60)).padStart(2, '0');
-      const ms = String(Math.floor((t % 1) * 1000)).padStart(3, '0');
-      if (timeLabel) timeLabel.textContent = `${mm}:${ss}.${ms}`;
-      if (speedLabel) speedLabel.textContent = `${Math.round(this.runner.speed * 100)}%`;
-    }, 100);
-  }
-
-  _stopStats() {
-    if (this._statsTimer) {
-      clearInterval(this._statsTimer);
-      this._statsTimer = null;
-    }
-  }
-
-  // ── Serial ───────────────────────────────────────────────────────────────
-
-  _appendSerial(text) {
-    // Capture sketch serial (not agent/simulator log lines) for the agent loop
-    if (this._capturing && !text.startsWith('[')) {
-      this._captureBuf += text;
-      if (this._captureBuf.length > 8000) this._captureBuf = this._captureBuf.slice(-8000);
-    }
-    const el = document.getElementById('simSerialOut');
-    if (!el) return;
-    el.textContent += text;
-    el.scrollTop = el.scrollHeight;
-
-    // Blink TX LED
-    const uno = this.canvas?.parts.find(p => p.type === 'wokwi-arduino-uno');
-    if (uno && this.running) {
-      uno.el.ledTX = true;
-      clearTimeout(this._txTimer);
-      this._txTimer = setTimeout(() => { uno.el.ledTX = false; }, 80);
-    }
-  }
-
-  // Human-readable pin-activity summary for the verify step.
-  _summarizePins() {
-    const entries = Object.entries(this._pinActivity)
-      .map(([p, n]) => [Number(p), n])
-      .sort((a, b) => b[1] - a[1]);
-    if (!entries.length) return 'no digital pin activity observed';
-    return entries.map(([pin, n]) => {
-      const label = pin >= 14 ? `A${pin - 14}` : `D${pin}`;
-      return `${label}:${n} edges`;
-    }).join(', ');
-  }
-
-  _clearSerial() {
-    const el = document.getElementById('simSerialOut');
-    if (el) el.textContent = '';
-  }
-
-  // ── Persistence ──────────────────────────────────────────────────────────
-
-  _save() {
-    if (!this.canvas) return;
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(this.canvas.serialize()));
-    } catch (_) { /* quota */ }
-  }
-
-  _restore() {
-    let data = null;
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) data = JSON.parse(raw);
-    } catch (_) { /* corrupted */ }
-
-    if (data && data.parts?.length) {
-      this.canvas.deserialize(data);
-      setTimeout(() => this._rebuildNets(), 100);
-    } else {
-      this.canvas.addPart('wokwi-arduino-uno', 60, 60);
-    }
+    const hasCircuit = this.canvas.parts.some(p => !partDef(p.type)?.board && partDef(p.type)?.category !== 'Breadboards');
+    return { hasCircuit, board: board.id, pins };
   }
 }
+
+export { PARTS };

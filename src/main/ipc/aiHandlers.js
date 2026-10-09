@@ -37,12 +37,15 @@ function register(ipcMain, ctx) {
     }
   }));
 
-  ipcMain.handle('ai:generate-circuit', withDebugLog('ai:generate-circuit', async (event, sketchCode) => {
-    if (typeof sketchCode !== 'string' || sketchCode.length > 200000) {
-      return { success: false, error: 'Invalid sketch code' };
-    }
+  ipcMain.handle('ai:generate-circuit', withDebugLog('ai:generate-circuit', async (event, sketchCode, options) => {
+    const parsed = parseOrDefault(schemas.aiGenerateCircuit, {
+      code: typeof sketchCode === 'string' ? sketchCode : '',
+      board: options?.board,
+      catalog: options?.catalog,
+    }, { success: false, error: 'Invalid sketch code' });
+    if (!parsed.ok) return parsed.defaultResult;
     try {
-      return await generateCircuit(aiAgent, sketchCode);
+      return await generateCircuit(aiAgent, parsed.data.code, { board: parsed.data.board, catalog: parsed.data.catalog });
     } catch (error) {
       return { success: false, error: error?.message ?? 'Circuit generation failed' };
     }

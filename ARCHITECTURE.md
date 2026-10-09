@@ -151,6 +151,34 @@ Secure API key storage using `electron-store`:
 - Per-provider keys
 - Format validation
 
+## Simulator (`src/renderer/simulation/`)
+
+The simulator runs the sketch's compiled firmware on an emulated AVR and wires it to parts on a canvas.
+
+```
+arduino-cli compile ──► app .hex ──► AvrRunner (avr8js) ◄──► CircuitEngine ◄──► part behaviors ──► canvas elements
+                                       │ ports, timers, USART,     │ nets, voltages,      │ LEDs, LCDs, sensors,
+                                       │ ADC, TWI, SPI, EEPROM     │ edges, I²C/SPI       │ motors, gates…
+```
+
+| Module | Role |
+|---|---|
+| `mcu.js`, `boards.js` | ATmega328P / ATmega2560 descriptions and the Uno, Nano and Mega 2560 pin maps (PWM, analog, I²C, SPI, serial, interrupts). |
+| `avr-runner.js` | Runs the CPU in real time (12 ms budget per frame), exposes pin states, ADC voltages, an I²C bus and an SPI bus, keeps EEPROM per board, handles the watchdog and RESET. |
+| `netlist.js` | Union-find nets plus nodal analysis per resistive island: pull-ups, voltage dividers, shorts. |
+| `engine.js` | Builds nets from wires, breadboard plugs and part internals; resolves every input pin; measures PWM duty and frequency; routes Arduino pin edges to `onPin` and any net level change to `onNet` (so gates can feed gates). |
+| `parts/catalog.js` | Every part: label, category, search keywords, description, pins, editable props, live controls, libraries, behavior, Wokwi aliases. `parts/pins.js` holds pin positions captured from the rendered elements for headless use. |
+| `parts/*.js`, `devices/*.js` | Behaviors (basic, displays, input, sensors, motion, power, logic, modules) and protocol models (HD44780, SSD1306, ILI9341, WS2812, DHT, DS18B20 1-Wire, TM1637, MAX7219/74HC595, NEC IR, DS1307/MPU6050 registers). |
+| `elements/` | Custom elements for parts not in `@wokwi/elements` (breadboards, chips, gates, modules), drawn in millimetres on the 0.1" grid. |
+| `canvas.js` | Wiring canvas: placement, rotation, wiring with waypoints, breadboard plugging, selection, zoom. |
+| `diagram.js` | Wokwi-compatible `diagram.json` read/write, routing hints, breadboard plug detection. |
+| `search.js`, `ui/` | Part picker (search with typo tolerance, synonyms and advice for things that aren't simulated), inspector, examples gallery. |
+| `examples.js` | Example projects (sketch + circuit); each is compiled and run by the test suite. |
+| `headless.js`, `expectations.js` | Runs firmware without a DOM for hardware tests (`// @expect …`) and AI verification. |
+| `index.js` | `SimulationManager`: toolbar, board switching, persistence (diagram.json next to the sketch), circuit checks, serial pane, logic analyzer, AI circuit builder and agent loop. |
+
+Circuits are saved as `diagram.json` beside the sketch. Opening an example writes the sketch and its diagram to `<sketchbook>/Impulse Examples/<name>/`.
+
 ## Data Flow
 
 ### Compile Flow
@@ -204,6 +232,13 @@ Display in AI panel
 - `serial:send` - Send data
 - `serial:list-ports` - List ports
 - `serial:data` (event) - Incoming data
+
+### Simulator
+- `arduino:compile-hex` - Compile for a simulated board and return the application HEX
+- `sketch:create-example` - Write an example sketch and its `diagram.json` into the sketchbook
+- `dialog:open-diagram` / `dialog:save-diagram` - Import and export circuits
+- `ai:generate-circuit` - Build a circuit for the current sketch
+- `ai:verify-execution` - Judge a simulated run (board, wiring, serial, pins) and propose a fix
 
 ### AI
 - `ai:set-provider` - Configure AI

@@ -1,218 +1,84 @@
-# Impulse IDE
+# Impulse
 
-An AI-powered desktop application for Arduino / IoT development — intelligent compilation, upload, serial monitoring, and error detection. (Also known as Arduino IDE Cursor.)
+An AI-assisted Arduino IDE with a built-in AVR simulator. Write a sketch, wire the circuit, run it in the simulator, check it against hardware tests, then upload it to the board.
 
 ## Features
 
-- ✅ **Compile Arduino Sketches** - Uses Arduino CLI to compile sketches
-- ✅ **Upload to Boards** - Upload compiled code to Arduino boards
-- ✅ **Serial Monitor** - Real-time serial communication with automatic baud rate detection
-- ✅ **Error Detection & Memory** - Intelligent error analysis with growing memory of past errors and fixes
-- ✅ **Modern UI** - Clean, dark-themed interface built with Electron
-- ✅ **Windows Executable** - Packaged as .exe for easy distribution
+- **Editor**: Arduino-aware syntax highlighting, find/replace, go to line, auto-indent, multi-tab sketches.
+- **Compile, upload, programmers**: through `arduino-cli`, including Upload Using Programmer, Export Compiled Binary and Archive Sketch.
+- **Simulator**: runs the compiled firmware for the **Arduino Uno, Nano and Mega 2560** on an emulated AVR, wired to **89 parts** on a canvas — LEDs, buttons, pots, breadboards, LCDs, OLED and TFT displays, NeoPixels, 7-segment and TM1637 displays, LED matrices, HC-SR04, DHT11/22, DS18B20 (1-Wire), PIR, IMU, RTC, load cell, keypads, rotary encoders, IR remote, servos, steppers (NEMA 17, 28BYJ-48 + ULN2003, A4988), DC motors with L293D/L298N, relays, 74HC595, transistors and MOSFETs, diodes, batteries and logic gates. Real libraries (Servo, LiquidCrystal I2C, Adafruit SSD1306/NeoPixel, DallasTemperature, TM1637, Keypad, IRremote, AccelStepper…) work unchanged.
+  - **Part picker** with typo-tolerant search; when something isn't simulated (ESP32, Bluetooth, GPS, SD…) it says so and suggests what to use instead.
+  - **36 example projects** that open as a sketch plus a wired circuit, from Blink to a robot car, a thermometer and a logic-gate truth table.
+  - **Circuit check**: missing resistors, unpowered parts, floating logic inputs, I²C address clashes, batteries over 5 V on a pin, short circuits.
+  - Circuits save as `diagram.json` next to the sketch; Wokwi `diagram.json` files import and export.
+  - **AI circuit builder** wires the parts your sketch uses; the **AI agent** compiles, simulates, checks and fixes.
+- **Logic analyzer**: waveforms for every active pin during a simulation, with frequency and duty cycle.
+- **Hardware tests**: describe expected behaviour as comments in the sketch and check it in the simulator (Sketch › Run Hardware Tests, ⌘/Ctrl+Shift+T):
 
-## Prerequisites
+  ```cpp
+  // @run 3s
+  // @expect serial contains "ready"
+  // @expect serial matches /temp=\d+/
+  // @expect pin 13 toggles
+  // @expect pin LED_BUILTIN frequency 1Hz ±10%
+  // @expect pin 9 high
+  // @expect no serial
+  ```
 
-1. **Arduino CLI** - Must be installed and available in your PATH
-   - Download from: https://arduino.github.io/arduino-cli/
-   - Or install via: `winget install Arduino.ArduinoCLI` (Windows)
+- **Pin-aware editor**: hover a pin to see what it's wired to. The gutter flags `digitalWrite` without `pinMode(OUTPUT)`, `analogWrite` on pins without PWM, pins 0/1 used alongside `Serial`, and (when a circuit exists) unwired pins or code that drives an input part.
+- **AI agent**: Claude, OpenAI or Gemini can read and edit the sketch, compile, and use the serial monitor. Every AI code change is run in the simulator automatically and gets a pass/fail card with a "Fix with AI" button. Uploading to a real board always asks for your approval.
+- **Simulator vs board**: runs the sketch in the simulator and on a connected Uno, Nano or Mega for the same time, then diffs the serial output line by line (Sketch › Compare Simulator with Board).
 
-2. **Node.js** - Version 16 or higher
-   - Download from: https://nodejs.org/
+## Requirements
 
-## Installation
+- Node.js 22+
+- [`arduino-cli`](https://arduino.github.io/arduino-cli/) with the AVR core: `arduino-cli core install arduino:avr`
+- Apple silicon Macs: the AVR toolchain is an Intel binary, so install Rosetta once:
 
-1. Clone or download this repository
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
+  ```bash
+  softwareupdate --install-rosetta --agree-to-license
+  ```
 
-## Development
+## Develop
 
-Run the application in development mode:
 ```bash
+npm install
 npm run dev
 ```
 
-Run the application normally:
-```bash
-npm start
-```
+`npm run dev` starts Vite and Electron with hot reload. `npm start` builds the renderer and runs Electron without the dev server.
 
-## Building
-
-Build a Windows executable:
-```bash
-npm run build:win
-```
-
-The executable will be created in the `dist` folder. The packaged app has **no CDN dependency**: CodeMirror and fonts are bundled; the app runs offline. For code signing (to avoid Windows SmartScreen warnings) and clean-machine testing, see [docs/BUILD_AND_SIGN.md](docs/BUILD_AND_SIGN.md). Release and changelog process: [docs/RELEASE.md](docs/RELEASE.md).
-
-## Usage
-
-### First Time Setup
-
-1. Launch the application
-2. Click "Check Arduino CLI" to verify Arduino CLI is installed
-3. If not installed, install Arduino CLI and ensure it's in your PATH
-
-### Compiling a Sketch
-
-1. Enter the full path to your `.ino` sketch file (or click Browse)
-2. Select your Arduino board from the dropdown
-3. Click "Compile" to compile your sketch
-4. View compilation output in the "Compilation Output" panel
-
-### Uploading to Board
-
-1. Ensure your sketch is compiled successfully
-2. Select the COM port where your Arduino is connected
-3. Click "Upload" to upload the compiled code to your board
-
-### Serial Monitor
-
-1. Select the serial port from the dropdown
-2. Choose the baud rate (default: 115200)
-3. Click "Connect" to start monitoring
-4. View incoming data in real-time
-5. Type messages in the input field and click "Send" to send data to the board
-
-### Error Analysis
-
-- When compilation or upload fails, the error is automatically analyzed
-- The system checks its memory for similar past errors
-- Suggested fixes are displayed with confidence scores
-- Error history is maintained and can be viewed in the "Error History" panel
-
-## Usage Examples
-
-### Opening a sketch from the renderer (preload API)
-The renderer uses `window.electronAPI` (exposed via preload). Example: open a file and read it.
-```javascript
-const result = await window.electronAPI.dialog.openFile();
-if (result.success && result.filePath) {
-  const fileResult = await window.electronAPI.file.read(result.filePath);
-  if (fileResult.success) console.log(fileResult.content);
-}
-```
-
-### Compiling and uploading
-```javascript
-const boardFQBN = 'arduino:avr:uno';
-const port = 'COM3';
-const compileResult = await window.electronAPI.arduino.compile(sketchPath, boardFQBN);
-if (compileResult.success) {
-  const uploadResult = await window.electronAPI.arduino.upload(sketchPath, boardFQBN, port);
-}
-```
-
-### AI assistant (after setting a model and API key)
-```javascript
-const result = await window.electronAPI.ai.processQuery('Why does my LED not blink?', { code: editorCode, hasFileOpen: true }, 'agent');
-if (result.success && result.data?.response) console.log(result.data.response);
-```
-
-## Debug logging
-
-To enable debug logs (function entry/exit and timing for IPC handlers), set the environment variable before starting the app:
-- **Windows (PowerShell):** `$env:IMPULSE_IDE_DEBUG="1"; npm run dev`
-- **Windows (CMD):** `set IMPULSE_IDE_DEBUG=1 && npm run dev`
-- **macOS/Linux:** `IMPULSE_IDE_DEBUG=1 npm run dev`
-
-Logs are written to the terminal where you started the app.
-
-## Testing and lint
+## Test
 
 ```bash
-npm run test   # Run Jest tests (IPC validation schemas)
-npm run lint   # Run ESLint on src/main
+npm test             # unit tests (includes a real compile → simulate test when arduino-cli is installed)
+npm run lint         # ESLint; CI runs it with --max-warnings=0
+npm run test:smoke   # launches the app with a throwaway profile, opens every panel and the simulator, fails on any runtime error
 ```
 
-## Architecture
+Example and part tests compile real sketches; tests whose libraries aren't installed are skipped. To run them without installing libraries globally, point `IMPULSE_TEST_LIBRARIES` at a folder of libraries (for example one filled with `ARDUINO_DIRECTORIES_USER=/tmp/libs arduino-cli lib install OneWire DallasTemperature TM1637`, then `IMPULSE_TEST_LIBRARIES=/tmp/libs/libraries npm test`).
 
-### Main Process (`src/main/`)
-- `main.js` - Electron main process; creates window and registers IPC
-- `preload.js` - Secure bridge between main and renderer (exposes `electronAPI`)
-- `ipc/` - IPC handlers by feature (shell, UI, arduino, serial, dialog, file, lib, errors, AI, API keys); input validated with Zod
-- `utils/logger.js` - Debug logging (behind `IMPULSE_IDE_DEBUG`)
-- `services/arduinoService.js` - Arduino CLI integration
-- `services/serialMonitor.js` - Serial port communication
-- `services/errorMemory.js` - Error detection and memory system
-- `services/ai/` - AI agent, providers (OpenAI, Gemini, Claude), tools, memory
+## Package
 
-### Renderer Process (`src/renderer/`)
-- `index.html` - Application UI structure
-- `styles.css` - Application styling
-- `renderer.js` - Frontend logic and UI interactions
+```bash
+npm run build:mac    # or build:win, build:linux
+```
 
-## How It Works
+Signing and release steps: [docs/BUILD_AND_SIGN.md](docs/BUILD_AND_SIGN.md), [docs/RELEASE.md](docs/RELEASE.md). Auto-update reads GitHub Releases from `nate1029/Impulse`.
 
-### Arduino CLI Integration
-The application uses Arduino CLI (not the Arduino IDE executable) to:
-- Compile sketches
-- Upload code to boards
-- List available boards and ports
-- Manage Arduino cores and libraries
+## Security model
 
-### Serial Monitor
-- Uses `serialport` library for cross-platform serial communication
-- Supports automatic baud rate detection
-- Real-time data streaming with timestamps
+- The renderer runs sandboxed with context isolation and no Node access, and its content security policy allows only bundled resources.
+- File access is limited to folders you opened through a system dialog. Library examples are read-only. Approvals are remembered by the main process, never by the renderer.
+- API keys are stored with the OS credential store (macOS Keychain, Windows DPAPI, libsecret) through Electron `safeStorage`; the UI only sees the last four characters.
+- The AI agent can't run shell commands, and every upload to hardware needs your confirmation.
+- Uncaught errors from both processes are written to `impulse.log` in the app's logs folder.
 
-### Error Memory System
-- Stores errors in JSON format in user's app data directory
-- Extracts error patterns (undefined references, compilation errors, etc.)
-- Matches new errors with past errors
-- Suggests fixes based on historical data
-- Learns from user-provided fixes
+## Layout
 
-## Dependencies (package.json)
-
-| Package | Purpose | Note |
-|--------|---------|------|
-| `zod` | Runtime input validation for IPC | Used in `src/main/ipc/schemas.js`; safe defaults on invalid input |
-| `electron`, `electron-builder` | App and build | Required |
-| `@anthropic-ai/sdk`, `@google/generative-ai`, `openai` | AI providers | Used by AI agent |
-| `serialport`, `@serialport/parser-readline` | Serial monitor | Required for serial I/O |
-| `electron-store` | Settings storage | Used for preferences |
-| `chokidar` | File watching | Used for project/file tree |
-| `sql.js` | SQLite in-memory | Used by `services/ai/memory/aiMemory.js` (optional AI memory backend) |
-| `node-pty` | Terminal emulation | Reserved for future features (e.g. integrated terminal); not used by current UI. Can be removed if you do not plan to add a terminal. |
-
-**Suggestions:**  
-- **node-pty**: Optional. Remove from `dependencies` if you do not need an integrated terminal to reduce install size and native rebuilds.  
-- Run `npm audit` and consider `npm audit fix` for reported vulnerabilities (avoid `--force` unless you accept breaking changes).
-
-## Configuration
-
-Error memory is stored in:
-- **Windows**: `%APPDATA%\arduino-ide-cursor\error-memory.json`
-- **macOS**: `~/Library/Preferences/arduino-ide-cursor/error-memory.json`
-- **Linux**: `~/.config/arduino-ide-cursor/error-memory.json`
-
-## Troubleshooting
-
-### Arduino CLI Not Found
-- Ensure Arduino CLI is installed
-- Verify it's in your system PATH
-- Try running `arduino-cli version` in a terminal to verify
-
-### Serial Port Issues
-- Ensure no other application is using the serial port
-- Check device manager (Windows) to verify the port exists
-- Try disconnecting and reconnecting the Arduino
-
-### Compilation Errors
-- Verify the sketch path is correct
-- Ensure the selected board matches your hardware
-- Check that required libraries are installed via Arduino CLI
-
-## License
-
-MIT
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit issues or pull requests.
-
+```
+src/main/        Electron main process: window, menu, IPC handlers, arduino-cli, serial, AI agent
+src/renderer/    UI: editor, panels, AI chat, hardware tests, pin insights, design system
+src/renderer/simulation/   AVR runner, boards, circuit engine, parts and devices, canvas, examples, headless runner (see ARCHITECTURE.md)
+scripts/smoke.mjs          end-to-end smoke test
+```

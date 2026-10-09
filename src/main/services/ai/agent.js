@@ -121,19 +121,10 @@ class AIAgent {
   getUnifiedModelList() {
     const list = [];
     const displayNames = {
-      // Claude 5
-      'claude-sonnet-5': 'Claude Sonnet 5',
-      'claude-fable-5': 'Claude Fable 5',
-      // Claude 4.x
-      'claude-opus-4-8': 'Claude Opus 4.8',
-      'claude-sonnet-4-6': 'Claude Sonnet 4.6',
-      'claude-haiku-4-5-20251001': 'Claude Haiku 4.5',
-      // Claude 3.x
-      'claude-3-7-sonnet-20250219': 'Claude 3.7 Sonnet',
-      'claude-3-5-sonnet-20241022': 'Claude 3.5 Sonnet',
-      'claude-3-5-haiku-20241022': 'Claude 3.5 Haiku',
-      'claude-3-opus-20240229': 'Claude 3 Opus',
-      'claude-3-haiku-20240307': 'Claude 3 Haiku',
+      'claude-opus-5-5': 'Claude Opus 5.5',
+      'claude-sonnet-5-5': 'Claude Sonnet 5.5',
+      'claude-fable-5-1': 'Claude Fable 5.1',
+      'claude-haiku-4-5': 'Claude Haiku 4.5',
       // OpenAI GPT-4.1
       'gpt-4.1': 'GPT-4.1',
       'gpt-4.1-mini': 'GPT-4.1 Mini',
@@ -351,7 +342,8 @@ class AIAgent {
 
     const chatOptions = {
       temperature: this.config.temperature,
-      max_tokens: this.config.max_tokens || 2000,
+      max_tokens: this.config.max_tokens,
+      effort: mode === 'ask' ? 'medium' : 'high',
       tools: toolsForMode
     };
 
@@ -397,6 +389,7 @@ class AIAgent {
       const assistantMsg = {
         role: 'assistant',
         content: response.content || null,
+        rawContent: response.rawContent,
         tool_calls: response.toolCalls.map(tc => ({
           id: tc.id,
           type: 'function',
@@ -423,6 +416,7 @@ class AIAgent {
           role: 'tool',
           tool_call_id: toolCall.id,
           name: toolCall.name,
+          is_error: !!(result && typeof result === 'object' && result.success === false),
           content: typeof result === 'string' ? result : JSON.stringify(result)
         });
       }
@@ -533,7 +527,8 @@ class AIAgent {
 
     const response = await this.currentProvider.chat(summarisePrompt, {
       temperature: 0.3,
-      max_tokens: 600,
+      max_tokens: 1500,
+      effort: 'low',
       tools: [] // no tools during summarisation
     });
 

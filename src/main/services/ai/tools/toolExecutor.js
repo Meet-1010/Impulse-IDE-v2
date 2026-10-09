@@ -153,17 +153,15 @@ class ToolExecutor {
         );
       }
 
-      return {
-        success: true,
-        tool: toolCall.name,
-        result: result
-      };
+      const ok = !(result && typeof result === 'object' && result.success === false);
+      return ok
+        ? { success: true, tool: toolCall.name, result }
+        : { success: false, tool: toolCall.name, error: result.error || 'Tool failed', result };
     } catch (error) {
       return {
         success: false,
         error: error.message,
-        tool: toolCall.name,
-        stack: error.stack
+        tool: toolCall.name
       };
     }
   }
@@ -193,6 +191,9 @@ class ToolExecutor {
     }
     try {
       const compileResult = await this.arduinoService.compile(sketchPath, boardFQBN);
+      if (compileResult && compileResult.success === false) {
+        return { success: false, error: compileResult.error?.message || compileResult.error || compileResult.message || 'Compilation failed' };
+      }
       return {
         output: compileResult.output,
         warnings: compileResult.warnings || [],
@@ -233,6 +234,14 @@ class ToolExecutor {
     if (!port) {
       return { success: false, error: 'No port selected. Please select a port from the Port dropdown (and connect your board via USB).' };
     }
+    // Uploading drives real hardware: the user approves every agent upload.
+    if (!this.uiCallbacks || !this.uiCallbacks.confirmUpload) {
+      return { success: false, error: 'Upload needs user confirmation, which is unavailable right now.' };
+    }
+    const approved = await this.uiCallbacks.confirmUpload({ sketchPath, boardFQBN, port });
+    if (!approved) {
+      return { success: false, error: 'The user declined the upload. Do not retry unless they ask.' };
+    }
     // Disconnect serial monitor to free the port (upload uses the same port)
     if (this.serialMonitor && this.serialMonitor.isConnected) {
       await this.serialMonitor.disconnect();
@@ -243,6 +252,9 @@ class ToolExecutor {
     }
     try {
       const uploadResult = await this.arduinoService.upload(sketchPath, boardFQBN, port);
+      if (uploadResult && uploadResult.success === false) {
+        return { success: false, error: uploadResult.error?.message || uploadResult.error || uploadResult.message || 'Upload failed' };
+      }
       return {
         output: uploadResult.output,
         port: uploadResult.port ?? port,
@@ -409,15 +421,17 @@ class ToolExecutor {
     let newLines;
 
     switch (operation) {
-      case 'replace':
+      case 'replace': {
         const codeLines = newCode ? newCode.split('\n') : [];
         newLines = [...lines.slice(0, start), ...codeLines, ...lines.slice(end + 1)];
         break;
+      }
 
-      case 'insert':
+      case 'insert': {
         const insertLines = newCode ? newCode.split('\n') : [];
         newLines = [...lines.slice(0, start), ...insertLines, ...lines.slice(start)];
         break;
+      }
 
       case 'delete':
         newLines = [...lines.slice(0, start), ...lines.slice(end + 1)];

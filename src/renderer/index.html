@@ -5,15 +5,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Impulse IDE</title>
-    <!-- Google Fonts: Inter (UI) + JetBrains Mono (code editor) -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <!-- CSS is imported via main.js (Vite bundles CodeMirror + app styles locally) -->
     <!-- Critical CSS: applied before the JS-imported bundle to prevent a flash of
          unstyled elements (skip-link, resize handles) on every boot. -->
     <style>
-        html, body { margin: 0; background: #0a0a0a; }
+        html, body { margin: 0; background: #08090a; }
         .skip-link { position: absolute; left: -9999px; top: auto; z-index: 10000; }
         .skip-link:focus { left: 0; top: 0; }
         .ai-panel-overlay:not(.open) { width: 0 !important; overflow: hidden; }
@@ -42,11 +38,10 @@
                 </button>
                 <div class="board-port-selector">
                     <button id="boardPortDropdown" class="board-port-btn" title="Select Board and Port">
-                        <svg class="board-port-btn-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M8 8V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v4" />
-                            <rect x="6" y="8" width="12" height="14" rx="2" ry="2" />
-                            <line x1="10" y1="14" x2="10" y2="18" />
-                            <line x1="14" y1="14" x2="14" y2="18" />
+                        <svg class="board-port-btn-icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <rect x="5" y="5" width="14" height="14" rx="2" />
+                            <rect x="9" y="9" width="6" height="6" rx="1" />
+                            <path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3" />
                         </svg>
                         <span id="boardPortDisplay" class="board-port-display">Select Board and Port</span>
                         <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor"
@@ -104,7 +99,7 @@
                             <path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
                         </svg>
                     </button>
-                    <button class="activity-icon" data-panel="boards" title="Board Manager">
+                    <button class="activity-icon" data-panel="boards" title="Board Manager (Ctrl+Shift+B)">
                         <svg viewBox="0 0 24 24" class="activity-icon-img" width="24" height="24" fill="none"
                             stroke="currentColor" stroke-width="2">
                             <rect x="4" y="4" width="16" height="16" rx="2" ry="2" />
@@ -119,7 +114,7 @@
                             <line x1="1" y1="14" x2="4" y2="14" />
                         </svg>
                     </button>
-                    <button class="activity-icon" data-panel="libraries" title="Library Manager">
+                    <button class="activity-icon" data-panel="libraries" title="Library Manager (Ctrl+Shift+I)">
                         <svg viewBox="0 0 24 24" class="activity-icon-img" width="24" height="24" fill="none"
                             stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <rect x="5" y="3" width="14" height="18" rx="2" />
@@ -146,7 +141,7 @@
                             <path d="M7 9l3 3-3 3M13 15h4" />
                         </svg>
                     </button>
-                    <button class="activity-icon" data-panel="simulate" title="2D Simulator (Ctrl+Shift+S)">
+                    <button class="activity-icon" data-panel="simulate" title="2D Simulator (Ctrl+Shift+D)">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <rect x="2" y="3" width="20" height="14" rx="2"/>
                             <path d="M8 21h8M12 17v4"/>
@@ -184,7 +179,7 @@
                 <!-- Explorer Panel -->
                 <div class="sidebar-panel active" id="explorerPanel">
                     <div class="sidebar-header">
-                        <span class="sidebar-title">SKETCHBOOK</span>
+                        <span class="sidebar-title">Sketchbook</span>
                         <button class="sidebar-collapse-btn" id="collapseSidebar" title="Collapse">
                             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
                                 stroke-width="2">
@@ -201,12 +196,12 @@
                                         d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
                                     <path d="M12 11v6M9 14h6" />
                                 </svg>
-                                Open Folder
+                                Open folder
                             </button>
                         </div>
                         <div class="sidebar-section">
                             <div class="folder-label" id="folderLabel">
-                                <span class="folder-icon">📁</span>
+                                <span class="folder-icon"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg></span>
                                 <span>No folder open</span>
                             </div>
                             <div id="fileTree" class="file-tree"></div>
@@ -266,7 +261,7 @@
                 <!-- Debug Panel -->
                 <div class="sidebar-panel" id="debugPanel">
                     <div class="sidebar-header">
-                        <span class="sidebar-title">DEBUG</span>
+                        <span class="sidebar-title">Debug</span>
                         <button class="sidebar-collapse-btn" title="Collapse">
                             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
                                 stroke-width="2">
@@ -285,23 +280,23 @@
                             <button id="debugConfigBtn" class="debug-gear-btn" title="Debug configuration">⚙</button>
                         </div>
                         <div class="sidebar-section">
-                            <div class="debug-section-header" data-debug-section="threads">THREADS</div>
+                            <div class="debug-section-header" data-debug-section="threads">Threads</div>
                             <div id="debugThreads" class="debug-section-content"></div>
                         </div>
                         <div class="sidebar-section">
-                            <div class="debug-section-header" data-debug-section="callstack">CALL STACK</div>
+                            <div class="debug-section-header" data-debug-section="callstack">Call stack</div>
                             <div id="debugCallStack" class="debug-section-content"></div>
                         </div>
                         <div class="sidebar-section">
-                            <div class="debug-section-header" data-debug-section="variables">VARIABLES</div>
+                            <div class="debug-section-header" data-debug-section="variables">Variables</div>
                             <div id="debugVariables" class="debug-section-content"></div>
                         </div>
                         <div class="sidebar-section">
-                            <div class="debug-section-header" data-debug-section="watch">WATCH</div>
+                            <div class="debug-section-header" data-debug-section="watch">Watch</div>
                             <div id="debugWatch" class="debug-section-content"></div>
                         </div>
                         <div class="sidebar-section">
-                            <div class="debug-section-header" data-debug-section="breakpoints">BREAKPOINTS</div>
+                            <div class="debug-section-header" data-debug-section="breakpoints">Breakpoints</div>
                             <div id="debugBreakpoints" class="debug-section-content"></div>
                         </div>
                     </div>
@@ -365,7 +360,7 @@
                 <!-- Simulate Panel -->
                 <div class="sidebar-panel" id="simulatePanel">
                     <div class="sidebar-header">
-                        <span class="sidebar-title">SIMULATOR</span>
+                        <span class="sidebar-title">Simulator</span>
                         <button class="sidebar-collapse-btn" title="Collapse">
                             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M15 18l-6-6 6-6" />
@@ -438,7 +433,7 @@
                         </div>
                         <div class="board-port-modal-body">
                             <div class="board-port-modal-section">
-                                <div class="board-port-modal-section-header">BOARDS</div>
+                                <div class="board-port-modal-section-header">Boards</div>
                                 <div class="board-port-search">
                                     <input type="text" id="boardSearchInput" placeholder="Search board"
                                         class="board-port-search-input">
@@ -453,7 +448,7 @@
                                 </div>
                             </div>
                             <div class="board-port-modal-section">
-                                <div class="board-port-modal-section-header">PORTS</div>
+                                <div class="board-port-modal-section-header">Ports</div>
                                 <div id="portList" class="board-port-list">
                                     <!-- Port list will be populated here -->
                                 </div>
@@ -464,7 +459,7 @@
                             </div>
                         </div>
                         <div class="board-port-modal-footer">
-                            <button id="boardPortModalCancel" class="board-port-modal-btn cancel">CANCEL</button>
+                            <button id="boardPortModalCancel" class="board-port-modal-btn cancel">Cancel</button>
                             <button id="boardPortModalOk" class="board-port-modal-btn ok">OK</button>
                         </div>
                     </div>
@@ -484,20 +479,21 @@
                         <!-- Empty state shown when no file is open -->
                         <div id="welcomeState" class="welcome-state">
                             <div class="welcome-content">
-                                <svg viewBox="0 0 24 24" width="56" height="56" fill="none" stroke="currentColor" stroke-width="1.5">
-                                    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
-                                </svg>
-                                <h2>Impulse IDE</h2>
-                                <p>AI-powered Arduino &amp; IoT development</p>
-                                <button class="welcome-btn" id="welcomeOpenFolder">Open Folder</button>
+                                <div class="welcome-mark" aria-hidden="true">
+                                    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                                        <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+                                    </svg>
+                                </div>
+                                <h2>Impulse</h2>
+                                <p>Write it, wire it, simulate it, ship it to the board.</p>
+                                <button class="welcome-btn" id="welcomeOpenFolder">Open folder</button>
                                 <div class="welcome-shortcuts">
-                                    <p>Quick shortcuts</p>
                                     <ul>
-                                        <li><kbd>Ctrl</kbd>+<kbd>O</kbd> Open file</li>
-                                        <li><kbd>Ctrl</kbd>+<kbd>N</kbd> New sketch</li>
-                                        <li><kbd>Ctrl</kbd>+<kbd>R</kbd> Verify / Compile</li>
-                                        <li><kbd>Ctrl</kbd>+<kbd>U</kbd> Upload</li>
-                                        <li><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>A</kbd> AI Assistant</li>
+                                        <li><span>Open file</span><span class="keys"><kbd>Ctrl</kbd><kbd>O</kbd></span></li>
+                                        <li><span>New sketch</span><span class="keys"><kbd>Ctrl</kbd><kbd>N</kbd></span></li>
+                                        <li><span>Verify</span><span class="keys"><kbd>Ctrl</kbd><kbd>R</kbd></span></li>
+                                        <li><span>Upload</span><span class="keys"><kbd>Ctrl</kbd><kbd>U</kbd></span></li>
+                                        <li><span>AI assistant</span><span class="keys"><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>A</kbd></span></li>
                                     </ul>
                                 </div>
                             </div>
@@ -516,6 +512,7 @@
                             <button class="output-tab" data-tab="serial">Serial Monitor</button>
                             <button class="output-tab" data-tab="plotter">Serial Plotter</button>
                             <button class="output-tab" data-tab="problems">Problems</button>
+                            <button class="output-tab" data-tab="tests">Tests</button>
                             <button class="output-tab" data-tab="playground">Playground</button>
                         </div>
                         <div id="consoleOutput" class="output-content active"></div>
@@ -543,6 +540,9 @@
                             <canvas id="plotterCanvas" class="plotter-canvas"></canvas>
                         </div>
                         <div id="problemsOutput" class="output-content"></div>
+                        <div id="testsOutput" class="output-content tests-content">
+                            <p class="tests-hint">Run Sketch › Run Hardware Tests to compile this sketch, run it in the simulator and check its // @expect lines.</p>
+                        </div>
                         <div id="playgroundOutput" class="output-content playground-content">
                             <div class="playground-toolbar">
                                 <span class="playground-label">
@@ -598,7 +598,26 @@
                         </button>
                     </div>
                 </div>
-                <div id="aiMessages" class="ai-msg-area"></div>
+                <div id="aiMessages" class="ai-msg-area">
+                    <div class="ai-welcome ai-empty">
+                        <div class="ai-empty-mark" aria-hidden="true">
+                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                                <rect x="4" y="8" width="16" height="12" rx="2"/>
+                                <path d="M12 8V4M9 4h6"/>
+                                <circle cx="9" cy="14" r="1" fill="currentColor"/>
+                                <circle cx="15" cy="14" r="1" fill="currentColor"/>
+                            </svg>
+                        </div>
+                        <h3 class="ai-empty-title">What are we building?</h3>
+                        <p class="ai-empty-copy">The agent writes the sketch, wires the circuit, runs it in the simulator and fixes what breaks.</p>
+                        <div class="ai-starters">
+                            <button type="button" class="ai-starter" data-prompt="Blink the onboard LED every 500 ms and print each toggle to Serial.">Blink an LED and log to Serial</button>
+                            <button type="button" class="ai-starter" data-prompt="Read a potentiometer on A0 and fade an LED on pin 9 with PWM.">Fade an LED with a potentiometer</button>
+                            <button type="button" class="ai-starter" data-prompt="Show the temperature from a DHT22 sensor on a 16x2 I2C LCD.">DHT22 temperature on a 16x2 LCD</button>
+                            <button type="button" class="ai-starter" data-prompt="Explain my last compile error and fix it.">Explain and fix my last error</button>
+                        </div>
+                    </div>
+                </div>
                 <div class="ai-composer">
                     <textarea id="aiInput" placeholder="Plan, @ for context, / for commands" rows="2"></textarea>
                     <div class="ai-composer-row">

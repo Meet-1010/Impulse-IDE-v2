@@ -1,7 +1,7 @@
 {
   "name": "arduino-ide-cursor",
   "version": "1.0.0",
-  "description": "AI-powered Arduino IDE alternative with intelligent error detection",
+  "description": "AI-assisted Arduino IDE with a built-in AVR simulator, hardware tests and a pin-aware editor",
   "main": "src/main/main.js",
   "scripts": {
     "prestart": "vite build",
@@ -14,11 +14,11 @@
     "build:mac": "npm run build:renderer && electron-builder --mac",
     "build:linux": "npm run build:renderer && electron-builder --linux",
     "build:all": "npm run build:renderer && electron-builder --win --mac --linux",
-    "postinstall": "electron-builder install-app-deps",
     "test": "jest",
-    "lint": "eslint src/ --ext .js",
-    "lint:fix": "eslint src/ --ext .js --fix",
-    "audit": "npm audit --production"
+    "lint": "eslint src/ scripts/ test/ --ext .js,.mjs",
+    "lint:fix": "eslint src/ scripts/ test/ --ext .js,.mjs --fix",
+    "audit": "npm audit --omit=dev",
+    "test:smoke": "node scripts/smoke.mjs"
   },
   "keywords": [
     "arduino",
@@ -29,31 +29,30 @@
   "author": "",
   "license": "MIT",
   "devDependencies": {
+    "@babel/core": "^8.0.6",
+    "@babel/preset-env": "^8.0.6",
     "concurrently": "^9.2.1",
-    "electron": "^40.4.1",
-    "electron-builder": "^24.13.3",
+    "electron": "^44.5.1",
+    "electron-builder": "^26.15.3",
     "eslint": "^8.57.0",
     "eslint-plugin-security": "^3.0.1",
-    "jest": "^29.7.0",
+    "jest": "^30.5.2",
     "vite": "^6.4.1",
     "wait-on": "^9.0.4"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.20.0",
+    "@anthropic-ai/sdk": "^0.131.0",
+    "@fontsource-variable/inter": "^5.3.0",
+    "@fontsource-variable/jetbrains-mono": "^5.3.0",
     "@google/generative-ai": "^0.24.1",
     "@serialport/parser-readline": "^12.0.0",
     "@wokwi/elements": "^1.9.2",
     "avr8js": "^0.21.0",
-    "chokidar": "^3.5.3",
     "codemirror": "^5.65.18",
     "electron-store": "^8.1.0",
     "electron-updater": "^6.7.3",
-    "node-pty": "^1.1.0",
     "openai": "^4.20.0",
     "serialport": "^12.0.0",
-    "sql.js": "^1.10.3",
-    "y-webrtc": "^10.3.0",
-    "yjs": "^13.6.29",
     "zod": "^3.23.8"
   },
   "build": {
@@ -70,8 +69,8 @@
     ],
     "publish": {
       "provider": "github",
-      "owner": "your-github-org",
-      "repo": "arduino-ide-cursor"
+      "owner": "nate1029",
+      "repo": "Impulse"
     },
     "win": {
       "target": [
@@ -82,12 +81,14 @@
           ]
         }
       ],
-      "icon": "assets/icon.ico",
-      "signingHashAlgorithms": [
-        "sha256"
-      ],
-      "certificateSubjectName": "${env.WIN_CSC_SUBJECT_NAME}",
-      "signAndEditExecutable": true
+      "icon": "assets/icon.png",
+      "signAndEditExecutable": true,
+      "signtoolOptions": {
+        "signingHashAlgorithms": [
+          "sha256"
+        ],
+        "certificateSubjectName": "${env.WIN_CSC_SUBJECT_NAME}"
+      }
     },
     "nsis": {
       "oneClick": false,
@@ -134,11 +135,23 @@
       "category": "Development",
       "maintainer": "Impulse IDE <hello@impulseide.dev>",
       "desktop": {
-        "StartupWMClass": "impulse-ide"
+        "entry": {
+          "StartupWMClass": "impulse-ide"
+        }
       }
     },
     "appImage": {
       "artifactName": "${productName}-${version}-${arch}.${ext}"
-    }
+    },
+    "npmRebuild": false
+  },
+  "allowScripts": {
+    "@serialport/bindings-cpp@12.0.1": true,
+    "esbuild@0.25.12": true,
+    "fsevents@2.3.3": true,
+    "electron@44.5.1": true,
+    "electron-winstaller@5.4.0": true,
+    "@parcel/watcher@2.6.0": true,
+    "unrs-resolver@1.12.2": true
   }
 }
