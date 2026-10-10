@@ -42,6 +42,8 @@ const state = window.state = {
     aiCompacting: false,   // guard against concurrent compaction
     apiKeyModalProvider: null,
     folderRoot: null,
+    // PlatformIO project the open file belongs to: { root, envs, env, cli, error } (see main/services/platformio.js)
+    pio: null,
     expandedDirs: new Set(),
     installedLibs: new Map(),
     libSearchResults: [],
@@ -131,6 +133,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         setupRevertButtonHandler();
         setupUpdater();
         startPortAutoRefresh();
+        document.getElementById('statusPio')?.addEventListener('click', choosePioEnv);
+        if (state.currentFile) syncPlatformio(state.currentFile);
 
         logToConsole('Impulse IDE initialized', 'info');
     } catch (err) {
@@ -460,6 +464,9 @@ async function handleMenuAction(action, payload) {
             break;
         case 'sketch-run-tests':
             runHardwareTests();
+            break;
+        case 'tools-pio-env':
+            choosePioEnv();
             break;
         case 'debug-start':
             window.impulse.showSimulator();
@@ -2595,9 +2602,10 @@ function switchToTab(index) {
 
     state.currentFile = file.path;
     const ext = (file.path.split('.').pop() || '').toLowerCase();
-    state.currentSketch = ext === 'ino' ? file.path : (state.currentSketch && state.openFiles.some(f => f.path === state.currentSketch) ? state.currentSketch : null);
+    state.currentSketch = isSketchSource(file.path) ? file.path : (state.currentSketch && state.openFiles.some(f => f.path === state.currentSketch) ? state.currentSketch : null);
     if (ext === 'ino') window.electronAPI.ui.updateSketchPath(file.path);
     announceSketch();
+    syncPlatformio(file.path);
 
     if (state.editor) {
         state.editor.setValue(file.content);
@@ -2638,7 +2646,7 @@ function closeTab(index) {
     const file = state.openFiles[state.activeTabIndex];
     state.currentFile = file.path;
     const ext = (file.path.split('.').pop() || '').toLowerCase();
-    state.currentSketch = ext === 'ino' ? file.path : (state.openFiles.find(f => (f.path.split('.').pop() || '').toLowerCase() === 'ino')?.path || null);
+    state.currentSketch = isSketchSource(file.path) ? file.path : (state.openFiles.find(f => isSketchSource(f.path))?.path || null);
     announceSketch();
     if (ext === 'ino') window.electronAPI.ui.updateSketchPath(file.path);
 
@@ -2818,7 +2826,8 @@ async function compileSketch() {
         return;
     }
 
-    if (!boardFQBN) {
+    const pio = inPioProject(state.currentSketch);
+    if (!boardFQBN && !pio) {
         logToConsole('Please select a board', 'warning');
         showProblem('No board selected. Please select a board from the dropdown.');
         return;
@@ -2829,12 +2838,12 @@ async function compileSketch() {
         return;
     }
 
-    logToConsole('Compiling...', 'info');
+    logToConsole(pio ? `Building PlatformIO environment ${state.pio.env}…` : 'Compiling...', 'info');
     setButtonState('compileBtn', true, 'Compiling...');
     clearProblems();
 
     try {
-        const result = await window.electronAPI.arduino.compile(state.currentSketch, await fqbnFor(boardFQBN));
+        const result = await window.electronAPI.arduino.compile(state.currentSketch, pio ? PIO_FQBN : await fqbnFor(boardFQBN));
 
         if (result.success) {
             logToConsole('Compilation successful!', 'success');
@@ -2902,7 +2911,8 @@ async function uploadSketch() {
         return;
     }
 
-    if (!boardFQBN) {
+    const pio = inPioProject(state.currentSketch);
+    if (!boardFQBN && !pio) {
         logToConsole('Please select a board', 'warning');
         showProblem('No board selected. Please select a board from the dropdown.');
         return;
@@ -2930,7 +2940,7 @@ async function uploadSketch() {
     clearProblems();
 
     try {
-        const result = await window.electronAPI.arduino.upload(state.currentSketch, await fqbnFor(boardFQBN), port);
+        const result = await window.electronAPI.arduino.upload(state.currentSketch, pio ? PIO_FQBN : await fqbnFor(boardFQBN), port);
 
         if (result.success) {
             logToConsole('Upload successful!', 'success');
@@ -4856,6 +4866,76 @@ function updateBoardPortDisplay(boardName, port) {
 // The simulator keeps each sketch's circuit in diagram.json next to it, so it
 // needs to know when the open sketch or the upload board changes.
 let announcedSketch;
+// ============================================
+// PlatformIO projects
+// ============================================
+/** Stands in for a board FQBN in a PlatformIO project: platformio.ini names the board. */
+const PIO_FQBN = 'platformio:project';
+const normPath = (p) => String(p || '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+
+/** Whether a file is inside the open PlatformIO project. */
+function inPioProject(filePath) {
+    if (!state.pio || !filePath) return false;
+    const root = normPath(state.pio.root);
+    const p = normPath(filePath);
+    return p === root || p.startsWith(`${root}/`);
+}
+
+/** A file that is "the sketch": an .ino, or a C/C++ source of a PlatformIO project. */
+function isSketchSource(filePath) {
+    const ext = (String(filePath).split('.').pop() || '').toLowerCase();
+    return ext === 'ino' || (inPioProject(filePath) && ['c', 'cc', 'cpp', 'cxx'].includes(ext));
+}
+
+/** Look up the PlatformIO project of a file (when it changes) and refresh what depends on it. */
+async function syncPlatformio(filePath) {
+    if (!filePath || !window.electronAPI?.platformio || inPioProject(filePath)) return;
+    const info = await window.electronAPI.platformio.project(filePath).catch(() => null);
+    const changed = (info?.root || null) !== (state.pio?.root || null);
+    state.pio = info;
+    if (changed) {
+        if (info) logToConsole(info.error ? `PlatformIO project: ${info.error}` : `PlatformIO project · environment ${info.env}`, info.error ? 'warning' : 'info');
+        const active = state.openFiles[state.activeTabIndex];
+        if (active && isSketchSource(active.path)) state.currentSketch = active.path;
+        else if (state.currentSketch && !isSketchSource(state.currentSketch)) state.currentSketch = null;
+        announceSketch();
+    }
+    renderPioStatus();
+}
+
+function renderPioStatus() {
+    const el = document.getElementById('statusPio');
+    if (!el) return;
+    el.hidden = !state.pio;
+    if (!state.pio) return;
+    el.dataset.state = state.pio.error ? 'error' : 'ok';
+    el.textContent = state.pio.error ? 'PlatformIO: not available' : `PlatformIO · ${state.pio.env}`;
+    el.title = state.pio.error || `PlatformIO environment for Verify and Upload (click to change). ${state.pio.envs.length} in platformio.ini.`;
+}
+
+/** Tools › PlatformIO Environment (or the status bar): choose the environment to build. */
+async function choosePioEnv() {
+    if (!state.pio) {
+        logToConsole('Open a file of a PlatformIO project (a folder with platformio.ini) first.', 'warning');
+        return;
+    }
+    if (state.pio.error) {
+        await askDialog({ title: 'PlatformIO', message: state.pio.error, confirmLabel: 'OK', cancelLabel: 'Close' });
+        return;
+    }
+    const choice = await askDialog({
+        title: 'PlatformIO environment',
+        message: 'Verify and Upload build this environment. The simulator picks the environment for its board (Uno, Nano or Mega 2560).',
+        options: state.pio.envs.map(e => ({ value: e.name, label: e.name, hint: `${e.board}${e.simBoard ? ' · can be simulated' : ''}` })),
+        confirmLabel: 'Use'
+    });
+    if (!choice || choice === state.pio.env) return;
+    const info = await window.electronAPI.platformio.selectEnv(state.pio.root, choice);
+    if (info) state.pio = info;
+    renderPioStatus();
+    logToConsole(`PlatformIO environment: ${state.pio.env}`, 'info');
+}
+
 /** Read a short message to screen readers. */
 function announceStatus(text) {
     let el = document.getElementById('srStatus');

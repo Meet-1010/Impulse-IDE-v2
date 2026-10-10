@@ -1927,22 +1927,30 @@ li.CodeMirror-hint-active {
     color: var(--ds-text-3);
 }
 
-.status-pins {
+.status-pins,
+.status-pio {
     border: none;
     background: transparent;
+    color: inherit;
     font: inherit;
     cursor: pointer;
+}
+
+.status-pio[data-state="error"] {
+    color: var(--ds-warn);
 }
 
 .status-pins[data-state="warning"] {
     color: var(--ds-warn);
 }
 
-.status-pins:hover {
+.status-pins:hover,
+.status-pio:hover {
     background: var(--ds-hover);
 }
 
-.status-pins[hidden] {
+.status-pins[hidden],
+.status-pio[hidden] {
     display: none;
 }
 

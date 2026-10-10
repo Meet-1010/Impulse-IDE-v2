@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs').promises;
 const ErrorHandler = require('../utils/errorHandler');
 const notifications = require('../utils/notifications');
+const { PlatformIO, projectRoot } = require('./platformio');
 
 /**
  * Arduino CLI Service
@@ -17,12 +18,21 @@ const notifications = require('../utils/notifications');
  * Never use shell string interpolation with user-controlled input.
  */
 class ArduinoService {
-  /** @param {{ cliPath?: string|null }} [opts] the arduino-cli to run (see services/toolchain.js) */
-  constructor({ cliPath = null } = {}) {
+  /**
+   * @param {{ cliPath?: string|null, platformio?: PlatformIO }} [opts] the arduino-cli to run (see
+   *   services/toolchain.js); sketches inside a PlatformIO project are built with `pio` instead
+   */
+  constructor({ cliPath = null, platformio = new PlatformIO() } = {}) {
     // GUI-launched apps on macOS don't inherit the shell PATH, so the
     // toolchain service resolves an absolute path; PATH lookup is the fallback.
     this.cliPath = cliPath || 'arduino-cli';
     this.coreIndexed = false;
+    this.platformio = platformio;
+  }
+
+  /** The PlatformIO project a sketch path belongs to, or null for an Arduino sketch. */
+  platformioRoot(sketchPath) {
+    return this.platformio ? projectRoot(sketchPath) : null;
   }
 
   // ==================== 2️⃣ Process Runner ====================
@@ -452,6 +462,17 @@ class ArduinoService {
    * Compile an Arduino sketch
    */
   async compile(sketchPath, boardFQBN) {
+    const pioRoot = this.platformioRoot(sketchPath);
+    if (pioRoot) {
+      const res = await this.platformio.build(pioRoot);
+      if (!res.success) {
+        const err = new Error(res.error);
+        err.errors = res.errors || [];
+        err.output = res.output;
+        throw err;
+      }
+      return { success: true, output: res.output, warnings: [], programSize: res.programSize, usagePercent: res.usagePercent, message: `Built PlatformIO environment ${res.env}` };
+    }
     try {
       // Input validation with user-friendly messages
       const validation = ErrorHandler.validateInput(
@@ -582,6 +603,12 @@ class ArduinoService {
    * Compile sketch and return the generated .hex file content for simulation.
    */
   async compileHex(sketchPath, boardFQBN) {
+    const pioRoot = this.platformioRoot(sketchPath);
+    if (pioRoot) {
+      const res = await this.platformio.build(pioRoot, { fqbn: boardFQBN });
+      if (!res.success) return { success: false, error: res.error };
+      return res.hex ? { success: true, hex: res.hex } : { success: false, error: 'PlatformIO produced no firmware.hex' };
+    }
     const os = require('os');
     const fs = require('fs');
     if (!this.validateFQBN(boardFQBN)) {
@@ -640,6 +667,15 @@ class ArduinoService {
     const os = require('os');
     const fsSync = require('fs');
     const crypto = require('crypto');
+    // Both spellings of each folder: the compiler records real paths (/private/var/… for /var/… on macOS).
+    const both = (p) => { try { return [...new Set([p, fsSync.realpathSync.native(p)])]; } catch { return [p]; } };
+    const pioRoot = this.platformioRoot(sketchPath);
+    if (pioRoot) {
+      const res = await this.platformio.build(pioRoot, { fqbn: boardFQBN, debug: true });
+      if (!res.success) return { success: false, error: res.error };
+      if (!res.hex || !res.elf) return { success: false, error: 'PlatformIO produced no firmware' };
+      return { success: true, hex: res.hex, elf: res.elf, sketchDirs: both(pioRoot), buildSketchDirs: [] };
+    }
     if (!this.validateFQBN(boardFQBN)) return { success: false, error: `Invalid board: "${boardFQBN}"` };
     if (!/^arduino:avr:/.test(boardFQBN)) return { success: false, error: 'The debugger runs the simulated AVR boards (Uno, Nano, Mega).' };
     const dir = this.sketchDir(sketchPath);
@@ -665,8 +701,6 @@ class ArduinoService {
       const hexFile = files.find(f => f.endsWith('.hex') && !f.endsWith('.with_bootloader.hex'));
       const elfFile = files.find(f => f.endsWith('.elf'));
       if (!hexFile || !elfFile) return { success: false, error: 'The compiler produced no program' };
-      // Both spellings of each folder: the compiler records real paths (/private/var/… for /var/… on macOS).
-      const both = (p) => { try { return [...new Set([p, fsSync.realpathSync.native(p)])]; } catch { return [p]; } };
       return {
         success: true,
         hex: fsSync.readFileSync(path.join(outputDir, hexFile), 'utf8'),
@@ -705,6 +739,14 @@ class ArduinoService {
    * Compile and export the .hex/.bin/.elf next to the sketch (sketch/build/<fqbn>/).
    */
   async exportBinaries(sketchPath, boardFQBN) {
+    const pioRoot = this.platformioRoot(sketchPath);
+    if (pioRoot) {
+      const res = await this.platformio.build(pioRoot);
+      if (!res.success) return { success: false, error: res.error };
+      const outputDir = await this.platformio.buildOutputDir(pioRoot, res.env);
+      const files = require('fs').readdirSync(outputDir).filter(f => /^firmware\./.test(f));
+      return { success: true, outputDir, files };
+    }
     if (!this.validateFQBN(boardFQBN)) return { success: false, error: 'Select a board first.' };
     const dir = this.sketchDir(sketchPath);
     const result = await this.runCommand(['compile', '--fqbn', boardFQBN, '--export-binaries', dir], { cwd: dir, timeout: 180000 });
@@ -818,6 +860,12 @@ class ArduinoService {
    * Upload to Arduino board
    */
   async upload(sketchPath, boardFQBN, port) {
+    const pioRoot = this.platformioRoot(sketchPath);
+    if (pioRoot) {
+      const res = await this.platformio.upload(pioRoot, port);
+      if (!res.success) throw new Error(`${res.error}${res.output ? `\n\n${res.output.trim().split('\n').slice(-20).join('\n')}` : ''}`);
+      return { success: true, output: res.output, port, message: `Uploaded PlatformIO environment ${res.env}`, warnings: [] };
+    }
     try {
       // Input validation
       const validation = ErrorHandler.validateInput(

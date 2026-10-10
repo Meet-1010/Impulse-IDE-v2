@@ -20,6 +20,7 @@ npm run build:renderer && npm run test:smoke && npm run test:e2e
 ```
 
 - Tests that compile sketches need arduino-cli and the AVR core, and skip otherwise. Point `IMPULSE_TEST_LIBRARIES` at a folder of extra libraries to run the ones that need libraries you haven't installed globally (see README).
+- PlatformIO: `IMPULSE_PIO_TESTS=1 npx jest src/main/services/__tests__/platformio.test.js` builds, simulates and debugs a real PlatformIO project (needs `pio`; the first run downloads the AVR toolchain).
 - UI changes: check them in the running app, in both the dark and light themes.
 - Keep to the existing style: match the surrounding code, its naming and its comment density.
 

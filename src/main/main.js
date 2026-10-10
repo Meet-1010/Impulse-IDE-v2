@@ -342,6 +342,7 @@ function buildMenu() {
         { label: 'Board…', click: () => sendMenuAction('tools-board') },
         { label: 'Port…', click: () => sendMenuAction('tools-port') },
         { label: 'Board Options…', click: () => sendMenuAction('tools-board-options') },
+        { label: 'PlatformIO Environment…', click: () => sendMenuAction('tools-pio-env') },
         { label: 'Reload Board Data', click: () => sendMenuAction('tools-reload-boards') },
         { label: 'Set Up Arduino Tools…', click: () => sendMenuAction('tools-setup') },
         { label: 'Get Board Info', click: () => sendMenuAction('tools-get-board-info') }

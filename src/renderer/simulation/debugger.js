@@ -46,7 +46,8 @@ export class Debugger {
     this.info = info;
     this.functionStarts = new Set(info.functions.map(fn => fn.low));
     this.sketchDirs = sketchDirs;
-    this.sketchFiles = new Set(info.files.map((f, i) => (inDirs(f, sketchDirs) ? i : -1)).filter(i => i >= 0));
+    // A PlatformIO project's downloaded libraries (.pio/libdeps) aren't the user's code.
+    this.sketchFiles = new Set(info.files.map((f, i) => (inDirs(f, sketchDirs) && !/\/\.pio\//.test(f) ? i : -1)).filter(i => i >= 0));
     const words = runner.cpu.progMem.length;
     this.lineKey = new Int32Array(words).fill(-1);
     this.stmtStart = new Uint8Array(words);

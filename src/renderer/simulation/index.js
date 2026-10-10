@@ -32,6 +32,16 @@ const SERIAL_LIMIT = 200_000;
 const LINE_ENDINGS = { newline: '\n', none: '', cr: '\r', both: '\r\n' };
 
 const sketchFolder = (p) => p.replace(/[/\\][^/\\]+$/, '');
+
+/** Where a sketch's diagram.json lives: next to it, or at the root of its PlatformIO project (as in Wokwi). */
+function diagramFolder(sketchPath) {
+  const root = window.state?.pio?.root;
+  if (root) {
+    const norm = (x) => x.replace(/\\/g, '/').toLowerCase();
+    if (norm(sketchPath).startsWith(`${norm(root).replace(/\/+$/, '')}/`)) return root;
+  }
+  return sketchFolder(sketchPath);
+}
 const joinPath = (folder, name) => `${folder}${folder.includes('\\') && !folder.includes('/') ? '\\' : '/'}${name}`;
 
 export class SimulationManager {
@@ -343,6 +353,14 @@ export class SimulationManager {
 
   /** Hint when the upload board (toolbar) differs from the simulated one. */
   _checkToolbarBoard() {
+    const pio = window.state?.pio;
+    if (pio && this.sketchPath && diagramFolder(this.sketchPath) === pio.root) {
+      // A PlatformIO project: its environment names the board, not the board menu.
+      const env = pio.envs?.find(e => e.name === pio.env);
+      this.notice.hidden = true;
+      if (env?.simBoard && env.simBoard !== this.board.id && this.canvas.parts.length <= 1) this.setBoard(env.simBoard, { quiet: true });
+      return;
+    }
     const fqbn = window.state?.selectedBoard;
     if (!fqbn || this._noticeDismissed === fqbn) { this.notice.hidden = true; return; }
     const target = boardForFqbn(fqbn);
@@ -817,7 +835,7 @@ export class SimulationManager {
     if (!this.canvas) return;
     const json = JSON.stringify(this._diagram(), null, 2);
     if (this.sketchPath) {
-      const res = await window.electronAPI?.file?.save(joinPath(sketchFolder(this.sketchPath), DIAGRAM_FILE), json).catch(e => ({ success: false, error: e.message }));
+      const res = await window.electronAPI?.file?.save(joinPath(diagramFolder(this.sketchPath), DIAGRAM_FILE), json).catch(e => ({ success: false, error: e.message }));
       if (res && !res.success && !this._saveErrorShown) {
         this._saveErrorShown = true;
         this.toast(`Couldn't save diagram.json next to the sketch: ${res.error}`, 'error');
@@ -853,6 +871,11 @@ export class SimulationManager {
   /** The open sketch changed: load its diagram.json (or keep/adopt the scratch circuit). */
   async setSketch(sketchPath) {
     if (sketchPath === this.sketchPath) return;
+    // Another file of the same sketch or project: same circuit.
+    if (sketchPath && this.sketchPath && diagramFolder(sketchPath) === diagramFolder(this.sketchPath)) {
+      this.sketchPath = sketchPath;
+      return;
+    }
     const previous = this.sketchPath;
     if (this._saveTimer) await this._save();
     if (this.running) this.stop();
@@ -860,7 +883,7 @@ export class SimulationManager {
     this._saveErrorShown = false;
     if (!sketchPath) return;
 
-    const res = await window.electronAPI?.file?.read(joinPath(sketchFolder(sketchPath), DIAGRAM_FILE)).catch(() => null);
+    const res = await window.electronAPI?.file?.read(joinPath(diagramFolder(sketchPath), DIAGRAM_FILE)).catch(() => null);
     if (res?.success) {
       let data = null;
       try { data = JSON.parse(res.content); } catch { data = null; }
@@ -869,6 +892,7 @@ export class SimulationManager {
         await this._applyModel(model, { record: false });
         this._resetHistory();
         if (model.unsupported.length) this.toast(`This circuit uses parts Impulse doesn't simulate yet: ${model.unsupported.join(', ')}. They were left out.`, 'warn');
+        this._checkToolbarBoard();
         return;
       }
       this.toast('diagram.json next to this sketch could not be read, so the circuit starts fresh.', 'warn');
@@ -881,6 +905,7 @@ export class SimulationManager {
     const board = boardForFqbn(window.state?.selectedBoard) || BOARDS.uno;
     await this._applyModel({ parts: [{ id: board.id, type: board.tag, x: 0, y: 160, rotate: 0, attrs: {} }], wires: [] }, { record: false });
     this._resetHistory();
+    this._checkToolbarBoard();
   }
 
   async importDiagram() {
@@ -904,7 +929,7 @@ export class SimulationManager {
 
   async exportDiagram() {
     const json = JSON.stringify(this._diagram(), null, 2);
-    const name = this.sketchPath ? `${sketchFolder(this.sketchPath).split(/[/\\]/).pop()}-diagram.json` : 'diagram.json';
+    const name = this.sketchPath ? `${diagramFolder(this.sketchPath).split(/[/\\]/).pop()}-diagram.json` : 'diagram.json';
     const res = await window.electronAPI?.dialog?.saveDiagram?.(json, name);
     if (res?.success) this.toast(`Saved ${res.filePath.split(/[/\\]/).pop()}.`, 'success');
     else if (res && !res.canceled) this.toast(res.error || 'Could not save the file.', 'error');
@@ -1256,7 +1281,7 @@ export class SimulationManager {
     const bps = window.impulse?.breakpoints;
     const sketch = window.state?.currentSketch;
     if (!bps || !sketch) return [];
-    const dirs = this.debug?.dirs || [sketchFolder(sketch)];
+    const dirs = this.debug?.dirs || [diagramFolder(sketch)];
     const out = [];
     for (const [file, lines] of bps.all()) {
       if (!inDirs(file, dirs)) continue;

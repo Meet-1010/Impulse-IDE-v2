@@ -26,6 +26,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     boardInfo: (port) => ipcRenderer.invoke('arduino:board-info', port)
   },
   
+  // PlatformIO projects (built and uploaded through the arduino methods)
+  platformio: {
+    project: (filePath) => ipcRenderer.invoke('platformio:project', filePath),
+    selectEnv: (root, env) => ipcRenderer.invoke('platformio:select-env', root, env)
+  },
+
   // Serial Monitor methods
   serial: {
     connect: (port, baudRate) => ipcRenderer.invoke('serial:connect', port, baudRate),

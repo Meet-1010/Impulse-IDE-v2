@@ -180,6 +180,8 @@ arduino-cli compile ──► app .hex ──► AvrRunner (avr8js) ◄──►
 
 Debug builds (`arduino:compile-debug`) use `-Og` without link-time optimization, in a build folder of their own, because LTO folds most of a sketch's line information away. Breakpoints live in the editor (`src/renderer/breakpoints.js`) per file and survive restarts.
 
+PlatformIO projects (`src/main/services/platformio.js`): `ArduinoService` hands any sketch path inside a folder with `platformio.ini` to `pio`, so Verify, Upload, the simulator, the debugger and the AI tools work unchanged. Environments come from `pio project config`; debug builds strip `-Os` and LTO through `PLATFORMIO_BUILD_UNFLAGS` in a build folder of their own.
+
 `src/cli/impulse-test.js` (`bin/impulse-test.mjs`) runs the same headless simulator from the command line for CI; see docs/TESTING.md.
 
 Circuits are saved as `diagram.json` beside the sketch. Opening an example writes the sketch and its diagram to `<sketchbook>/Impulse Examples/<name>/`.
@@ -241,6 +243,7 @@ Display in AI panel
 ### Simulator
 - `arduino:compile-hex` - Compile for a simulated board and return the application HEX
 - `arduino:compile-debug` - Debug build (-Og, no LTO): HEX, ELF and the sketch folder's paths
+- `platformio:project` / `platformio:select-env` - The PlatformIO project of a file, its environments, and the one to build
 - `sketch:create-example` - Write an example sketch and its `diagram.json` into the sketchbook
 - `dialog:open-diagram` / `dialog:save-diagram` - Import and export circuits
 - `ai:generate-circuit` - Build a circuit for the current sketch
