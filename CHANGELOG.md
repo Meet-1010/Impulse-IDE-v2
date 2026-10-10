@@ -54,6 +54,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Saving (⌘S, autosave, or the save before Verify, Upload and simulating) while a second tab of a sketch was open wrote that tab's text over the sketch's .ino. Each tab is now saved to its own file, and every edited tab is saved before a build, so builds never use stale headers. The AI agent no longer writes the sketch into whichever tab is showing.
 - The end-to-end and smoke tests refuse to run when their debugging port is taken, instead of driving whichever app holds it.
 - Loading the simulator outside the app pulled in every part element just for the LCD font, and touched `localStorage` (a warning in Node 25+).
 - Accessibility: wrong ARIA roles on the activity bar, file list, editor tabs and dialogs; unlabelled AI and editor controls; nested interactive elements in tabs and part thumbnails; logs that couldn't be scrolled from the keyboard.

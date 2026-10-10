@@ -1669,7 +1669,8 @@ export class SimulationManager {
   }
 
   async _applyCode(sketchPath, code) {
-    if (window.state?.editor) window.state.editor.setValue(code);
+    // The editor shows the active tab: only replace its text when that tab is the sketch.
+    if (window.state?.editor && window.state.currentFile === sketchPath) window.state.editor.setValue(code);
     const tab = (window.state?.openFiles || []).find(f => f.path === sketchPath);
     if (tab) tab.content = code;
     const saved = await window.electronAPI.file.save(sketchPath, code).catch(e => ({ success: false, error: e.message }));

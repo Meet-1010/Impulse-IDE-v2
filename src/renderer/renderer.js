@@ -744,7 +744,9 @@ async function saveFile({ quiet = false } = {}) {
         if (!quiet) logToConsole('No file open to save', 'warning');
         return false;
     }
-    const target = state.currentSketch || state.currentFile;
+    // The editor holds the active tab, so it is saved to the active tab's file
+    // (never to the sketch's .ino while a .h or .cpp tab is open).
+    const target = state.currentFile;
     if (!state.editor || !target) return false;
     const code = state.editor.getValue();
     try {
@@ -923,7 +925,23 @@ async function exportCompiledBinary() {
 }
 
 // The simulator compiles from disk, so it saves the open file first.
-window.saveActiveFile = () => saveFile({ quiet: true });
+/** Save every edited tab (the active one from the editor) before a build. */
+async function saveAllFiles() {
+    if (state.editor && state.currentFile && !await saveFile({ quiet: true })) return false;
+    for (const [i, file] of state.openFiles.entries()) {
+        if (i === state.activeTabIndex || !file.dirty) continue;
+        const result = await window.electronAPI.file.save(file.path, file.content).catch(e => ({ success: false, error: e.message }));
+        if (!result?.success) {
+            logToConsole(`Save failed for ${file.name || file.path}: ${result?.error || 'unknown error'}`, 'error');
+            return false;
+        }
+        file.dirty = false;
+    }
+    renderFileTabs();
+    return true;
+}
+
+window.saveActiveFile = () => saveAllFiles();
 
 function showOutputTab(name) {
     const outputPanel = document.getElementById('outputPanel');
@@ -942,7 +960,7 @@ async function runHardwareTests() {
     showOutputTab('tests');
     hardwareTestsRunning = true;
     try {
-        if (!await saveFile({ quiet: true })) return;
+        if (!await saveAllFiles()) return;
         const context = simulationContext();
         container.innerHTML = `<p class="tests-hint">Compiling for the simulated ${escapeHtml(context.label)}…</p>`;
         const result = await runSimulatorCheck({
@@ -2806,12 +2824,9 @@ async function compileSketch() {
         return;
     }
 
-    if (state.editor && state.currentSketch) {
-        const code = state.editor.getValue();
-        await window.electronAPI.file.save(state.currentSketch, code);
-        if (state.activeTabIndex >= 0 && state.openFiles[state.activeTabIndex]) {
-            state.openFiles[state.activeTabIndex].content = code;
-        }
+    if (!await saveAllFiles()) {
+        showProblem('The sketch could not be saved, so the build would use old code. Fix the save error and try again.');
+        return;
     }
 
     logToConsole('Compiling...', 'info');
@@ -2899,12 +2914,9 @@ async function uploadSketch() {
         return;
     }
 
-    if (state.editor && state.currentSketch) {
-        const code = state.editor.getValue();
-        await window.electronAPI.file.save(state.currentSketch, code);
-        if (state.activeTabIndex >= 0 && state.openFiles[state.activeTabIndex]) {
-            state.openFiles[state.activeTabIndex].content = code;
-        }
+    if (!await saveAllFiles()) {
+        showProblem('The sketch could not be saved, so the build would use old code. Fix the save error and try again.');
+        return;
     }
 
     const reopenMonitor = state.serialConnected;

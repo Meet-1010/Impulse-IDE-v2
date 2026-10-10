@@ -72,18 +72,22 @@ async function connect() {
   throw new Error('App did not expose a debuggable window within 30 s');
 }
 
-/** Choose an application-menu item, exactly as clicking it does. */
-async function menu(action) {
+/** Evaluate an expression in the main process. */
+async function inMain(expression) {
   const list = await (await fetch(`http://127.0.0.1:${INSPECT_PORT}/json/list`)).json();
   const ws = new WebSocket(list[0].webSocketDebuggerUrl);
   await new Promise((resolve, reject) => { ws.onopen = resolve; ws.onerror = reject; });
   const done = new Promise(r => { ws.onmessage = r; });
-  ws.send(JSON.stringify({ id: 1, method: 'Runtime.evaluate', params: {
-    expression: `process.mainModule.require('electron').BrowserWindow.getAllWindows()[0].webContents.send('menu:action', ${JSON.stringify(action)})`,
-  } }));
+  ws.send(JSON.stringify({ id: 1, method: 'Runtime.evaluate', params: { expression } }));
   await done;
   ws.close();
 }
+
+/** Choose an application-menu item, exactly as clicking it does. */
+const menu = (action) => inMain(`process.mainModule.require('electron').BrowserWindow.getAllWindows()[0].webContents.send('menu:action', ${JSON.stringify(action)})`);
+
+/** Grant the app access to a folder, as choosing it in the open dialog does. */
+const approve = (dir) => inMain(`process.mainModule.require(${JSON.stringify(path.join(root, 'src/main/utils/pathValidator.js'))}).approveDirectory(${JSON.stringify(dir)})`);
 
 let exitCode = 1;
 try {
@@ -216,6 +220,22 @@ try {
     skipped.push('compile and run an example (arduino-cli with the AVR core is not installed)');
     skipped.push('debug an example (arduino-cli with the AVR core is not installed)');
   }
+
+  await step('saving a multi-file sketch writes each tab to its own file', async () => {
+    const dir = path.join(sketchbook, 'tabs');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'tabs.ino'), '#include "helper.h"\nvoid setup() {}\nvoid loop() {}\n');
+    fs.writeFileSync(path.join(dir, 'helper.h'), 'int helper();\n');
+    await approve(dir);
+    const open = (file) => `window.impulse.openSketch(null, ${JSON.stringify(path.join(dir, file))})`;
+    const type = (text) => `window.state.editor.replaceRange(${JSON.stringify(text)}, { line: 0, ch: 0 }, undefined, '+input')`;
+    await evaluate(`(async () => { await ${open('tabs.ino')}; ${type('// sketch edit\n')}; await ${open('helper.h')}; ${type('// header edit\n')}; })()`);
+    if (!await evaluate(`window.saveActiveFile()`)) throw new Error('saving failed');
+    const ino = fs.readFileSync(path.join(dir, 'tabs.ino'), 'utf8');
+    const header = fs.readFileSync(path.join(dir, 'helper.h'), 'utf8');
+    if (ino !== '// sketch edit\n#include "helper.h"\nvoid setup() {}\nvoid loop() {}\n') throw new Error(`tabs.ino on disk: ${JSON.stringify(ino)}`);
+    if (header !== '// header edit\nint helper();\n') throw new Error(`helper.h on disk: ${JSON.stringify(header)}`);
+  });
 
   await step('dialogs are accessible', async () => {
     await evaluate(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
