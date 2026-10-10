@@ -27,6 +27,7 @@ An AI-assisted Arduino IDE with a built-in AVR simulator. Write a sketch, wire t
 
   The same tests run in CI with `impulse-test`, a single-file command-line runner that compiles, simulates with the sketch's circuit and writes JUnit/JSON reports: see [docs/TESTING.md](docs/TESTING.md).
 
+- **Debugger**: click left of a line number to set a breakpoint and press Debug (F5). The simulated board stops on that line; step over, into and out of functions (F10, F11, ⇧F11), run to the cursor, and read locals, globals (structs, arrays, `String`s, enums), registers and flags. Works with multi-file sketches.
 - **Pin-aware editor**: hover a pin to see what it's wired to. The gutter flags `digitalWrite` without `pinMode(OUTPUT)`, `analogWrite` on pins without PWM, pins 0/1 used alongside `Serial`, and (when a circuit exists) unwired pins or code that drives an input part.
 - **AI agent**: Claude, OpenAI or Gemini can read and edit the sketch, compile, and use the serial monitor. Every AI code change is run in the simulator automatically and gets a pass/fail card with a "Fix with AI" button. Uploading to a real board always asks for your approval.
 - **Simulator vs board**: runs the sketch in the simulator and on a connected Uno, Nano or Mega for the same time, then diffs the serial output line by line (Sketch › Compare Simulator with Board).

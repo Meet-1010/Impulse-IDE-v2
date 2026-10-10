@@ -51,6 +51,12 @@ function register(ipcMain, ctx) {
     return arduinoService.compileHex(sketchPath, boardFQBN || 'arduino:avr:uno');
   }));
 
+  ipcMain.handle('arduino:compile-debug', withDebugLog('arduino:compile-debug', async (event, sketchPath, boardFQBN) => {
+    const blocked = denied(sketchPath);
+    if (blocked) return blocked;
+    return arduinoService.compileDebug(sketchPath, boardFQBN || 'arduino:avr:uno');
+  }));
+
   ipcMain.handle('arduino:export-binaries', withDebugLog('arduino:export-binaries', async (event, sketchPath, boardFQBN) => {
     const blocked = denied(sketchPath);
     if (blocked) return blocked;

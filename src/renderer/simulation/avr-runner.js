@@ -106,6 +106,10 @@ export class AvrRunner {
     this.onSerial = null;      // (char, port) — port 0 is Serial, 1-3 are Serial1-3 (Mega)
     this.onError = null;       // (msg) => void
     this.onReset = null;       // () => void, after a reset (watchdog, RESET pin, restart)
+    // Debugging: checked after every instruction while set; returning true
+    // stops the run before the next instruction and calls onBreak.
+    this.stopCheck = null;     // (cpu) => boolean
+    this.onBreak = null;       // () => void
 
     this._resetPinArrays();
   }
@@ -306,6 +310,25 @@ export class AvrRunner {
   }
 
   /**
+   * Run until `stopCheck` stops the CPU or `maxCycles` pass (headless debugging and tests).
+   * @returns {boolean} whether it stopped
+   */
+  runUntilStop(maxCycles) {
+    const cpu = this.cpu;
+    const check = this.stopCheck;
+    const end = cpu.cycles + maxCycles;
+    while (cpu.cycles < end) {
+      avrInstruction(cpu);
+      cpu.tick();
+      if (check && check(cpu)) {
+        this.onBreak?.();
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
    * Call `fn` after `cycles` CPU cycles of simulated time.
    * @returns {Function} handle for cancel()
    */
@@ -417,10 +440,24 @@ export class AvrRunner {
     try {
       const cpu = this.cpu;
       const endCycles = cpu.cycles + targetCycles;
+      const check = this.stopCheck;
       while (cpu.cycles < endCycles) {
-        for (let i = 0; i < 5000; i++) {
-          avrInstruction(cpu);
-          cpu.tick();
+        if (check) {
+          for (let i = 0; i < 5000; i++) {
+            avrInstruction(cpu);
+            cpu.tick();
+            if (check(cpu)) {
+              this.running = false;
+              this._rafId = null;
+              this.onBreak?.();
+              return;
+            }
+          }
+        } else {
+          for (let i = 0; i < 5000; i++) {
+            avrInstruction(cpu);
+            cpu.tick();
+          }
         }
         if (performance.now() - start > frameBudgetMs) break;
       }

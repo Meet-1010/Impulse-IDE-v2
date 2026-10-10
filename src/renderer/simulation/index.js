@@ -1,6 +1,6 @@
 // Simulation manager: the simulator view. Owns the canvas, the AVR runner and
 // the circuit engine, and the UI around them (toolbar, part picker, inspector,
-// examples, serial monitor, logic analyzer, circuit checks).
+// examples, serial monitor, logic analyzer, circuit checks, debugger).
 //
 // The circuit belongs to the open sketch and is saved next to it as
 // diagram.json (Wokwi format). Without a saved sketch it lives in local storage.
@@ -21,6 +21,9 @@ import { exampleDiagram, EXAMPLES } from './examples.js';
 import { h, icon, iconSvg, mod } from './ui/dom.js';
 import { isMuted, setMuted, onMuteChange } from './audio.js';
 import { confirmDialog } from '../dialog.js';
+import { readDebugInfo } from './dwarf.js';
+import { Debugger, inDirs } from './debugger.js';
+import { DebugPane } from './ui/debug-pane.js';
 
 const SCRATCH_KEY = 'impulse-sim-diagram';
 const DIAGRAM_FILE = 'diagram.json';
@@ -50,6 +53,7 @@ export class SimulationManager {
     this._agentRunning = false;
     this._shorts = [];
     this._libCache = null;
+    this.debug = null; // { dbg, dirs, stopped } while debugging
 
     this._buildUI();
     this._bindRunner();
@@ -73,6 +77,13 @@ export class SimulationManager {
     this.playBtn = btn('simPlayBtn', 'play', 'Start the simulation', 'go');
     this.stopBtn = btn('simStopBtn', 'stop', 'Stop the simulation');
     this.pauseBtn = btn('simPauseBtn', 'pause', 'Pause');
+    this.debugBtn = btn('simDebugBtn', 'bug', 'Debug: run to breakpoints (F5)');
+    this.continueBtn = btn('simContinueBtn', 'continue', 'Continue (F5)');
+    this.stepOverBtn = btn('simStepOverBtn', 'stepOver', 'Step over (F10)');
+    this.stepIntoBtn = btn('simStepIntoBtn', 'stepInto', 'Step into (F11)');
+    this.stepOutBtn = btn('simStepOutBtn', 'stepOut', 'Step out (⇧F11)');
+    this.debugGroup = h('div', { class: 'sim-tb-group sim-debug-group', role: 'group', 'aria-label': 'Debugger', hidden: true },
+      this.continueBtn, this.stepOverBtn, this.stepIntoBtn, this.stepOutBtn);
     this.stopBtn.hidden = true;
     this.pauseBtn.hidden = true;
     this.boardBtn = h('button', { type: 'button', id: 'simBoardBtn', class: 'sim-board-chip', title: 'Choose the simulated board', 'aria-haspopup': 'menu' },
@@ -86,7 +97,8 @@ export class SimulationManager {
     this.menuBtn = btn('simMenuBtn', 'more', 'More');
 
     const toolbar = h('div', { class: 'sim-toolbar', role: 'toolbar', 'aria-label': 'Simulator' },
-      h('div', { class: 'sim-tb-group' }, this.playBtn, this.pauseBtn, this.stopBtn),
+      h('div', { class: 'sim-tb-group' }, this.playBtn, this.debugBtn, this.pauseBtn, this.stopBtn),
+      this.debugGroup,
       h('span', { class: 'sim-tb-sep' }),
       this.boardBtn,
       h('span', { class: 'sim-tb-sep' }),
@@ -136,10 +148,11 @@ export class SimulationManager {
     this.inputRow = h('div', { class: 'sim-serial-inputrow' }, this.serialInput, this.lineEnding, clearBtn);
     this.logicPane = h('div', { id: 'simLogicPane', class: 'sim-logic-pane', hidden: true });
     this.checksPane = h('div', { id: 'simChecksPane', class: 'sim-checks-pane', hidden: true });
+    this.debugPaneEl = h('div', { id: 'simDebugPane', class: 'sim-debug-pane', hidden: true });
     const tab = (pane, label, active = false) => h('button', { type: 'button', class: `sim-pane-tab${active ? ' active' : ''}`, dataset: { pane }, role: 'tab' }, label);
     this.checksTab = tab('checks', 'Circuit check');
-    const tabs = h('div', { class: 'sim-pane-tabs', role: 'tablist' }, tab('serial', 'Serial', true), tab('logic', 'Logic analyzer'), this.checksTab);
-    this.pane = h('div', { class: 'sim-serial-pane', id: 'simSerialPane' }, tabs, this.serialOut, this.logicPane, this.checksPane, this.inputRow);
+    const tabs = h('div', { class: 'sim-pane-tabs', role: 'tablist' }, tab('serial', 'Serial', true), tab('logic', 'Logic analyzer'), this.checksTab, tab('debug', 'Debug'));
+    this.pane = h('div', { class: 'sim-serial-pane', id: 'simSerialPane' }, tabs, this.serialOut, this.logicPane, this.checksPane, this.debugPaneEl, this.inputRow);
 
     panel.append(this.stage, this.pane);
 
@@ -190,11 +203,20 @@ export class SimulationManager {
     });
     this.gallery = new ExamplesGallery({ onOpen: (ex) => this.openExample(ex) });
     this.analyzer = new LogicAnalyzer(this.logicPane);
+    this.debugPane = new DebugPane(this.debugPaneEl, {
+      onOpenLocation: (file, line) => window.impulse?.revealLine?.(file, line),
+      onRemoveBreakpoint: (file, line) => this._removeBreakpoint(file, line),
+    });
 
     // Toolbar
     this.playBtn.addEventListener('click', () => (this.running ? this.restart() : this.run()));
     this.stopBtn.addEventListener('click', () => this.stop());
     this.pauseBtn.addEventListener('click', () => this.togglePause());
+    this.debugBtn.addEventListener('click', () => this.debugStart());
+    this.continueBtn.addEventListener('click', () => this.debugAction('continue'));
+    this.stepOverBtn.addEventListener('click', () => this.debugAction('stepOver'));
+    this.stepIntoBtn.addEventListener('click', () => this.debugAction('stepInto'));
+    this.stepOutBtn.addEventListener('click', () => this.debugAction('stepOut'));
     this.boardBtn.addEventListener('click', (e) => this._boardMenu(e));
     this.addBtn.addEventListener('click', () => this.picker.toggle());
     this.examplesBtn.addEventListener('click', () => this.gallery.open());
@@ -235,7 +257,9 @@ export class SimulationManager {
     this.inputRow.hidden = name !== 'serial';
     this.logicPane.hidden = name !== 'logic';
     this.checksPane.hidden = name !== 'checks';
+    this.debugPaneEl.hidden = name !== 'debug';
     this.pane.classList.toggle('logic', name === 'logic');
+    if (name === 'debug' && !this.debug) this.debugPane.idle(this._breakpointList());
     if (name === 'logic') this.analyzer.render();
     if (name === 'checks') this._renderChecks();
   }
@@ -1006,53 +1030,253 @@ export class SimulationManager {
   }
 
   async run() {
+    if (this.debug) this.stop();
+    const sketchPath = await this._prepareRun();
+    if (!sketchPath) return;
+    const board = this.board;
+    this._systemLine(`Compiling for ${board.label}…`, 'info');
+    const result = await this._compile(sketchPath, board);
+    if (!result.success) {
+      this._compileFailed(result);
+      return;
+    }
+    if (!this._load(result.hex, board)) return;
+    this._systemLine(`Running on ${board.label}.`, 'success');
+    this.runner.start();
+    this._started();
+  }
+
+  /** Checks before compiling: a saved sketch and a board. Returns the sketch path. */
+  async _prepareRun() {
     const sketchPath = window.state?.currentSketch || window.state?.currentFile;
     if (!sketchPath) {
       this._systemLine('Open or save a sketch first (File › New Sketch), then press ▶ — or open an example.', 'info');
       this.toast('Save your sketch first, or open an example.', 'info');
-      return;
+      return null;
     }
     if (!this.boardPart) {
       this.toast('Add a board before running.', 'warn');
-      return;
+      return null;
     }
     this._setState('compiling');
     if (window.saveActiveFile && !await window.saveActiveFile()) {
       this._systemLine('Could not save the sketch, so the simulation would run old code. Fix the save error and try again.', 'error');
       this._setState('idle');
-      return;
+      return null;
     }
-    const board = this.board;
-    this._systemLine(`Compiling for ${board.label}…`, 'info');
-    const result = await this._compile(sketchPath, board);
-    if (!result.success) {
-      this._setState('idle');
-      this._systemLine('Compilation failed:', 'error');
-      this._appendRaw(`${(result.error || 'unknown error').trim()}\n`);
-      const consoleEl = document.getElementById('consoleOutput');
-      if (consoleEl) consoleEl.appendChild(h('div', { class: 'console-error' }, result.error || 'Compilation failed'));
-      return;
-    }
+    return sketchPath;
+  }
+
+  _compileFailed(result) {
+    this._setState('idle');
+    this._systemLine('Compilation failed:', 'error');
+    this._appendRaw(`${(result.error || 'unknown error').trim()}\n`);
+    const consoleEl = document.getElementById('consoleOutput');
+    if (consoleEl) consoleEl.appendChild(h('div', { class: 'console-error' }, result.error || 'Compilation failed'));
+  }
+
+  /** Load a program and the circuit; false when the program doesn't fit the board. */
+  _load(hex, board) {
     this._clearSerial();
     this._shorts = [];
     this.canvas.wires.forEach(w => w.groupEl.classList.remove('short'));
-    if (!this.runner.load(result.hex, board.id)) {
+    if (!this.runner.load(hex, board.id)) {
       this._setState('idle');
-      return;
+      return false;
     }
     this.engine.setModel(this._engineModel());
     this.engine.start();
     this.analyzer?.reset();
     this.analyzer?.setBoard(board.id);
     this._pinActivity = {};
-    this._systemLine(`Running on ${board.label}.`, 'success');
+    return true;
+  }
+
+  _started() {
     this.running = true;
     this.paused = false;
-    this.runner.start();
     this._setState('running');
     this._startLoop();
     this.inspector.render();
     this._updateEmpty();
+  }
+
+  // ── Debugger ─────────────────────────────────────────────────────────────
+
+  /** Debug › Start Debugging (F5): continue when stopped, else compile a debug build and run it. */
+  async debugStart() {
+    if (this.debug) {
+      if (this.debug.stopped) this.debugAction('continue');
+      return;
+    }
+    if (this.running) this.stop();
+    const sketchPath = await this._prepareRun();
+    if (!sketchPath) return;
+    const board = this.board;
+    this._showPane('debug');
+    this.debugPane.running(`Compiling a debug build for ${board.label}…`, this._breakpointList());
+    this._systemLine(`Compiling a debug build for ${board.label}…`, 'info');
+    let result;
+    try {
+      result = await window.electronAPI.arduino.compileDebug(sketchPath, board.fqbn);
+    } catch (err) {
+      result = { success: false, error: err.message };
+    }
+    if (!result.success) {
+      this._compileFailed(result);
+      this.debugPane.idle(this._breakpointList());
+      return;
+    }
+    let info;
+    try {
+      info = readDebugInfo(result.elf);
+    } catch (err) {
+      this._setState('idle');
+      this._systemLine(`Could not read the debug information: ${err.message}`, 'error');
+      this.debugPane.idle(this._breakpointList());
+      return;
+    }
+    if (!this._load(result.hex, board)) return;
+    const dbg = new Debugger(this.runner, info, {
+      sketchDirs: result.sketchDirs,
+      remap: (result.buildSketchDirs || []).map(b => [b, result.sketchDirs[0]]),
+    });
+    this.debug = { dbg, dirs: result.sketchDirs, stopped: false };
+    dbg.onStop = (s) => this._debugStopped(s);
+    this._syncBreakpoints();
+    this._systemLine(`Debugging on ${board.label}. Debug builds are compiled with -Og and without link-time optimization, so timing can differ slightly from a normal build.`, 'success');
+    this._started();
+    const hasBreakpoints = dbg.breakWords.some(Boolean);
+    const setup = dbg.sketchFunction('setup');
+    this.debugPane.running(hasBreakpoints ? 'Running to the first breakpoint…' : 'Running to setup()…', this._breakpointList());
+    if (hasBreakpoints) dbg.continue();
+    else if (!(setup && dbg.runToLine(setup.file, setup.line))) dbg.runToSketch();
+  }
+
+  /** continue | stepOver | stepInto | stepOut, while stopped. */
+  debugAction(kind) {
+    const session = this.debug;
+    if (!session?.stopped) return;
+    session.stopped = false;
+    this.paused = false;
+    window.impulse?.breakpoints?.setCurrent(null);
+    this._setState('running');
+    this.debugPane.running(kind === 'continue' ? 'Running…' : 'Stepping…', this._breakpointList());
+    session.dbg[kind]();
+  }
+
+  /** Debug › Run to Cursor. */
+  debugRunToCursor() {
+    const session = this.debug;
+    const file = window.state?.currentFile;
+    const line = window.state?.editor ? window.state.editor.getCursor().line + 1 : null;
+    if (!session?.stopped || !file || !line) return;
+    if (!inDirs(file, session.dirs)) {
+      this.toast('Put the cursor on a line of this sketch first.');
+      return;
+    }
+    session.stopped = false;
+    this.paused = false;
+    window.impulse?.breakpoints?.setCurrent(null);
+    if (!session.dbg.runToLine(file, line)) {
+      session.stopped = true;
+      this.paused = true;
+      this.toast('No code runs on that line or the lines after it.', 'warn');
+      return;
+    }
+    this._setState('running');
+    this.debugPane.running('Running to the cursor…', this._breakpointList());
+  }
+
+  _debugStopped(s) {
+    const session = this.debug;
+    if (!session) return;
+    session.stopped = true;
+    this.paused = true;
+    this._setState('paused');
+    this._flushSerial();
+    const file = s.location.file ? this._appPath(s.location.file) : null;
+    const location = { ...s.location, file };
+    window.impulse?.breakpoints?.setCurrent(file ? { file, line: location.line } : null);
+    if (file) window.impulse?.revealLine?.(file, location.line);
+    this._showPane('debug');
+    const dbg = session.dbg;
+    this.debugPane.stopped({ reason: s.reason, location, locals: dbg.locals(), globals: dbg.globals(), registers: dbg.registers(), breakpoints: this._breakpointList() });
+    const t = this.runner.time;
+    this.timeLabel.textContent = `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(Math.floor(t % 60)).padStart(2, '0')}.${String(Math.floor((t % 1) * 1000)).padStart(3, '0')}`;
+    this.announcer.textContent = location.inSketch
+      ? `Stopped at line ${location.line}${location.function ? ` in ${location.function}` : ''}`
+      : `Paused in ${location.function || 'Arduino core code'}`;
+  }
+
+  /** The app's spelling of a sketch file path from the debugger. */
+  _appPath(file) {
+    const key = (p) => String(p).replace(/\\/g, '/').toLowerCase();
+    const candidates = [
+      ...(window.state?.openFiles || []).map(f => f.path),
+      ...(window.impulse?.breakpoints ? [...window.impulse.breakpoints.all().keys()] : []),
+    ];
+    const known = candidates.find(p => key(p) === key(file));
+    if (known) return known;
+    return this.debug?.dirs[0]?.includes('\\') ? file.replace(/\//g, '\\') : file;
+  }
+
+  /** Breakpoints of the current sketch, for the Debug tab. */
+  _breakpointList() {
+    const bps = window.impulse?.breakpoints;
+    const sketch = window.state?.currentSketch;
+    if (!bps || !sketch) return [];
+    const dirs = this.debug?.dirs || [sketchFolder(sketch)];
+    const out = [];
+    for (const [file, lines] of bps.all()) {
+      if (!inDirs(file, dirs)) continue;
+      const missing = bps.unverifiedLines(file);
+      for (const line of lines) out.push({ file, line, unverified: missing.has(line) });
+    }
+    return out.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line);
+  }
+
+  _removeBreakpoint(file, line) {
+    const bps = window.impulse?.breakpoints;
+    if (!bps) return;
+    bps.remove(file, line);
+  }
+
+  /** Send the editor's breakpoints to the debugger (on start and whenever they change). */
+  _syncBreakpoints() {
+    const session = this.debug;
+    const bps = window.impulse?.breakpoints;
+    if (!bps) return;
+    if (session) {
+      session.dbg.clearBreakpoints();
+      for (const [file, lines] of bps.all()) {
+        if (!inDirs(file, session.dirs)) continue;
+        bps.setResolved(file, session.dbg.setBreakpoints(file, lines));
+      }
+    }
+    if (!this.debugPaneEl.hidden && (!session || !session.stopped)) {
+      if (session) this.debugPane.running(this.runner.running ? 'Running…' : 'Starting…', this._breakpointList());
+      else this.debugPane.idle(this._breakpointList());
+    }
+  }
+
+  /** The editor's breakpoints changed. */
+  onBreakpointsChanged() {
+    this._syncBreakpoints();
+    if (this.debug?.stopped && !this.debugPaneEl.hidden) {
+      const dbg = this.debug.dbg;
+      const loc = dbg.location();
+      this.debugPane.stopped({ reason: dbg.stopReason, location: { ...loc, file: loc.file ? this._appPath(loc.file) : null }, locals: dbg.locals(), globals: dbg.globals(), registers: dbg.registers(), breakpoints: this._breakpointList() });
+    }
+  }
+
+  _endDebug() {
+    if (!this.debug) return;
+    this.debug.dbg.detach();
+    this.debug = null;
+    window.impulse?.breakpoints?.setCurrent(null);
+    window.impulse?.breakpoints?.clearResolved();
+    this.debugPane.idle(this._breakpointList());
   }
 
   /** Compile for the simulated board, installing a missing library once if needed. */
@@ -1092,12 +1316,19 @@ export class SimulationManager {
     this.runner.reset();
     this.engine.restartParts();
     this.paused = false;
+    if (this.debug) {
+      // Breakpoints stay armed through the restart.
+      this.debug.stopped = false;
+      window.impulse?.breakpoints?.setCurrent(null);
+      this.debugPane.running('Running…', this._breakpointList());
+    }
     if (!this.runner.running) this.runner.start();
     this._setState('running');
   }
 
   stop() {
     this.runner.stop();
+    this._endDebug();
     this.engine.stop();
     const was = this.running;
     this.running = false;
@@ -1113,6 +1344,11 @@ export class SimulationManager {
 
   togglePause() {
     if (!this.running) return;
+    if (this.debug) {
+      if (this.debug.stopped) this.debugAction('continue');
+      else this.debug.dbg.pause();
+      return;
+    }
     if (this.paused) this.runner.start();
     else this.runner.stop();
     this.paused = !this.paused;
@@ -1126,10 +1362,19 @@ export class SimulationManager {
     this.playBtn.setAttribute('aria-label', this.playBtn.title);
     this.playBtn.classList.toggle('compiling', state === 'compiling');
     this.playBtn.disabled = state === 'compiling';
+    const debugging = !!this.debug;
     this.stopBtn.hidden = !running;
-    this.pauseBtn.hidden = !running;
+    // Stopped in the debugger, Continue takes the place of Resume.
+    this.pauseBtn.hidden = !running || (debugging && state === 'paused');
+    this.debugBtn.hidden = running;
+    this.debugBtn.disabled = state === 'compiling';
+    this.debugGroup.hidden = !debugging;
+    const stoppedHere = debugging && state === 'paused';
+    for (const b of [this.continueBtn, this.stepOverBtn, this.stepIntoBtn, this.stepOutBtn]) b.disabled = !stoppedHere;
+    this.stage.classList.toggle('debugging', debugging);
     this.pauseBtn.innerHTML = iconSvg(state === 'paused' ? 'play' : 'pause', 16);
     this.pauseBtn.title = state === 'paused' ? 'Resume' : 'Pause';
+    this.pauseBtn.setAttribute('aria-label', this.pauseBtn.title);
     this.stats.hidden = !running;
     this.stage.classList.toggle('running', running);
     this.stage.classList.toggle('paused', state === 'paused');

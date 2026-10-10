@@ -34,6 +34,7 @@
     /* status colors are used for text too: 4.5:1 on every light surface */
     --ds-signal: #247438;
     --ds-danger: #b43d36;
+    --ds-breakpoint: #d6322b;
     --ds-warn: #8f5b09;
     --ds-link: #2563c9;
 
@@ -78,6 +79,7 @@
     --ds-go-fg: #71d083;
     --ds-signal: #71d083;
     --ds-danger: #ff9592;
+    --ds-breakpoint: #f2555a;
     --ds-warn: #e2b866;
     --ds-link: #70b8ff;
 
@@ -1830,6 +1832,62 @@ li.CodeMirror-hint-active {
 
 .verify-fix:hover {
     background: var(--ds-hover);
+}
+
+/* ── Breakpoints and the debugger's current line ─────────────────────────── */
+.impulse-bp-gutter {
+    width: 16px;
+    cursor: pointer;
+}
+
+.bp-slot {
+    position: relative;
+    display: block;
+    width: 16px;
+    height: 18px;
+}
+
+.bp-marker {
+    display: inline-block;
+    box-sizing: border-box;
+    width: 10px;
+    height: 10px;
+    margin: 4px 0 0 3px;
+    border-radius: 50%;
+    background: var(--ds-breakpoint);
+}
+
+.bp-slot .bp-marker {
+    position: absolute;
+    top: 0;
+    left: 0;
+}
+
+/* Where the debugger is stopped: an arrow, drawn over the breakpoint dot. */
+.bp-current {
+    position: absolute;
+    top: 4px;
+    left: 4px;
+    width: 0;
+    height: 0;
+    border-top: 5px solid transparent;
+    border-bottom: 5px solid transparent;
+    border-left: 9px solid var(--ds-warn);
+    filter: drop-shadow(0 0 1px var(--ds-canvas));
+}
+
+.bp-marker.unverified {
+    background: transparent;
+    border: 1.5px solid var(--ds-breakpoint);
+}
+
+.cm-debug-current {
+    background: color-mix(in srgb, var(--ds-warn) 20%, transparent);
+}
+
+.cm-debug-current-gutter .CodeMirror-linenumber {
+    color: var(--ds-text);
+    font-weight: 600;
 }
 
 /* ── Pin-aware editor ──────────────────────────────────────────────────── */

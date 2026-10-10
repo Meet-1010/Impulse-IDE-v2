@@ -6,6 +6,7 @@
 
 import { spawn, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -17,6 +18,8 @@ const electron = (await import('electron')).default;
 const axeSource = fs.readFileSync(require.resolve('axe-core/axe.min.js'), 'utf8');
 const PORT = 9398;
 const INSPECT_PORT = 9397;
+await assertPortFree(PORT);
+await assertPortFree(INSPECT_PORT);
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'impulse-e2e-'));
 const profile = path.join(temp, 'profile');
 const sketchbook = path.join(temp, 'sketchbook');
@@ -36,6 +39,18 @@ function hasAvrToolchain() {
   }
 }
 
+/** Fail fast when a debugging port is taken: the test would drive whatever app holds it. */
+async function assertPortFree(port) {
+  const free = await new Promise((resolve) => {
+    const server = net.createServer();
+    server.once('error', () => resolve(false));
+    server.listen(port, '127.0.0.1', () => server.close(() => resolve(true)));
+  });
+  if (!free) {
+    console.error(`Port ${port} is in use (another Impulse or Chrome debugging session?). Close it and run again.`);
+    process.exit(2);
+  }
+}
 const args = [root, `--remote-debugging-port=${PORT}`, `--inspect=${INSPECT_PORT}`, `--user-data-dir=${profile}`];
 if (process.platform === 'linux') args.push('--no-sandbox', '--disable-gpu');
 // The example is written into a throwaway sketchbook, never the real one.
@@ -158,8 +173,46 @@ try {
       await waitFor(`/No wiring problems found/.test(document.getElementById('simChecksPane').textContent)`, 3000, 'a clean circuit check');
       await audit('the simulator with an example');
     });
+
+    await step('the debugger stops at a breakpoint, steps and shows variables', async () => {
+      const lineOf = async (text) => evaluate(`window.state.editor.getValue().split('\\n').findIndex(l => l.includes(${JSON.stringify(text)})) + 1`);
+      const bpLine = await lineOf('wasPressed = pressed;');
+      if (bpLine < 1) throw new Error('the example sketch is not in the editor');
+      await evaluate(`window.impulse.breakpoints.toggle(${bpLine})`);
+      await waitFor(`!!document.querySelector('.CodeMirror .bp-marker')`, 2000, 'the breakpoint marker');
+      await evaluate(`window.simManager.debugStart()`);
+      await waitFor(`!!window.simManager.debug && window.simManager.runner.running`, 120000, 'the debug build to start');
+      await sleep(300);
+      if (await evaluate(`window.simManager.debug.stopped`)) throw new Error('stopped before the button was pressed');
+      await evaluate(`window.simManager.engine.behaviorOf('btn1').set(true)`);
+      await waitFor(`window.simManager.debug?.stopped`, 5000, 'the breakpoint');
+      const pane = () => evaluate(`document.getElementById('simDebugPane').innerText`);
+      let text = await pane();
+      if (!text.includes(`loop() · button.ino:${bpLine}`)) throw new Error(`stopped somewhere else: ${text.slice(0, 120)}`);
+      if (!/Breakpoint/.test(text)) throw new Error('the stop reason is missing');
+      if (!await evaluate(`!!document.querySelector('.CodeMirror .cm-debug-current')`)) throw new Error('the current line is not highlighted');
+      const row = (name) => evaluate(`(() => { const r = [...document.querySelectorAll('#simDebugPane .dbg-row')].find(r => r.querySelector('.dbg-name')?.firstChild?.textContent === ${JSON.stringify(name)}); return r ? r.querySelector('.dbg-value').textContent + (r.classList.contains('changed') ? ' (changed)' : '') : null; })()`);
+      if (await row('pressed') !== 'true') throw new Error(`local "pressed" shows ${await row('pressed')}`);
+      if (await row('wasPressed') !== 'false') throw new Error(`global "wasPressed" shows ${await row('wasPressed')}`);
+      await audit('the debugger');
+      await evaluate(`window.simManager.debugAction('stepOver')`);
+      await waitFor(`window.simManager.debug?.stopped`, 5000, 'the step');
+      if (await row('wasPressed') !== 'true (changed)') throw new Error(`after the step "wasPressed" shows ${await row('wasPressed')}`);
+      text = await pane();
+      if (!/Step/.test(text)) throw new Error('the step was not reported');
+      await evaluate(`window.simManager.debugAction('continue')`);
+      await sleep(200);
+      if (await evaluate(`window.simManager.debug.stopped`)) throw new Error('stopped again without a change');
+      await evaluate(`window.simManager.engine.behaviorOf('btn1').set(false)`);
+      await waitFor(`window.simManager.debug?.stopped`, 5000, 'the breakpoint after the release');
+      if (await row('pressed') !== 'false (changed)') throw new Error(`after the release "pressed" shows ${await row('pressed')}`);
+      await evaluate(`window.simManager.stop()`);
+      if (await evaluate(`!!document.querySelector('.CodeMirror .cm-debug-current') || !!window.simManager.debug`)) throw new Error('stopping left the debugger attached');
+      await evaluate(`window.impulse.breakpoints.toggle(${bpLine})`);
+    });
   } else {
     skipped.push('compile and run an example (arduino-cli with the AVR core is not installed)');
+    skipped.push('debug an example (arduino-cli with the AVR core is not installed)');
   }
 
   await step('dialogs are accessible', async () => {
@@ -190,7 +243,12 @@ try {
 } finally {
   app.kill();
   if (app.exitCode === null && app.signalCode === null) await Promise.race([new Promise(r => app.once('exit', r)), sleep(5000)]);
-  fs.rmSync(temp, { recursive: true, force: true });
+  // Windows keeps the profile locked for a moment after the app exits.
+  try {
+    fs.rmSync(temp, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
+  } catch (err) {
+    console.warn(`Could not remove ${temp}: ${err.message}`);
+  }
 }
 
 for (const p of passed) console.log(`✓ ${p}`);

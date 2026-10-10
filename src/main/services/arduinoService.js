@@ -629,6 +629,59 @@ class ArduinoService {
   }
 
   /**
+   * Compile for the simulator's debugger: -Og without link-time optimization,
+   * so every sketch line keeps its code and variables keep their locations.
+   * Builds in a folder of its own so these objects never mix with normal
+   * (LTO) builds of the same sketch.
+   * @returns {Promise<{ success: boolean, hex?: string, elf?: Uint8Array, sketchDirs?: string[],
+   *   buildSketchDirs?: string[], error?: string }>}
+   */
+  async compileDebug(sketchPath, boardFQBN) {
+    const os = require('os');
+    const fsSync = require('fs');
+    const crypto = require('crypto');
+    if (!this.validateFQBN(boardFQBN)) return { success: false, error: `Invalid board: "${boardFQBN}"` };
+    if (!/^arduino:avr:/.test(boardFQBN)) return { success: false, error: 'The debugger runs the simulated AVR boards (Uno, Nano, Mega).' };
+    const dir = this.sketchDir(sketchPath);
+    const key = crypto.createHash('sha1').update(`${dir}\n${boardFQBN}`).digest('hex').slice(0, 16);
+    const buildPath = path.join(os.tmpdir(), 'impulse-debug-builds', key);
+    const outputDir = fsSync.mkdtempSync(path.join(os.tmpdir(), 'impulse-debug-'));
+    const properties = [
+      'compiler.c.extra_flags=-Og -fno-lto',
+      'compiler.cpp.extra_flags=-Og -fno-lto',
+      'compiler.S.extra_flags=-fno-lto',
+      'compiler.c.elf.extra_flags=-Og',
+    ];
+    try {
+      const result = await this.runCommand([
+        'compile', '--fqbn', boardFQBN, '--build-path', buildPath,
+        ...properties.flatMap(p => ['--build-property', p]),
+        '--output-dir', outputDir, dir,
+      ], { cwd: dir, timeout: 180000 });
+      if (!result.success) {
+        return { success: false, error: ArduinoService.explainToolchainError(result.stderr) || result.stderr.trim() || 'Compile failed' };
+      }
+      const files = fsSync.readdirSync(outputDir);
+      const hexFile = files.find(f => f.endsWith('.hex') && !f.endsWith('.with_bootloader.hex'));
+      const elfFile = files.find(f => f.endsWith('.elf'));
+      if (!hexFile || !elfFile) return { success: false, error: 'The compiler produced no program' };
+      // Both spellings of each folder: the compiler records real paths (/private/var/… for /var/… on macOS).
+      const both = (p) => { try { return [...new Set([p, fsSync.realpathSync.native(p)])]; } catch { return [p]; } };
+      return {
+        success: true,
+        hex: fsSync.readFileSync(path.join(outputDir, hexFile), 'utf8'),
+        elf: new Uint8Array(fsSync.readFileSync(path.join(outputDir, elfFile))),
+        sketchDirs: both(dir),
+        buildSketchDirs: both(path.join(buildPath, 'sketch')),
+      };
+    } catch (err) {
+      return { success: false, error: err.message };
+    } finally {
+      fsSync.rmSync(outputDir, { recursive: true, force: true });
+    }
+  }
+
+  /**
    * Translate known toolchain failures into an actionable message.
    * @returns {string|null}
    */

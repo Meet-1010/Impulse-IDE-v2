@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Debugger for the simulated Uno, Nano and Mega: breakpoints in the editor gutter, step over/into/out, run to cursor, and the values of locals, globals and registers in a Debug tab, with changed values highlighted. Debug › Start Debugging (F5). Debug builds are compiled with -Og and without link-time optimization so every line can be stopped on.
 - `impulse-test`: hardware tests on the command line and in CI. It compiles each sketch, simulates it with its `diagram.json` circuit, checks its `// @expect` lines, fails on short circuits, and writes human, JSON or JUnit reports with exit codes for CI. Releases include it as a single file that needs only Node.js and arduino-cli (docs/TESTING.md).
 - First-run setup: when arduino-cli, the AVR core or (on Apple silicon) Rosetta is missing, Impulse explains what's needed and installs it with progress. arduino-cli 1.5.1 is downloaded from its official release and checked against a SHA-256 built into the app. Existing installs, including the one inside Arduino IDE 2, are found and used. Tools › Set Up Arduino Tools reruns it.
 - Release pipeline: pushing a version tag builds macOS (Intel and Apple silicon), Windows and Linux installers with auto-update metadata into a draft GitHub Release; signing and notarization run when the certificates are configured.
@@ -53,6 +54,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The end-to-end and smoke tests refuse to run when their debugging port is taken, instead of driving whichever app holds it.
 - Loading the simulator outside the app pulled in every part element just for the LCD font, and touched `localStorage` (a warning in Node 25+).
 - Accessibility: wrong ARIA roles on the activity bar, file list, editor tabs and dialogs; unlabelled AI and editor controls; nested interactive elements in tabs and part thumbnails; logs that couldn't be scrolled from the keyboard.
 - The welcome tour waited for nothing and appeared on top of first-run setup.

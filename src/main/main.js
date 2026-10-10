@@ -316,6 +316,21 @@ function buildMenu() {
       ]
     },
     {
+      label: 'Debug',
+      submenu: [
+        { label: 'Start Debugging / Continue', accelerator: 'F5', click: () => sendMenuAction('debug-start') },
+        { label: 'Stop Debugging', accelerator: 'Shift+F5', click: () => sendMenuAction('debug-stop') },
+        { type: 'separator' },
+        { label: 'Step Over', accelerator: 'F10', click: () => sendMenuAction('debug-step-over') },
+        { label: 'Step Into', accelerator: 'F11', click: () => sendMenuAction('debug-step-into') },
+        { label: 'Step Out', accelerator: 'Shift+F11', click: () => sendMenuAction('debug-step-out') },
+        { label: 'Run to Cursor', accelerator: 'CmdOrCtrl+F10', click: () => sendMenuAction('debug-run-to-cursor') },
+        { type: 'separator' },
+        { label: 'Toggle Breakpoint', accelerator: 'F9', click: () => sendMenuAction('debug-toggle-breakpoint') },
+        { label: 'Remove All Breakpoints', click: () => sendMenuAction('debug-clear-breakpoints') }
+      ]
+    },
+    {
       label: 'Tools',
       submenu: [
         { label: 'Auto Format', click: () => sendMenuAction('tools-format') },

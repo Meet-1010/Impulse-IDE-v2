@@ -177,10 +177,25 @@ function appDataDirs(platform = process.platform, env = process.env, home = os.h
   return ['Impulse IDE', 'arduino-ide-cursor'].map(name => path.join(base, name));
 }
 
+/** A command given as a path, or as a name to look up on PATH (with PATHEXT on Windows). */
+export function resolveCommand(command, env = process.env, platform = process.platform) {
+  if (/[\\/]/.test(command)) return isFile(command) ? command : null;
+  const exts = platform === 'win32' && !path.extname(command)
+    ? ['', ...String(env.PATHEXT || '.EXE;.CMD;.BAT').split(';').filter(Boolean).map(e => e.toLowerCase())]
+    : [''];
+  for (const dir of String(env.PATH || env.Path || '').split(path.delimiter).filter(Boolean)) {
+    for (const ext of exts) {
+      const candidate = path.join(dir, command + ext);
+      if (isFile(candidate)) return candidate;
+    }
+  }
+  return null;
+}
+
 /** arduino-cli to compile with: --cli, $ARDUINO_CLI, then where Impulse looks. */
 export function findCli(explicit = null, env = process.env) {
-  if (explicit) return isFile(explicit) ? explicit : null;
-  if (env.ARDUINO_CLI) return isFile(env.ARDUINO_CLI) ? env.ARDUINO_CLI : null;
+  if (explicit) return resolveCommand(explicit, env);
+  if (env.ARDUINO_CLI) return resolveCommand(env.ARDUINO_CLI, env);
   const seen = new Set();
   for (const dir of appDataDirs()) {
     for (const c of toolchain.cliCandidates({ managedDir: path.join(dir, 'toolchain'), env })) {

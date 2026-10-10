@@ -11,6 +11,7 @@ import { ensureToolchain } from './setup.js';
 import { runSimulatorCheck, renderTestReport, renderVerifyCard, isSimulatableBoard, simulationContext } from './verify.js';
 import { boardForFqbn } from './simulation/boards.js';
 import { attachPinInsights } from './pin-insights.js';
+import { attachBreakpoints } from './breakpoints.js';
 import { detectBaud, diffSerial, captureBoardSerial, renderCompareReport } from './compare.js';
 import { runHeadless } from './simulation/headless.js';
 
@@ -89,6 +90,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         attachPinInsights(state.editor, {
             getWiring: () => window.simManager?.getWiring?.() ?? null,
             onIssues: (issues) => window.dispatchEvent(new CustomEvent('impulse:pin-issues', { detail: issues }))
+        });
+        window.impulse.breakpoints = attachBreakpoints(state.editor, {
+            getFile: () => state.currentFile,
+            announce: announceStatus,
+            onChange: () => window.simManager?.onBreakpointsChanged?.()
         });
         // First run (or a missing core): offer to install the Arduino tools.
         await ensureToolchain();
@@ -454,6 +460,31 @@ async function handleMenuAction(action, payload) {
             break;
         case 'sketch-run-tests':
             runHardwareTests();
+            break;
+        case 'debug-start':
+            window.impulse.showSimulator();
+            window.simManager?.debugStart();
+            break;
+        case 'debug-stop':
+            if (window.simManager?.debug) window.simManager.stop();
+            break;
+        case 'debug-step-over':
+            window.simManager?.debugAction('stepOver');
+            break;
+        case 'debug-step-into':
+            window.simManager?.debugAction('stepInto');
+            break;
+        case 'debug-step-out':
+            window.simManager?.debugAction('stepOut');
+            break;
+        case 'debug-run-to-cursor':
+            window.simManager?.debugRunToCursor();
+            break;
+        case 'debug-toggle-breakpoint':
+            window.impulse.breakpoints?.toggle();
+            break;
+        case 'debug-clear-breakpoints':
+            window.impulse.breakpoints?.clearAll();
             break;
         case 'sketch-compare-board':
             compareSimulatorWithBoard();
@@ -4813,6 +4844,20 @@ function updateBoardPortDisplay(boardName, port) {
 // The simulator keeps each sketch's circuit in diagram.json next to it, so it
 // needs to know when the open sketch or the upload board changes.
 let announcedSketch;
+/** Read a short message to screen readers. */
+function announceStatus(text) {
+    let el = document.getElementById('srStatus');
+    if (!el) {
+        el = document.createElement('div');
+        el.id = 'srStatus';
+        el.className = 'sr-only';
+        el.setAttribute('role', 'status');
+        el.setAttribute('aria-live', 'polite');
+        document.body.appendChild(el);
+    }
+    el.textContent = text;
+}
+
 function announceSketch() {
     if (announcedSketch === state.currentSketch) return;
     announcedSketch = state.currentSketch;
@@ -4932,6 +4977,21 @@ window.impulse = {
         addOrFocusFile(filePath, res.content, filePath.split(/[/\\]/).pop());
         switchToTab(state.openFiles.findIndex(f => f.path === filePath));
         saveSession();
+        return true;
+    },
+    /** Open a file (if it isn't already) and scroll to a line. */
+    async revealLine(filePath, line) {
+        const same = (a, b) => a.replace(/\\/g, '/').toLowerCase() === b.replace(/\\/g, '/').toLowerCase();
+        let index = state.openFiles.findIndex(f => same(f.path, filePath));
+        if (index < 0) {
+            const res = await window.electronAPI.file.read(filePath);
+            if (!res?.success) return false;
+            showEditor();
+            addOrFocusFile(filePath, res.content, filePath.split(/[/\\]/).pop());
+            index = state.openFiles.findIndex(f => same(f.path, filePath));
+        }
+        if (index !== state.activeTabIndex) switchToTab(index);
+        if (state.editor && line) state.editor.scrollIntoView({ line: line - 1, ch: 0 }, 80);
         return true;
     },
     showSimulator() {

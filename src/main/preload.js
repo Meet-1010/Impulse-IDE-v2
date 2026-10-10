@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   arduino: {
     compile: (sketchPath, boardFQBN) => ipcRenderer.invoke('arduino:compile', sketchPath, boardFQBN),
     compileHex: (sketchPath, boardFQBN) => ipcRenderer.invoke('arduino:compile-hex', sketchPath, boardFQBN),
+    compileDebug: (sketchPath, boardFQBN) => ipcRenderer.invoke('arduino:compile-debug', sketchPath, boardFQBN),
     upload: (sketchPath, boardFQBN, port) => ipcRenderer.invoke('arduino:upload', sketchPath, boardFQBN, port),
     listBoards: () => ipcRenderer.invoke('arduino:list-boards'),
     listPorts: () => ipcRenderer.invoke('arduino:list-ports'),

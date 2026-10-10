@@ -175,7 +175,12 @@ arduino-cli compile ──► app .hex ──► AvrRunner (avr8js) ◄──►
 | `search.js`, `ui/` | Part picker (search with typo tolerance, synonyms and advice for things that aren't simulated), inspector, examples gallery. |
 | `examples.js` | Example projects (sketch + circuit); each is compiled and run by the test suite. |
 | `headless.js`, `expectations.js` | Runs firmware without a DOM for hardware tests (`// @expect …`) and AI verification. |
-| `index.js` | `SimulationManager`: toolbar, board switching, persistence (diagram.json next to the sketch), circuit checks, serial pane, logic analyzer, AI circuit builder and agent loop. |
+| `dwarf.js`, `debugger.js` | Source-level debugger. `dwarf.js` reads the line table, functions, variables, types and location lists (DWARF 2–4) straight from the ELF. `debugger.js` maps flash words to sketch lines, stops the CPU between instructions through `AvrRunner.stopCheck` (breakpoints, step into/over/out by line and stack depth, run to cursor) and evaluates DWARF location expressions to show locals, globals and registers. |
+| `index.js` | `SimulationManager`: toolbar, board switching, persistence (diagram.json next to the sketch), circuit checks, serial pane, logic analyzer, debugger session, AI circuit builder and agent loop. |
+
+Debug builds (`arduino:compile-debug`) use `-Og` without link-time optimization, in a build folder of their own, because LTO folds most of a sketch's line information away. Breakpoints live in the editor (`src/renderer/breakpoints.js`) per file and survive restarts.
+
+`src/cli/impulse-test.js` (`bin/impulse-test.mjs`) runs the same headless simulator from the command line for CI; see docs/TESTING.md.
 
 Circuits are saved as `diagram.json` beside the sketch. Opening an example writes the sketch and its diagram to `<sketchbook>/Impulse Examples/<name>/`.
 
@@ -235,6 +240,7 @@ Display in AI panel
 
 ### Simulator
 - `arduino:compile-hex` - Compile for a simulated board and return the application HEX
+- `arduino:compile-debug` - Debug build (-Og, no LTO): HEX, ELF and the sketch folder's paths
 - `sketch:create-example` - Write an example sketch and its `diagram.json` into the sketchbook
 - `dialog:open-diagram` / `dialog:save-diagram` - Import and export circuits
 - `ai:generate-circuit` - Build a circuit for the current sketch

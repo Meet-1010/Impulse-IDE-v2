@@ -2,7 +2,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import {
-  main, parseArgs, findSketches, findCli, junitReport, exitCode, diagramBoard, loadDiagram, UsageError, EXIT,
+  main, parseArgs, findSketches, findCli, resolveCommand, junitReport, exitCode, diagramBoard, loadDiagram, UsageError, EXIT,
 } from '../impulse-test.js';
 import { exampleById, exampleDiagram } from '../../renderer/simulation/examples.js';
 import { wordsToHex, TOGGLE_D13 } from '../../renderer/simulation/__tests__/helpers.js';
@@ -74,12 +74,17 @@ describe('finding sketches', () => {
     expect(() => findSketches(fs.mkdtempSync(path.join(temp, 'empty-')))).toThrow(/No Arduino sketches/);
   });
 
-  test('arduino-cli: an explicit path must exist', () => {
+  test('arduino-cli: a path must exist; a bare name is looked up on PATH', () => {
     expect(findCli(path.join(temp, 'arduino-cli'))).toBeNull();
     const fake = path.join(temp, 'arduino-cli');
     fs.writeFileSync(fake, '');
     expect(findCli(fake)).toBe(fake);
     expect(findCli(null, { ARDUINO_CLI: fake })).toBe(fake);
+    expect(findCli('arduino-cli', { PATH: ['/nonexistent', temp].join(path.delimiter) })).toBe(fake);
+    expect(findCli('arduino-cli', { PATH: '/nonexistent' })).toBeNull();
+    expect(resolveCommand('arduino-cli', { PATH: temp, PATHEXT: '.EXE' }, 'win32')).toBe(fake);
+    fs.writeFileSync(path.join(temp, 'tool.exe'), '');
+    expect(resolveCommand('tool', { PATH: temp, PATHEXT: '.EXE;.CMD' }, 'win32')).toBe(path.join(temp, 'tool.exe'));
   });
 });
 

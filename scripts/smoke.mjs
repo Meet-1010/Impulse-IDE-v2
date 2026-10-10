@@ -4,16 +4,30 @@
 
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = 9399;
+await assertPortFree(PORT);
 const electron = (await import('electron')).default;
 // A throwaway profile: the simulator steps add parts, which must not touch real sketches.
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'impulse-smoke-'));
 
+/** Fail fast when a debugging port is taken: the test would drive whatever app holds it. */
+async function assertPortFree(port) {
+  const free = await new Promise((resolve) => {
+    const server = net.createServer();
+    server.once('error', () => resolve(false));
+    server.listen(port, '127.0.0.1', () => server.close(() => resolve(true)));
+  });
+  if (!free) {
+    console.error(`Port ${port} is in use (another Impulse or Chrome debugging session?). Close it and run again.`);
+    process.exit(2);
+  }
+}
 const args = [root, `--remote-debugging-port=${PORT}`, `--user-data-dir=${profile}`];
 if (process.platform === 'linux') args.push('--no-sandbox', '--disable-gpu');
 const app = spawn(electron, args, { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ELECTRON_ENABLE_LOGGING: '1' } });
@@ -112,7 +126,12 @@ try {
 } finally {
   app.kill();
   if (app.exitCode === null && app.signalCode === null) await Promise.race([new Promise(r => app.once('exit', r)), sleep(5000)]);
-  fs.rmSync(profile, { recursive: true, force: true });
+  // Windows keeps the profile locked for a moment after the app exits.
+  try {
+    fs.rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
+  } catch (err) {
+    console.warn(`Could not remove ${profile}: ${err.message}`);
+  }
 }
 
 if (problems.length) {

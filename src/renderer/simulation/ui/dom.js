@@ -58,6 +58,11 @@ const ICON_PATHS = {
   grid: '<rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/>',
   wire: '<path d="M4 18c4 0 4-12 8-12s4 12 8 12"/><circle cx="4" cy="18" r="1.6" fill="currentColor"/><circle cx="20" cy="18" r="1.6" fill="currentColor"/>',
   bolt: '<path d="M13 2L4 14h7l-1 8 9-12h-7z"/>',
+  bug: '<path d="M8 10a4 4 0 0 1 8 0v4a4 4 0 0 1-8 0z"/><path d="M12 10v8M4 13h4M16 13h4M5 7.5l3 2M19 7.5l-3 2M5 19.5l3-2M19 19.5l-3-2M9.5 6.5L8 4.5M14.5 6.5L16 4.5"/>',
+  continue: '<path d="M6 5.5v13"/><path d="M10.5 5.5v13l9-6.5z" fill="currentColor" stroke="none"/>',
+  stepOver: '<path d="M4.5 13.5a7.5 7.5 0 0 1 14.2-3.4"/><path d="M19.5 5v5.5H14"/><circle cx="12" cy="18.5" r="2" fill="currentColor" stroke="none"/>',
+  stepInto: '<path d="M12 3.5v10"/><path d="M8 10l4 4 4-4"/><circle cx="12" cy="19.5" r="2" fill="currentColor" stroke="none"/>',
+  stepOut: '<path d="M12 15V4.5"/><path d="M8 8.5l4-4 4 4"/><circle cx="12" cy="19.5" r="2" fill="currentColor" stroke="none"/>',
 };
 
 export function icon(name, size = 16) {
