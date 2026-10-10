@@ -3,9 +3,12 @@
 // the DWARF information of a debug build (see dwarf.js) and stops the CPU
 // between instructions through AvrRunner.stopCheck.
 
-import { DATA_OFFSET, ENCODING } from './dwarf.js';
+import { DATA_OFFSET, ENCODING, frameRules } from './dwarf.js';
 
 const KEY_STRIDE = 1_000_000; // line key = file index * stride + line
+const MAX_FRAMES = 32;
+// Registers a called function must preserve (avr-gcc ABI); r1 is always zero in C code.
+const CALL_SAVED = new Set([2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 28, 29]);
 const MAX_CHILDREN = 256;
 const MAX_STRING = 200;
 
@@ -272,6 +275,60 @@ export class Debugger {
     this._mode = null;
   }
 
+  // ── Call stack ────────────────────────────────────────────────────────────
+
+  _topFrame() {
+    const cpu = this.runner.cpu;
+    return { pc: cpu.pc * 2, lookupPc: cpu.pc * 2, sp: cpu.SP, regs: Array.from(cpu.data.subarray(0, 32)) };
+  }
+
+  _fdeAt(pc) {
+    return this.info.frames?.find(f => pc >= f.low && pc < f.high) || null;
+  }
+
+  /** The calling frame, from the frame description of the function `frame` is in. */
+  _caller(frame) {
+    const fde = this._fdeAt(frame.lookupPc);
+    const rules = fde && frameRules(fde, frame.lookupPc);
+    if (!rules) return null;
+    const base = rules.cfaReg === 32 ? frame.sp : pair(frame.regs, rules.cfaReg);
+    if (base === null) return null;
+    const cfa = base + rules.cfaOffset;
+    const ra = rules.rules.get(fde.cie.raReg);
+    if (!ra || ra[0] !== 'offset') return null;
+    const data = this.runner.cpu.data;
+    const pcBytes = this.runner.cpu.pc22Bits ? 3 : 2;
+    let word = 0;
+    for (let i = 0; i < pcBytes; i++) word = word * 256 + (data[cfa + ra[1] + i] ?? 0);
+    if (!word || word >= this.lineKey.length) return null;
+    const regs = frame.regs.map((v, n) => (n === 1 ? 0 : CALL_SAVED.has(n) ? v : null));
+    for (const [reg, rule] of rules.rules) {
+      if (reg >= 32) continue;
+      if (rule[0] === 'offset') regs[reg] = data[cfa + rule[1]] ?? null;
+      else if (rule[0] === 'undefined') regs[reg] = null;
+      else if (rule[0] === 'register') regs[reg] = frame.regs[rule[1]] ?? null;
+    }
+    // A return address points after the call; its line is the call's.
+    return { pc: word * 2, lookupPc: word * 2 - 2, sp: cfa, regs };
+  }
+
+  /**
+   * Frames from the current one outwards, to main().
+   * @returns {{ index: number, function: string|null, file: string|null, line: number|null, inSketch: boolean, pc: number }[]}
+   */
+  callStack() {
+    const out = [];
+    let frame = this._topFrame();
+    for (let i = 0; frame && i < MAX_FRAMES; i++) {
+      const fn = this.functionAt(frame.lookupPc);
+      const at = this.lineAt(frame.lookupPc >> 1);
+      out.push({ index: i, function: fn ? displayName(fn.name) : null, file: at?.file || null, line: at?.line || null, inSketch: !!at, pc: frame.pc, frame });
+      if (!fn || fn.name === 'main') break;
+      frame = this._caller(frame);
+    }
+    return out;
+  }
+
   // ── Values ────────────────────────────────────────────────────────────────
 
   registers() {
@@ -299,15 +356,22 @@ export class Debugger {
         : this._variable(g, null)));
   }
 
-  /** Parameters and locals of the function the CPU is in. */
-  locals() {
-    const pcByte = this.runner.cpu.pc * 2;
+  /** Parameters and locals of a frame's function (0: where the CPU is). */
+  locals(frameIndex = 0) {
+    const frame = frameIndex === 0 ? this._topFrame() : this.callStack()[frameIndex]?.frame;
+    if (!frame) return [];
+    const pcByte = frame.lookupPc;
     const fn = this.functionAt(pcByte);
     if (!fn) return [];
     const vars = [...fn.vars];
     for (const b of fn.blocks) if (pcByte >= b.low && pcByte < b.high) vars.push(...b.vars);
-    const frameBase = fn.frameBase ? this._evalAddress(fn.frameBase, pcByte, null) : null;
-    return vars.map(v => this._variable(v, frameBase, pcByte));
+    this._frame = frame;
+    try {
+      const frameBase = fn.frameBase ? this._evalAddress(fn.frameBase, pcByte) : null;
+      return vars.map(v => this._variable(v, frameBase, pcByte));
+    } finally {
+      this._frame = null;
+    }
   }
 
   _variable(v, frameBase, pcByte = this.runner.cpu.pc * 2) {
@@ -320,7 +384,7 @@ export class Debugger {
       const expr = pickExpr(v.loc, pcByte);
       if (!expr) return { name: v.name, type: typeName, value: 'optimized out here', unavailable: true, param: v.param };
       const r = this._evaluate(expr, size || 1, frameBase);
-      if (r.error) return { name: v.name, type: typeName, value: r.error, unavailable: true, param: v.param };
+      if (r.error || !r.bytes) return { name: v.name, type: typeName, value: r.error || 'not available in this frame', unavailable: true, param: v.param };
       bytes = r.bytes;
     }
     return { name: v.name, type: typeName, param: v.param, ...this.format(v.type, bytes, 0) };
@@ -331,16 +395,28 @@ export class Debugger {
     if (!expr) return null;
     const r = this._run(expr, null);
     if (r.error) return null;
-    if (r.loc?.kind === 'reg') return this._regValue(r.loc.reg);
+    if (r.loc?.kind === 'reg') {
+      try {
+        return this._regValue(r.loc.reg);
+      } catch {
+        return null;
+      }
+    }
     return r.stack.length ? r.stack[r.stack.length - 1] : null;
   }
 
+  /** Registers of the frame being evaluated (the CPU's own unless a caller's frame is selected). */
+  _regs() {
+    return this._frame || { sp: this.runner.cpu.SP, regs: Array.from(this.runner.cpu.data.subarray(0, 32)) };
+  }
+
+  /** A register as an address-sized value (a pair from rN); throws when a caller's register is unknown. */
   _regValue(n) {
-    const cpu = this.runner.cpu;
-    if (n === 32) return cpu.SP;
-    if (n >= 0 && n < 31) return cpu.data[n] | (cpu.data[n + 1] << 8);
-    if (n === 31) return cpu.data[31];
-    return 0;
+    const f = this._regs();
+    if (n === 32) return f.sp;
+    const v = n === 31 ? f.regs[31] : pair(f.regs, n);
+    if (v === null || v === undefined) throw new Error('unavailable');
+    return v;
   }
 
   /** Run a DWARF expression: the final stack, pieces and pending location. */
@@ -415,11 +491,12 @@ export class Debugger {
     const r = this._run(expr, frameBase);
     if (r.error) return r;
     const readLoc = (loc, n) => {
-      const cpu = this.runner.cpu;
       if (!loc) return null;
       if (loc.kind === 'reg') {
-        if (loc.reg === 32) return intBytes(cpu.SP, n);
-        return Uint8Array.from({ length: n }, (_, i) => cpu.data[loc.reg + i] ?? 0);
+        const f = this._regs();
+        if (loc.reg === 32) return intBytes(f.sp, n);
+        const bytes = Array.from({ length: n }, (_, i) => f.regs[loc.reg + i]);
+        return bytes.some(b => b === null || b === undefined) ? null : Uint8Array.from(bytes);
       }
       if (loc.kind === 'value') return intBytes(loc.value, n);
       if (loc.kind === 'bytes') return Uint8Array.from({ length: n }, (_, i) => loc.bytes[i] ?? 0);
@@ -578,6 +655,13 @@ export class Debugger {
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
+
+/** A little-endian register pair rN:rN+1, or null when either is unknown. */
+function pair(regs, n) {
+  const lo = regs[n];
+  const hi = regs[n + 1];
+  return lo === null || lo === undefined || hi === null || hi === undefined ? null : lo | (hi << 8);
+}
 
 /** Compiler-generated function names, readable. */
 function displayName(name) {

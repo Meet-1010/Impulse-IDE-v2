@@ -190,6 +190,8 @@ try {
       let text = await pane();
       if (!text.includes(`loop() · button.ino:${bpLine}`)) throw new Error(`stopped somewhere else: ${text.slice(0, 120)}`);
       if (!/Breakpoint/.test(text)) throw new Error('the stop reason is missing');
+      const frames = await evaluate(`[...document.querySelectorAll('#simDebugPane .dbg-frame .dbg-name')].map(n => n.textContent).join(' < ')`);
+      if (frames !== 'loop() < main()') throw new Error(`the call stack shows "${frames}"`);
       if (!await evaluate(`!!document.querySelector('.CodeMirror .cm-debug-current')`)) throw new Error('the current line is not highlighted');
       const row = (name) => evaluate(`(() => { const r = [...document.querySelectorAll('#simDebugPane .dbg-row')].find(r => r.querySelector('.dbg-name')?.firstChild?.textContent === ${JSON.stringify(name)}); return r ? r.querySelector('.dbg-value').textContent + (r.classList.contains('changed') ? ' (changed)' : '') : null; })()`);
       if (await row('pressed') !== 'true') throw new Error(`local "pressed" shows ${await row('pressed')}`);

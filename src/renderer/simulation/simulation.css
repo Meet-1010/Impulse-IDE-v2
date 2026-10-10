@@ -1291,6 +1291,25 @@ summary.dbg-row::marker { color: var(--ds-text-4); }
 .dbg-reg-line { display: flex; gap: 10px; padding: 1px 6px; }
 .dbg-reg-line .dbg-name { flex: none; width: 44px; }
 
+.dbg-frame {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 2px 6px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ds-text);
+  font: 12.5px var(--font-ui);
+  text-align: left;
+  cursor: pointer;
+}
+.dbg-frame:hover { background: var(--ds-hover); }
+.dbg-frame.selected { background: var(--ds-active); }
+.dbg-frame.outside .dbg-name { color: var(--ds-text-3); }
+
 .dbg-bp { display: flex; align-items: center; gap: 8px; padding: 1px 6px; }
 .dbg-bp .bp-marker { margin: 0; flex: none; }
 .dbg-bp-loc {

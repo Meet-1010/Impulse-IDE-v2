@@ -206,6 +206,7 @@ export class SimulationManager {
     this.debugPane = new DebugPane(this.debugPaneEl, {
       onOpenLocation: (file, line) => window.impulse?.revealLine?.(file, line),
       onRemoveBreakpoint: (file, line) => this._removeBreakpoint(file, line),
+      onSelectFrame: (index) => this._selectFrame(index),
     });
 
     // Toolbar
@@ -1200,13 +1201,42 @@ export class SimulationManager {
     window.impulse?.breakpoints?.setCurrent(file ? { file, line: location.line } : null);
     if (file) window.impulse?.revealLine?.(file, location.line);
     this._showPane('debug');
-    const dbg = session.dbg;
-    this.debugPane.stopped({ reason: s.reason, location, locals: dbg.locals(), globals: dbg.globals(), registers: dbg.registers(), breakpoints: this._breakpointList() });
+    session.reason = s.reason;
+    session.frame = 0;
+    session.stack = session.dbg.callStack().map(f => ({ ...f, file: f.file ? this._appPath(f.file) : null }));
+    this._renderStopped();
     const t = this.runner.time;
     this.timeLabel.textContent = `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(Math.floor(t % 60)).padStart(2, '0')}.${String(Math.floor((t % 1) * 1000)).padStart(3, '0')}`;
     this.announcer.textContent = location.inSketch
       ? `Stopped at line ${location.line}${location.function ? ` in ${location.function}` : ''}`
       : `Paused in ${location.function || 'Arduino core code'}`;
+  }
+
+  _renderStopped() {
+    const session = this.debug;
+    const dbg = session.dbg;
+    const loc = dbg.location();
+    this.debugPane.stopped({
+      reason: session.reason,
+      location: { ...loc, file: loc.file ? this._appPath(loc.file) : null },
+      stack: session.stack,
+      frame: session.frame,
+      locals: dbg.locals(session.frame),
+      globals: dbg.globals(),
+      registers: dbg.registers(),
+      breakpoints: this._breakpointList(),
+    });
+  }
+
+  /** Show a caller's locals and line. */
+  _selectFrame(index) {
+    const session = this.debug;
+    if (!session?.stopped || !session.stack?.[index]) return;
+    session.frame = index;
+    const f = session.stack[index];
+    window.impulse?.breakpoints?.setFrame(index > 0 && f.file ? { file: f.file, line: f.line } : null);
+    if (f.file) window.impulse?.revealLine?.(f.file, f.line);
+    this._renderStopped();
   }
 
   /** The app's spelling of a sketch file path from the debugger. */
@@ -1263,11 +1293,7 @@ export class SimulationManager {
   /** The editor's breakpoints changed. */
   onBreakpointsChanged() {
     this._syncBreakpoints();
-    if (this.debug?.stopped && !this.debugPaneEl.hidden) {
-      const dbg = this.debug.dbg;
-      const loc = dbg.location();
-      this.debugPane.stopped({ reason: dbg.stopReason, location: { ...loc, file: loc.file ? this._appPath(loc.file) : null }, locals: dbg.locals(), globals: dbg.globals(), registers: dbg.registers(), breakpoints: this._breakpointList() });
-    }
+    if (this.debug?.stopped && !this.debugPaneEl.hidden) this._renderStopped();
   }
 
   _endDebug() {

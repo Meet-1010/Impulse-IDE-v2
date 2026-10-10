@@ -10,12 +10,13 @@ export class DebugPane {
   /**
    * @param {HTMLElement} el
    * @param {{ onOpenLocation: (file: string, line: number) => void,
-   *   onRemoveBreakpoint: (file: string, line: number) => void }} actions
+   *   onRemoveBreakpoint: (file: string, line: number) => void,
+   *   onSelectFrame: (index: number) => void }} actions
    */
   constructor(el, actions) {
     this.el = el;
     this.actions = actions;
-    this.expanded = new Set(['locals', 'globals', 'breakpoints']);
+    this.expanded = new Set(['stack', 'locals', 'globals', 'breakpoints']);
     this.previous = new Map();
     this.idle([]);
   }
@@ -36,10 +37,13 @@ export class DebugPane {
   }
 
   /**
-   * @param {{ reason: string, location: object, locals: object[], globals: object[], registers: object, breakpoints: object[] }} s
+   * @param {{ reason: string, location: object, stack: object[], frame: number, locals: object[], globals: object[],
+   *   registers: object, breakpoints: object[] }} s - frame: the selected stack frame (0 is where the CPU is)
    */
   stopped(s) {
     const { location } = s;
+    const frame = s.stack?.[s.frame || 0];
+    const fnName = frame?.function || location.function;
     const why = { breakpoint: 'Breakpoint', step: 'Step', pause: 'Paused', cursor: 'Run to cursor' }[s.reason] || 'Paused';
     const where = location.inSketch
       ? h('button', { type: 'button', class: 'dbg-loc', title: 'Show this line', onclick: () => this.actions.onOpenLocation(location.file, location.line) },
@@ -49,13 +53,26 @@ export class DebugPane {
 
     const seen = new Map();
     const sections = [
-      this._section('locals', ['Locals', location.function ? h('span', { class: 'dbg-fn' }, ` · ${location.function}()`) : null], s.locals, 'locals', seen, 'No locals here.'),
+      s.stack?.length ? this._stack(s.stack, s.frame || 0) : null,
+      this._section('locals', ['Locals', fnName ? h('span', { class: 'dbg-fn' }, ` · ${fnName}()`) : null], s.locals, `locals.${s.frame || 0}.${fnName}`, seen, 'No locals here.'),
       this._section('globals', 'Globals', s.globals, 'globals', seen, 'This sketch has no global variables.'),
       this._registers(s.registers),
       this._breakpoints(s.breakpoints),
     ];
     this.previous = seen;
-    this.el.replaceChildren(status, ...sections);
+    this.el.replaceChildren(status, ...sections.filter(Boolean));
+  }
+
+  _stack(stack, selected) {
+    const rows = stack.map(f => h('button', {
+      type: 'button',
+      class: `dbg-frame${f.index === selected ? ' selected' : ''}${f.inSketch ? '' : ' outside'}`,
+      'aria-current': f.index === selected ? 'true' : null,
+      onclick: () => this.actions.onSelectFrame(f.index),
+    },
+    h('span', { class: 'dbg-name' }, f.function ? `${f.function}()` : `0x${f.pc.toString(16)}`),
+    h('span', { class: 'dbg-type mono' }, f.inSketch ? `${baseName(f.file)}:${f.line}` : 'Arduino core')));
+    return this._details('stack', 'Call stack', h('div', { class: 'dbg-vars' }, ...rows));
   }
 
   _details(key, title, ...body) {

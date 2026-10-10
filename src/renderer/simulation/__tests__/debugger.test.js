@@ -208,6 +208,10 @@ describeWithCli('debugger on a debug build', () => {
     // Compiled from the build folder's copy, shown as the sketch's own file.
     expect(stop.location.file).toBe(cpp.replace(/\\/g, '/'));
     expect(dbg.locals().find(v => v.name === 'v')).toMatchObject({ param: true, value: '2' });
+    // The call stack, from the frame descriptions.
+    expect(dbg.callStack().map(f => [f.function, f.line])).toEqual([
+      ['scale', lineOf(HELPER_CPP, 'long r =')], ['loop', L('ticks = scale(counter)')], ['main', null],
+    ]);
     stop = run(() => dbg.stepOut());
     expect(stop.location.function).toBe('loop');
     expect(stop.location.line).toBe(L('ticks = scale(counter)'));
@@ -235,6 +239,21 @@ describeWithCli('debugger on a debug build', () => {
     expect(stop.location.function).toBe('twice');
     const locals = Object.fromEntries(dbg.locals().map(v => [v.name, v.value]));
     expect(locals.x).toBe('3');
+    expect(dbg.callStack().map(f => f.function)).toEqual(['twice', 'loop', 'main']);
+
+    // Paused inside the Arduino core: the stack leads back to the sketch.
+    dbg.setBreakpoints(ino, [L('delay(10)')]);
+    run(() => dbg.continue());
+    dbg.setBreakpoints(ino, []);
+    dbg.runner.stopCheck = null;
+    dbg.runner.step(16000 * 3);
+    const inDelay = dbg.callStack();
+    // Somewhere in delay() (or micros(), which it calls).
+    expect(inDelay[0].inSketch).toBe(false);
+    const names = inDelay.map(f => f.function);
+    expect(names.slice(names.indexOf('delay'))).toEqual(['delay', 'loop', 'main']);
+    expect(inDelay.find(f => f.function === 'loop').line).toBe(L('delay(10)'));
+    dbg.runner.stopCheck = (cpu) => dbg._check(cpu);
 
     // Run to a line, and pause anywhere.
     expect(dbg.runToLine(ino, L('digitalWrite(13'))).toBe(true);
@@ -249,6 +268,11 @@ describeWithCli('debugger on a debug build', () => {
   test('a Mega (22-bit program counter) stops and steps too', async () => {
     const code = `int n = 0;
 
+int bump(int v) {
+  int w = v + 1;
+  return w;
+}
+
 void setup() {
   pinMode(13, OUTPUT);
 }
@@ -256,6 +280,7 @@ void setup() {
 void loop() {
   n++;
   digitalWrite(13, n & 1);
+  n = bump(n) - 1;
   delay(5);
 }
 `;
@@ -271,5 +296,14 @@ void loop() {
     expect(dbg.globals().find(g => g.name === 'n').value).toBe('1');
     stop = run(() => dbg.stepOver());
     expect(dbg.globals().find(g => g.name === 'n').value).toBe('2');
+    // Into bump(): three-byte return addresses unwind to loop().
+    stop = run(() => dbg.stepOver());
+    expect(stop.location.line).toBe(lineOf(code, 'n = bump(n)'));
+    stop = run(() => dbg.stepInto());
+    expect(stop.location.function).toBe('bump');
+    expect(dbg.callStack().map(f => [f.function, f.line])).toEqual([
+      ['bump', stop.location.line], ['loop', lineOf(code, 'n = bump(n)')], ['main', null],
+    ]);
+    expect(dbg.locals().find(v => v.name === 'v').value).toBe('2');
   }, 240000);
 });

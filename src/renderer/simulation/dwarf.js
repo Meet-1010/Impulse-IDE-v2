@@ -382,7 +382,7 @@ const isLocList = (v) => typeof v === 'number';
  * @returns {{
  *   files: string[],
  *   rows: { address: number, file: number, line: number, stmt: boolean, end: boolean }[],
- *   functions: object[], globals: object[], types: Map<number, object>, inlined: object[]
+ *   functions: object[], globals: object[], types: Map<number, object>, inlined: object[], frames: object[]
  * }}
  *   Paths use forward slashes. Addresses are byte addresses in flash.
  */
@@ -534,7 +534,13 @@ export function readDebugInfo(elfBytes) {
     }
   }
   functions.sort((a, b) => a.low - b.low);
-  return { files, rows, functions, globals, types, inlined };
+  let frames = [];
+  try {
+    frames = readFrames(elfBytes, units[0]?.addressSize || 4);
+  } catch {
+    frames = []; // no call stack, everything else still works
+  }
+  return { files, rows, functions, globals, types, inlined, frames };
 }
 
 function typeOf(die, cu) {
@@ -575,4 +581,127 @@ function typeOf(die, cu) {
       return { ...base, kind, members, declaration: !!a[AT.declaration] };
     }
   }
+}
+
+// ── Call frame information (.debug_frame) ──────────────────────────────────
+
+/**
+ * Decode call frame instructions into [op, ...operands] (addresses scaled by
+ * the code alignment factor, offsets by the data alignment factor).
+ */
+function decodeCfa(bytes, cie, addressSize) {
+  const r = new Reader(bytes);
+  const out = [];
+  while (r.pos < bytes.length) {
+    const op = r.u8();
+    const high = op & 0xc0;
+    const low = op & 0x3f;
+    if (high === 0x40) { out.push(['advance', low * cie.codeAlign]); continue; }
+    if (high === 0x80) { out.push(['offset', low, r.uleb() * cie.dataAlign]); continue; }
+    if (high === 0xc0) { out.push(['restore', low]); continue; }
+    switch (op) {
+      case 0x00: break;
+      case 0x01: out.push(['set_loc', r.addr(addressSize)]); break;
+      case 0x02: out.push(['advance', r.u8() * cie.codeAlign]); break;
+      case 0x03: out.push(['advance', r.u16() * cie.codeAlign]); break;
+      case 0x04: out.push(['advance', r.u32() * cie.codeAlign]); break;
+      case 0x05: out.push(['offset', r.uleb(), r.uleb() * cie.dataAlign]); break;
+      case 0x06: out.push(['restore', r.uleb()]); break;
+      case 0x07: out.push(['undefined', r.uleb()]); break;
+      case 0x08: out.push(['same', r.uleb()]); break;
+      case 0x09: out.push(['register', r.uleb(), r.uleb()]); break;
+      case 0x0a: out.push(['remember']); break;
+      case 0x0b: out.push(['restore_state']); break;
+      case 0x0c: out.push(['def_cfa', r.uleb(), r.uleb()]); break;
+      case 0x0d: out.push(['def_cfa_register', r.uleb()]); break;
+      case 0x0e: out.push(['def_cfa_offset', r.uleb()]); break;
+      case 0x11: out.push(['offset', r.uleb(), r.sleb() * cie.dataAlign]); break;
+      case 0x12: out.push(['def_cfa', r.uleb(), r.sleb() * cie.dataAlign]); break;
+      case 0x13: out.push(['def_cfa_offset', r.sleb() * cie.dataAlign]); break;
+      case 0x2e: r.uleb(); break; // GNU_args_size
+      default:
+        out.push(['unsupported', op]);
+        return out;
+    }
+  }
+  return out;
+}
+
+/**
+ * Frame descriptions from .debug_frame.
+ * @returns {{ low: number, high: number, cie: object, instructions: any[][] }[]} sorted by address
+ */
+export function readFrames(elfBytes, addressSize = 4) {
+  const sections = elfSections(elfBytes);
+  const data = sections.get('.debug_frame')?.data;
+  if (!data) return [];
+  const cies = new Map();
+  const fdes = [];
+  const r = new Reader(data);
+  while (r.pos + 4 <= data.length) {
+    const start = r.pos;
+    const length = r.u32();
+    if (length === 0) continue;
+    if (length === 0xffffffff) throw new Error('64-bit DWARF is not supported');
+    const end = r.pos + length;
+    const id = r.u32();
+    if (id === 0xffffffff) {
+      const version = r.u8();
+      const augmentation = r.cstr();
+      if (version >= 4) { r.u8(); r.u8(); }
+      const cie = { codeAlign: r.uleb(), dataAlign: r.sleb(), raReg: version === 1 ? r.u8() : r.uleb() };
+      if (augmentation) { r.pos = end; continue; } // augmented CIEs are not produced by avr-gcc for .debug_frame
+      cie.initial = decodeCfa(data.subarray(r.pos, end), cie, addressSize);
+      cies.set(start, cie);
+    } else {
+      const cie = cies.get(id);
+      const low = r.addr(addressSize);
+      const range = r.addr(addressSize);
+      if (cie) fdes.push({ low, high: low + range, cie, instructions: decodeCfa(data.subarray(r.pos, end), cie, addressSize) });
+    }
+    r.pos = end;
+  }
+  return fdes.sort((a, b) => a.low - b.low);
+}
+
+/**
+ * The unwind rules in effect at byte address `pc` of a frame description.
+ * @returns {{ cfaReg: number, cfaOffset: number, rules: Map<number, ['offset', number] | ['same'] | ['undefined'] | ['register', number]> } | null}
+ */
+export function frameRules(fde, pc) {
+  let cfaReg = 0;
+  let cfaOffset = 0;
+  let rules = new Map();
+  let initialRules = null;
+  const stack = [];
+  let loc = fde.low;
+  const run = (ops, limited) => {
+    for (const [op, a, b] of ops) {
+      if (limited && (op === 'advance' || op === 'set_loc')) {
+        const next = op === 'advance' ? loc + a : a;
+        if (next > pc) return false;
+        loc = next;
+        continue;
+      }
+      switch (op) {
+        case 'def_cfa': cfaReg = a; cfaOffset = b; break;
+        case 'def_cfa_register': cfaReg = a; break;
+        case 'def_cfa_offset': cfaOffset = a; break;
+        case 'offset': rules.set(a, ['offset', b]); break;
+        case 'restore': if (initialRules?.has(a)) rules.set(a, initialRules.get(a)); else rules.delete(a); break;
+        case 'undefined': rules.set(a, ['undefined']); break;
+        case 'same': rules.set(a, ['same']); break;
+        case 'register': rules.set(a, ['register', b]); break;
+        case 'remember': stack.push({ cfaReg, cfaOffset, rules: new Map(rules) }); break;
+        case 'restore_state': { const s = stack.pop(); if (s) ({ cfaReg, cfaOffset, rules } = s); break; }
+        case 'unsupported': return null;
+        default:
+      }
+    }
+    return true;
+  };
+  if (run(fde.cie.initial, false) === null) return null;
+  initialRules = new Map(rules);
+  if (run(fde.instructions, true) === null) return null;
+  return { cfaReg, cfaOffset, rules };
 }

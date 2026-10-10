@@ -1885,6 +1885,10 @@ li.CodeMirror-hint-active {
     background: color-mix(in srgb, var(--ds-warn) 20%, transparent);
 }
 
+.cm-debug-frame {
+    background: color-mix(in srgb, var(--ds-signal) 14%, transparent);
+}
+
 .cm-debug-current-gutter .CodeMirror-linenumber {
     color: var(--ds-text);
     font-weight: 600;

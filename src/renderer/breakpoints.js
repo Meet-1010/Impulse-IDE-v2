@@ -24,6 +24,8 @@ export function attachBreakpoints(editor, { getFile, announce = () => {}, onChan
   const unverified = new Map(); // file → Set of lines without code
   let current = null; // { file, line } where the debugger is stopped
   let currentHandle = null;
+  let frame = null; // { file, line } of a selected caller frame
+  let frameHandle = null;
 
   const gutters = (editor.getOption('gutters') || []).filter(g => g !== GUTTER);
   editor.setOption('gutters', [GUTTER, ...gutters]);
@@ -74,6 +76,13 @@ export function attachBreakpoints(editor, { getFile, announce = () => {}, onChan
       if (hereLine) {
         currentHandle = editor.addLineClass(hereLine - 1, 'background', 'cm-debug-current');
         editor.addLineClass(currentHandle, 'gutter', 'cm-debug-current-gutter');
+      }
+      if (frameHandle) {
+        editor.removeLineClass(frameHandle, 'background', 'cm-debug-frame');
+        frameHandle = null;
+      }
+      if (frame && file && frame.file === file && frame.line - 1 < editor.lineCount()) {
+        frameHandle = editor.addLineClass(frame.line - 1, 'background', 'cm-debug-frame');
       }
     });
   };
@@ -166,13 +175,20 @@ export function attachBreakpoints(editor, { getFile, announce = () => {}, onChan
       onChange();
     },
     unverifiedLines: (file) => new Set(unverified.get(file) || []),
+    /** Highlight a caller's line while its stack frame is selected (null clears it). */
+    setFrame(location) {
+      frame = location?.file && location.line ? { file: location.file, line: location.line } : null;
+      render();
+      if (frame && frame.file === getFile()) editor.scrollIntoView({ line: frame.line - 1, ch: 0 }, 80);
+    },
     clearResolved() {
       unverified.clear();
       render();
     },
-    /** Highlight the line the debugger stopped on (null clears it). */
+    /** Highlight the line the debugger stopped on (null clears it, and any selected frame). */
     setCurrent(location) {
       current = location?.file && location.line ? { file: location.file, line: location.line } : null;
+      frame = null;
       render();
       if (current && current.file === getFile()) editor.scrollIntoView({ line: current.line - 1, ch: 0 }, 80);
     },
