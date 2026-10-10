@@ -1,5 +1,9 @@
 // Tiny DOM helpers for the simulator UI.
 
+// Thumbnails are live part elements: register them.
+import '@wokwi/elements';
+import '../elements/index.js';
+
 export function h(tag, props = {}, ...children) {
   const el = document.createElement(tag);
   for (const [k, v] of Object.entries(props || {})) {

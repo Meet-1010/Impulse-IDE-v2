@@ -4,6 +4,9 @@
 // Parts dropped on a breadboard snap their pins into its holes and connect
 // automatically; moving a breadboard carries the parts plugged into it.
 
+// Registers the part elements (Wokwi's and Impulse's own) the canvas draws.
+import '@wokwi/elements';
+import './elements/index.js';
 import { partDef } from './parts/catalog.js';
 
 const GRID = 4.8;          // half of the 0.1" pin pitch at 96 dpi

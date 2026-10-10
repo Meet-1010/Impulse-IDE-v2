@@ -36,6 +36,8 @@ function cliAsset(platform = process.platform, arch = process.arch) {
 
 /** Places arduino-cli is commonly installed, in the order to try them. */
 function cliCandidates({ platform = process.platform, home = os.homedir(), env = process.env, managedDir } = {}) {
+  // Path rules of the platform being described (not necessarily this machine's).
+  const p = platform === 'win32' ? path.win32 : path.posix;
   const exe = platform === 'win32' ? 'arduino-cli.exe' : 'arduino-cli';
   const list = [];
   const add = (p, source) => { if (p) list.push({ path: p, source }); };
@@ -45,19 +47,19 @@ function cliCandidates({ platform = process.platform, home = os.homedir(), env =
   } else if (platform === 'linux') {
     add('/usr/local/bin/arduino-cli', 'system');
     add('/usr/bin/arduino-cli', 'system');
-    add(path.join(home, '.local', 'bin', 'arduino-cli'), 'system');
+    add(p.join(home, '.local', 'bin', 'arduino-cli'), 'system');
     add('/snap/bin/arduino-cli', 'system');
   }
-  add(path.join(home, 'bin', exe), 'system');
-  for (const dir of String(env.PATH || '').split(path.delimiter).filter(Boolean)) add(path.join(dir, exe), 'system');
+  add(p.join(home, 'bin', exe), 'system');
+  for (const dir of String(env.PATH || '').split(p.delimiter).filter(Boolean)) add(p.join(dir, exe), 'system');
   // Arduino IDE 2 ships its own arduino-cli.
   const ideCli = ['lib', 'backend', 'resources', exe];
-  if (platform === 'darwin') add(path.join('/Applications/Arduino IDE.app/Contents/Resources/app', ...ideCli), 'arduino-ide');
+  if (platform === 'darwin') add(p.join('/Applications/Arduino IDE.app/Contents/Resources/app', ...ideCli), 'arduino-ide');
   if (platform === 'win32') {
-    add(env.LOCALAPPDATA && path.join(env.LOCALAPPDATA, 'Programs', 'Arduino IDE', 'resources', 'app', ...ideCli), 'arduino-ide');
-    add(env.ProgramFiles && path.join(env.ProgramFiles, 'Arduino IDE', 'resources', 'app', ...ideCli), 'arduino-ide');
+    add(env.LOCALAPPDATA && p.join(env.LOCALAPPDATA, 'Programs', 'Arduino IDE', 'resources', 'app', ...ideCli), 'arduino-ide');
+    add(env.ProgramFiles && p.join(env.ProgramFiles, 'Arduino IDE', 'resources', 'app', ...ideCli), 'arduino-ide');
   }
-  if (managedDir) add(path.join(managedDir, exe), 'impulse');
+  if (managedDir) add(p.join(managedDir, exe), 'impulse');
   const seen = new Set();
   return list.filter(c => !seen.has(c.path) && seen.add(c.path));
 }

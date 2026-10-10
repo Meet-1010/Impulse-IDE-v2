@@ -6,8 +6,6 @@
 // exists, so Wokwi projects import as-is. Parts drawn by Impulse use the
 // "impulse-" prefix.
 
-import '@wokwi/elements';
-import '../elements/index.js';
 import { BoardBehavior, LedBehavior, RgbLedBehavior, BarGraphBehavior, BuzzerBehavior, PushbuttonBehavior,
   SlideSwitchBehavior, DipSwitchBehavior, PotentiometerBehavior } from './basic.js';
 import { SevenSegmentBehavior, LcdBehavior, Ssd1306Behavior, NeoPixelBehavior, LedRingBehavior, NeoMatrixBehavior,
