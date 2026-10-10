@@ -59,7 +59,7 @@
     "eslint-plugin-security": "^3.0.1",
     "jest": "^30.5.2",
     "vite": "^6.4.1",
-    "wait-on": "^9.0.4"
+    "wait-on": "^9.5.1"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.131.0",
