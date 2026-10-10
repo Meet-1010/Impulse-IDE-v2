@@ -3,6 +3,10 @@
   "productName": "Impulse IDE",
   "version": "2.0.0-beta.1",
   "description": "AI-assisted Arduino IDE with a built-in AVR simulator, hardware tests and a pin-aware editor",
+  "main": "src/main/main.js",
+  "bin": {
+    "impulse-test": "bin/impulse-test.mjs"
+  },
   "author": {
     "name": "Meet Chauhan",
     "email": "meetsc03@gmail.com"
@@ -19,7 +23,6 @@
   "engines": {
     "node": ">=22"
   },
-  "main": "src/main/main.js",
   "scripts": {
     "prestart": "vite build",
     "start": "electron .",
@@ -32,12 +35,13 @@
     "build:linux": "npm run build:renderer && electron-builder --linux",
     "build:all": "npm run build:renderer && electron-builder --win --mac --linux",
     "test": "jest",
-    "lint": "eslint src/ scripts/ test/ --ext .js,.mjs",
-    "lint:fix": "eslint src/ scripts/ test/ --ext .js,.mjs --fix",
+    "lint": "eslint src/ scripts/ test/ bin/ --ext .js,.mjs",
+    "lint:fix": "eslint src/ scripts/ test/ bin/ --ext .js,.mjs --fix",
     "audit": "npm audit --omit=dev",
     "test:smoke": "node scripts/smoke.mjs",
     "notices": "node scripts/third-party-notices.mjs",
-    "test:e2e": "node scripts/e2e.mjs"
+    "test:e2e": "node scripts/e2e.mjs",
+    "build:cli": "node scripts/build-cli.mjs"
   },
   "keywords": [
     "arduino",
@@ -55,6 +59,7 @@
     "concurrently": "^9.2.1",
     "electron": "^44.5.1",
     "electron-builder": "^26.15.3",
+    "esbuild": "^0.25.12",
     "eslint": "^8.57.0",
     "eslint-plugin-security": "^3.0.1",
     "jest": "^30.5.2",

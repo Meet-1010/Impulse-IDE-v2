@@ -68,6 +68,16 @@ jobs:
       - name: Build renderer (Vite)
         run: npm run build:renderer
 
+      - name: Build the impulse-test bundle
+        run: |
+          npm run build:cli
+          node dist-cli/impulse-test.mjs --version
+
+      # The standalone bundle, the way a project's own CI would run it.
+      - name: impulse-test on a sketch (bundle)
+        if: runner.os == 'Linux'
+        run: node dist-cli/impulse-test.mjs test/fixtures/sketches --junit "$RUNNER_TEMP/impulse-test.xml"
+
       - name: Smoke test (launch app, open every panel and the simulator)
         if: runner.os == 'Linux'
         run: xvfb-run -a npm run test:smoke

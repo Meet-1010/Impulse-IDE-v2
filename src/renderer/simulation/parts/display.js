@@ -8,7 +8,8 @@ import { ILI9341 } from '../devices/ili9341.js';
 import { MAX7219 } from '../devices/shift.js';
 import { WS2812Decoder } from '../devices/ws2812.js';
 import { TM1637 } from '../devices/tm1637.js';
-import { fontA00 } from '@wokwi/elements';
+// Just the font: the package index would load every element.
+import { fontA00 } from '@wokwi/elements/dist/esm/lcd1602-font-a00.js';
 
 const SEGMENTS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'DP'];
 

@@ -4,6 +4,8 @@ module.exports = {
   testPathIgnorePatterns: ['/node_modules/', '/dist/', '/dist-renderer/'],
   moduleNameMapper: {
     '^@wokwi/elements$': '<rootDir>/test/stubs/empty.js',
+    // Single files (the LCD font) from the CommonJS build Jest can load.
+    '^@wokwi/elements/dist/esm/(.*)$': '<rootDir>/node_modules/@wokwi/elements/dist/cjs/$1',
     '^\\.\\./elements/index\\.js$': '<rootDir>/test/stubs/empty.js'
   },
   collectCoverageFrom: [

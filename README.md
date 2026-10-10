@@ -25,6 +25,8 @@ An AI-assisted Arduino IDE with a built-in AVR simulator. Write a sketch, wire t
   // @expect no serial
   ```
 
+  The same tests run in CI with `impulse-test`, a single-file command-line runner that compiles, simulates with the sketch's circuit and writes JUnit/JSON reports: see [docs/TESTING.md](docs/TESTING.md).
+
 - **Pin-aware editor**: hover a pin to see what it's wired to. The gutter flags `digitalWrite` without `pinMode(OUTPUT)`, `analogWrite` on pins without PWM, pins 0/1 used alongside `Serial`, and (when a circuit exists) unwired pins or code that drives an input part.
 - **AI agent**: Claude, OpenAI or Gemini can read and edit the sketch, compile, and use the serial monitor. Every AI code change is run in the simulator automatically and gets a pass/fail card with a "Fix with AI" button. Uploading to a real board always asks for your approval.
 - **Simulator vs board**: runs the sketch in the simulator and on a connected Uno, Nano or Mega for the same time, then diffs the serial output line by line (Sketch › Compare Simulator with Board).
@@ -55,6 +57,7 @@ npm test             # unit tests (includes a real compile → simulate test whe
 npm run lint         # ESLint; CI runs it with --max-warnings=0
 npm run test:smoke   # launches the app with a throwaway profile, opens every panel and the simulator, fails on any runtime error
 npm run test:e2e     # opens an example, compiles and runs it, presses its button; accessibility audit (axe) of the main screens in both themes
+npm run build:cli    # builds dist-cli/impulse-test.mjs, the command-line hardware test runner (docs/TESTING.md)
 ```
 
 Example and part tests compile real sketches; tests whose libraries aren't installed are skipped. To run them without installing libraries globally, point `IMPULSE_TEST_LIBRARIES` at a folder of libraries (for example one filled with `ARDUINO_DIRECTORIES_USER=/tmp/libs arduino-cli lib install OneWire DallasTemperature TM1637`, then `IMPULSE_TEST_LIBRARIES=/tmp/libs/libraries npm test`).
@@ -81,5 +84,6 @@ Signing and release steps: [docs/BUILD_AND_SIGN.md](docs/BUILD_AND_SIGN.md), [do
 src/main/        Electron main process: window, menu, IPC handlers, arduino-cli, serial, AI agent
 src/renderer/    UI: editor, panels, AI chat, hardware tests, pin insights, design system
 src/renderer/simulation/   AVR runner, boards, circuit engine, parts and devices, canvas, examples, headless runner (see ARCHITECTURE.md)
+src/cli/         impulse-test, the command-line hardware test runner (bin/impulse-test.mjs)
 scripts/smoke.mjs          end-to-end smoke test
 ```

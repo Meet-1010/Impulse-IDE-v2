@@ -4,8 +4,10 @@
 const MUTE_KEY = 'impulse-sim-muted';
 let ctx = null;
 let master = null;
+// Through window: Node (headless runs, impulse-test) has a localStorage that warns when touched.
+const storage = () => globalThis.window?.localStorage;
 let muted = (() => {
-  try { return localStorage.getItem(MUTE_KEY) === '1'; } catch { return false; }
+  try { return storage()?.getItem(MUTE_KEY) === '1'; } catch { return false; }
 })();
 const listeners = new Set();
 
@@ -26,7 +28,7 @@ export function isMuted() {
 
 export function setMuted(value) {
   muted = !!value;
-  try { localStorage.setItem(MUTE_KEY, muted ? '1' : '0'); } catch { /* storage unavailable */ }
+  try { storage()?.setItem(MUTE_KEY, muted ? '1' : '0'); } catch { /* storage unavailable */ }
   if (master) master.gain.setTargetAtTime(muted ? 0 : 0.06, ctx.currentTime, 0.01);
   listeners.forEach(fn => fn(muted));
 }

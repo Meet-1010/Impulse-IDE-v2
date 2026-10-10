@@ -51,6 +51,12 @@ module.exports = {
       }
     },
     {
+      // Command-line tools: ES modules for Node that share the simulator's code
+      files: ['src/cli/**/*.js', 'bin/**/*.mjs'],
+      parserOptions: { sourceType: 'module', ecmaVersion: 2024 },
+      env: { node: true, browser: false }
+    },
+    {
       // Node ES module scripts (smoke test)
       files: ['scripts/**/*.mjs'],
       parserOptions: { sourceType: 'module', ecmaVersion: 2024 },
