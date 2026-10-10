@@ -1,13 +1,13 @@
 
-# Arduino IDE Cursor - Architecture
+# Impulse IDE - Architecture
 
 ## Overview
 
-Arduino IDE Cursor is a **Cursor-style AI-powered IDE for Arduino/IoT development**. It provides an intelligent coding environment with AI assistance, serial monitoring, and seamless Arduino CLI integration.
+Impulse is an **AI-assisted IDE for Arduino development with a built-in circuit simulator**. It provides an intelligent coding environment with AI assistance, serial monitoring, and seamless Arduino CLI integration.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                        Arduino IDE Cursor                           │
+│                           Impulse IDE                               │
 ├──────────────┬─────────────────────────────┬───────────────────────┤
 │   Sidebar    │      Code Editor            │    AI Assistant       │
 │              │                             │                       │
@@ -142,7 +142,7 @@ JSON-based persistence (no SQLite dependency):
 }
 ```
 
-Stored at: `%APPDATA%/arduino-ide-cursor/memory.json`
+Stored at: `<userData>/memory.json` (`Impulse IDE`, or `arduino-ide-cursor` for data from pre-2.0 development builds)
 
 ### 6. API Key Manager (`ai/config/apiKeyManager.js`)
 
@@ -290,7 +290,7 @@ Display in AI panel
 {
   "build": {
     "appId": "com.arduinoidecursor.app",
-    "productName": "Arduino IDE Cursor",
+    "productName": "Impulse IDE",
     "win": { "target": "nsis" }
   }
 }

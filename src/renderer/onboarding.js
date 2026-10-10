@@ -335,7 +335,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (isFirstVisit) {
       // Show a less intrusive welcome message first
       if (window.notifications) {
-        window.notifications.info('Welcome to Arduino IDE Cursor! Click here to take a quick tour.', {
+        window.notifications.info('Welcome to Impulse! Click here to take a quick tour.', {
           duration: 8000,
           actions: [
             { 

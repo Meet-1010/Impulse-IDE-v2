@@ -5,7 +5,7 @@
 
 import { getCodeMirror } from './codemirror-ref.js';
 import { SimulationManager } from './simulation/index.js';
-import { askDialog, confirmDialog, preferencesDialog } from './dialog.js';
+import { askDialog, confirmDialog, preferencesDialog, reportProblemDialog } from './dialog.js';
 import { runSimulatorCheck, renderTestReport, renderVerifyCard, isSimulatableBoard, simulationContext } from './verify.js';
 import { boardForFqbn } from './simulation/boards.js';
 import { attachPinInsights } from './pin-insights.js';
@@ -245,6 +245,31 @@ function setupNativeMenuListener() {
             handleMenuAction(action, payload);
         });
     }
+    // Something crashed last session: offer to report it.
+    window.electronAPI?.problem?.pendingCrash?.().then((crash) => {
+        if (!crash) return;
+        window.notifications?.show({
+            id: `crash-${crash.id}`,
+            type: 'warning',
+            title: 'Impulse hit a problem last time',
+            message: crash.kind === 'renderer' ? 'The window stopped working.' : 'An unexpected error occurred.',
+            persistent: true,
+            actions: [
+                { id: 'report', label: 'Report…', callback: () => reportProblem(crash) },
+                { id: 'dismiss', label: 'Dismiss', callback: () => window.electronAPI.problem.dismissCrash(crash.id) }
+            ]
+        });
+    }).catch(() => { /* reporting is best effort */ });
+}
+
+/** Help › Report a Problem: review the details, then open a GitHub issue. */
+async function reportProblem(crash = null) {
+    const res = await window.electronAPI?.problem?.details?.(crash?.id || null).catch(() => null);
+    const answer = await reportProblemDialog({ details: res?.details || '', crash });
+    if (!answer) return;
+    const sent = await window.electronAPI.problem.report({ ...answer, crashId: crash?.id || null }).catch(e => ({ success: false, error: e.message }));
+    if (sent?.success) window.notifications?.success('Your report is open in the browser. Submit it there to send it.');
+    else window.notifications?.error(`Could not open the report: ${sent?.error || 'unknown error'}`);
 }
 
 // The focused plain text field, or null if focus is elsewhere (e.g. CodeMirror).
@@ -503,6 +528,9 @@ function handleMenuAction(action, payload) {
             break;
         case 'help-about':
             showAbout();
+            break;
+        case 'help-report-problem':
+            reportProblem();
             break;
         default:
             break;

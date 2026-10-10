@@ -47,6 +47,14 @@ const schemas = {
   aiExecuteTool: z.object({ toolName: requiredString, args: z.record(z.unknown()).optional().default({}) }),
   apiKeysSet: z.object({ provider: requiredString, apiKey: requiredString }),
   apiKeysProvider: z.object({ provider: requiredString }),
+  problemDetails: z.object({ crashId: z.string().max(120).regex(/^[\w-]+$/).optional().nullable() }),
+  problemReport: z.object({
+    title: z.string().trim().min(1).max(200),
+    description: z.string().max(5000).optional().default(''),
+    includeDetails: z.boolean().optional().default(true),
+    crashId: z.string().max(120).regex(/^[\w-]+$/).optional().nullable()
+  }),
+  partRequest: z.object({ query: z.string().trim().min(1).max(120) }),
   exampleCreate: z.object({
     name: z.string().regex(/^[a-z0-9][a-z0-9-]{0,60}$/, 'Example names are lower-case letters, digits and dashes'),
     code: z.string().min(1).max(512 * 1024),

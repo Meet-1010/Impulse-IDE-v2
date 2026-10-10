@@ -189,3 +189,66 @@ export function preferencesDialog(current) {
     form.theme.focus();
   });
 }
+
+/**
+ * Report a problem: the user writes what happened and sees exactly which
+ * technical details go with it before anything leaves the app.
+ * @param {{ details: string, crash?: { kind: string, at: string, message: string } | null }} spec
+ * @returns {Promise<{ title: string, description: string, includeDetails: boolean } | null>}
+ */
+export function reportProblemDialog({ details, crash = null }) {
+  if (open) close(null);
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.className = 'impulse-dialog-overlay';
+    overlay.innerHTML = `
+      <form class="impulse-dialog wide" role="dialog" aria-modal="true" aria-labelledby="impulseReportTitle">
+        <h3 class="impulse-dialog-title" id="impulseReportTitle">Report a problem</h3>
+        <p class="impulse-dialog-message">This opens a GitHub issue in your browser with what you write below. Nothing is sent until you submit it there.</p>
+        <div class="impulse-dialog-fields stacked">
+          <label class="impulse-dialog-field">
+            <span>Title</span>
+            <input name="title" class="impulse-dialog-input" maxlength="200" placeholder="Short summary, e.g. Upload fails on ESP32-S3" spellcheck="false">
+          </label>
+          <label class="impulse-dialog-field">
+            <span>What happened?</span>
+            <textarea name="description" class="impulse-dialog-input impulse-dialog-textarea" maxlength="5000" placeholder="What did you do, what did you expect, and what happened instead?"></textarea>
+          </label>
+          <label class="impulse-dialog-check">
+            <input name="includeDetails" type="checkbox" checked>
+            <span>Include technical details (shown below; your home folder and keys are removed)</span>
+          </label>
+          <pre class="impulse-dialog-details" tabindex="0" aria-label="Technical details"></pre>
+        </div>
+        <p class="impulse-dialog-error" role="alert"></p>
+        <div class="impulse-dialog-actions">
+          <button type="button" class="impulse-dialog-btn secondary" data-act="cancel">Cancel</button>
+          <button type="submit" class="impulse-dialog-btn primary">Open GitHub issue</button>
+        </div>
+      </form>`;
+    const form = overlay.querySelector('form');
+    const pre = overlay.querySelector('.impulse-dialog-details');
+    pre.textContent = details || 'No technical details available.';
+    if (crash) {
+      form.title.value = `Crash: ${crash.message}`.slice(0, 200);
+      form.description.placeholder = 'What were you doing when it happened?';
+    }
+    form.includeDetails.addEventListener('change', () => { pre.hidden = !form.includeDetails.checked; });
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const title = form.title.value.trim();
+      if (!title) {
+        overlay.querySelector('.impulse-dialog-error').textContent = 'Add a short title.';
+        form.title.focus();
+        return;
+      }
+      close({ title, description: form.description.value.trim(), includeDetails: form.includeDetails.checked });
+    });
+    overlay.querySelector('[data-act="cancel"]').addEventListener('click', () => close(null));
+    overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) close(null); });
+    overlay.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); close(null); } });
+    open = { overlay, resolve, previousFocus: document.activeElement };
+    document.body.appendChild(overlay);
+    (crash ? form.description : form.title).focus();
+  });
+}

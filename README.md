@@ -64,7 +64,7 @@ Example and part tests compile real sketches; tests whose libraries aren't insta
 npm run build:mac    # or build:win, build:linux
 ```
 
-Signing and release steps: [docs/BUILD_AND_SIGN.md](docs/BUILD_AND_SIGN.md), [docs/RELEASE.md](docs/RELEASE.md). Auto-update reads GitHub Releases from `nate1029/Impulse`.
+Signing and release steps: [docs/BUILD_AND_SIGN.md](docs/BUILD_AND_SIGN.md), [docs/RELEASE.md](docs/RELEASE.md). Auto-update reads GitHub Releases from `Meet-1010/Impulse-IDE-v2`.
 
 ## Security model
 

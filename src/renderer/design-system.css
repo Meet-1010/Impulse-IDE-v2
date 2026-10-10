@@ -1399,6 +1399,50 @@ li.CodeMirror-hint-active {
     color: var(--ds-text-3);
 }
 
+.impulse-dialog.wide {
+    width: min(560px, 100%);
+}
+
+.impulse-dialog-fields.stacked .impulse-dialog-field {
+    grid-template-columns: 1fr;
+    gap: 6px;
+}
+
+.impulse-dialog-textarea {
+    height: 96px;
+    padding: 8px 10px;
+    resize: vertical;
+    line-height: 1.45;
+}
+
+.impulse-dialog-check {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    font-size: 12.5px;
+    color: var(--ds-text-3);
+    cursor: pointer;
+}
+
+.impulse-dialog-check input {
+    margin-top: 2px;
+    accent-color: var(--ds-text);
+}
+
+.impulse-dialog-details {
+    margin: 0;
+    max-height: 160px;
+    overflow: auto;
+    padding: 8px 10px;
+    background: var(--ds-canvas);
+    border: 1px solid var(--ds-line);
+    border-radius: var(--radius-sm);
+    color: var(--ds-text-3);
+    font: 11.5px/1.5 var(--font-mono);
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
 .impulse-dialog-actions {
     display: flex;
     justify-content: flex-end;

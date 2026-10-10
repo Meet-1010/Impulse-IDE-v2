@@ -166,6 +166,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     }
   },
 
+  problem: {
+    details: (crashId) => ipcRenderer.invoke('problem:details', { crashId }),
+    report: (spec) => ipcRenderer.invoke('problem:report', spec),
+    dismissCrash: (crashId) => ipcRenderer.invoke('problem:dismiss-crash', { crashId }),
+    requestPart: (query) => ipcRenderer.invoke('problem:request-part', { query }),
+    pendingCrash: () => ipcRenderer.invoke('problem:pending-crash')
+  },
   app: {
     quit: () => ipcRenderer.send('app:quit'),
     getVersion: () => ipcRenderer.invoke('app:get-version'),

@@ -1,5 +1,5 @@
 /**
- * Impulse IDE (Arduino IDE Cursor) - Electron main process.
+ * Impulse IDE - Electron main process.
  * Creates window, initializes services, and registers IPC handlers.
  */
 
@@ -7,6 +7,17 @@ const { app, BrowserWindow, ipcMain, dialog, shell, Menu } = require('electron')
 const path = require('path');
 const fs = require('fs');
 const fsp = require('fs').promises;
+
+// Data lives in "Impulse IDE". Development builds before 2.0 ran as
+// "arduino-ide-cursor": while only that folder holds app data, keep using it
+// so settings, sessions and approved folders survive. (Electron creates the
+// new folder before this runs, so look for real data, not the folder.)
+// Runs before any service module asks for the userData path.
+const legacyUserData = path.join(app.getPath('appData'), 'arduino-ide-cursor');
+const hasAppData = (dir) => fs.existsSync(path.join(dir, 'Local Storage'));
+const explicitProfile = app.commandLine.hasSwitch('user-data-dir');
+if (!explicitProfile && !hasAppData(app.getPath('userData')) && hasAppData(legacyUserData)) app.setPath('userData', legacyUserData);
+
 const ArduinoService = require('./services/arduinoService');
 const SerialMonitor = require('./services/serialMonitor');
 const ErrorMemory = require('./services/errorMemory');
@@ -19,9 +30,28 @@ const WorkspaceStore = require('./services/workspaceStore');
 const { validatePath } = require('./utils/pathValidator');
 
 const logger = require('./utils/logger');
+const { ProblemReporter } = require('./services/problemReporter');
 
-process.on('uncaughtException', (err) => logger.error('uncaughtException', { error: err?.message, stack: err?.stack }));
+// Where problem reports go: the GitHub repository in package.json.
+const pkg = require('../../package.json');
+const reportRepo = /github\.com\/([^/]+\/[^/#]+)/.exec(pkg.bugs?.url || '')?.[1]?.replace(/\/issues$/, '') || 'Meet-1010/Impulse-IDE-v2';
+const problemReporter = new ProblemReporter({
+  userDataDir: app.getPath('userData'),
+  logFile: path.join(app.getPath('logs'), 'impulse.log'),
+  version: app.getVersion(),
+  repo: reportRepo
+});
+
+process.on('uncaughtException', (err) => {
+  logger.error('uncaughtException', { error: err?.message, stack: err?.stack });
+  problemReporter.recordCrash('main', err);
+});
 process.on('unhandledRejection', (reason) => logger.error('unhandledRejection', { error: reason?.message ?? String(reason) }));
+app.on('render-process-gone', (event, webContents, details) => {
+  if (details.reason === 'clean-exit') return;
+  logger.error('render-process-gone', details);
+  problemReporter.recordCrash('renderer', { message: `The window's renderer stopped (${details.reason}, exit code ${details.exitCode}).` });
+});
 
 let mainWindow;
 let arduinoService;
@@ -60,6 +90,22 @@ function createWindow() {
 
   mainWindow.once('ready-to-show', () => {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.show();
+  });
+
+  // A crashed renderer leaves a blank window: offer to reload it.
+  mainWindow.webContents.on('render-process-gone', async (event, details) => {
+    if (details.reason === 'clean-exit' || !mainWindow || mainWindow.isDestroyed()) return;
+    const { response } = await dialog.showMessageBox(mainWindow, {
+      type: 'error',
+      buttons: ['Reload', 'Quit'],
+      defaultId: 0,
+      cancelId: 1,
+      title: 'Impulse stopped responding',
+      message: 'The Impulse window stopped working.',
+      detail: 'Reload to continue where you left off. Your files are saved on disk; after reloading you can report what happened.'
+    });
+    if (response === 0 && !mainWindow.isDestroyed()) mainWindow.webContents.reload();
+    else app.quit();
   });
 
   // SECURITY: Prevent navigation to external websites within the app
@@ -294,6 +340,8 @@ function buildMenu() {
         { type: 'separator' },
         { label: 'Frequently Asked Questions', click: () => sendMenuAction('help-faq') },
         { label: 'Visit Arduino.cc', click: () => sendMenuAction('help-visit-arduino') },
+        { type: 'separator' },
+        { label: 'Report a Problem…', click: () => sendMenuAction('help-report-problem') },
         ...(isMac ? [] : [
           { type: 'separator' },
           { label: 'About Impulse', click: () => sendMenuAction('help-about') }
@@ -439,7 +487,8 @@ app.whenReady().then(() => {
     dialog,
     shell,
     app,
-    workspace
+    workspace,
+    problemReporter
   };
   registerAllIpc(ipcMain, ctx);
 

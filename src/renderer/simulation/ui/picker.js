@@ -17,7 +17,7 @@ export class PartPicker {
   /**
    * @param {HTMLElement} host stage element the popover lives in
    * @param {{ onAdd: (type: string, at?: {clientX, clientY}) => void, onAskAi?: (query: string) => void,
-   *   canDropAt?: (clientX, clientY) => boolean }} opts
+   *   canDropAt?: (clientX, clientY) => boolean, onRequestPart?: (query: string) => void }} opts
    */
   constructor(host, opts) {
     this.opts = opts;
@@ -142,6 +142,11 @@ export class PartPicker {
       const ai = h('button', { type: 'button', class: 'sim-btn ghost sim-picker-ai' }, icon('sparkle', 14), 'Build the circuit from my code with AI');
       ai.addEventListener('click', () => { this.toggle(false); this.opts.onAskAi(q); });
       this.list.appendChild(ai);
+    }
+    if (this.opts.onRequestPart) {
+      const ask = h('button', { type: 'button', class: 'sim-btn ghost sim-picker-ai' }, icon('flag', 14), `Request “${q}” as a new part`);
+      ask.addEventListener('click', () => { this.toggle(false); this.opts.onRequestPart(q); });
+      this.list.appendChild(ask);
     }
     this._setFocus(0);
   }

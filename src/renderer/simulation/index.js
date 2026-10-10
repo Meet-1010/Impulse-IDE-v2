@@ -160,6 +160,11 @@ export class SimulationManager {
     this.picker = new PartPicker(this.stage, {
       onAdd: (type, at) => this.addPart(type, at),
       onAskAi: () => this.buildCircuitFromCode(),
+      onRequestPart: async (query) => {
+        const res = await window.electronAPI?.problem?.requestPart?.(query).catch(e => ({ success: false, error: e.message }));
+        if (res?.success) this.toast(`A part request for “${query}” is open in your browser. Submit it there and it goes on the list.`, 'success');
+        else this.toast(`Could not open the part request: ${res?.error || 'unknown error'}`, 'error');
+      },
       canDropAt: (x, y) => {
         const r = this.wrap.getBoundingClientRect();
         return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
