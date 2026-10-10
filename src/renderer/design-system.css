@@ -1443,6 +1443,20 @@ li.CodeMirror-hint-active {
     word-break: break-word;
 }
 
+.impulse-dialog-fields.board-options {
+    max-height: min(52vh, 460px);
+    overflow-y: auto;
+    padding-right: 4px;
+}
+
+.impulse-dialog-fields.board-options .impulse-dialog-field {
+    grid-template-columns: 170px 1fr;
+}
+
+.impulse-dialog-spacer {
+    flex: 1;
+}
+
 .impulse-dialog-actions {
     display: flex;
     justify-content: flex-end;

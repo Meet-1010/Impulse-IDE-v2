@@ -5,7 +5,8 @@
 
 import { getCodeMirror } from './codemirror-ref.js';
 import { SimulationManager } from './simulation/index.js';
-import { askDialog, confirmDialog, preferencesDialog, reportProblemDialog } from './dialog.js';
+import { askDialog, confirmDialog, preferencesDialog, reportProblemDialog, boardOptionsDialog } from './dialog.js';
+import { baseFqbn, composeFqbn, effectiveChoices, suggestedChoices, loadChoices, saveChoices, describePort, sortPorts } from './board-options.js';
 import { runSimulatorCheck, renderTestReport, renderVerifyCard, isSimulatableBoard, simulationContext } from './verify.js';
 import { boardForFqbn } from './simulation/boards.js';
 import { attachPinInsights } from './pin-insights.js';
@@ -532,6 +533,9 @@ function handleMenuAction(action, payload) {
         case 'help-report-problem':
             reportProblem();
             break;
+        case 'tools-board-options':
+            openBoardOptions();
+            break;
         default:
             break;
     }
@@ -868,7 +872,7 @@ async function exportCompiledBinary() {
     if (!requireSketchAndBoard()) return;
     if (!await saveFile({ quiet: true })) return;
     logToConsole('Exporting compiled binary…', 'info');
-    const res = await window.electronAPI.arduino.exportBinaries(state.currentSketch, state.selectedBoard);
+    const res = await window.electronAPI.arduino.exportBinaries(state.currentSketch, await fqbnFor(state.selectedBoard));
     if (!res?.success) {
         logToConsole(res?.error || 'Export failed', 'error');
         return;
@@ -970,7 +974,7 @@ async function compareSimulatorWithBoard() {
         if (mode === 'upload') {
             container.innerHTML = '<p class="tests-hint">Uploading to the board…</p>';
             await window.electronAPI.serial.disconnect().catch(() => {});
-            const up = await window.electronAPI.arduino.upload(state.currentSketch, state.selectedBoard, state.selectedPort);
+            const up = await window.electronAPI.arduino.upload(state.currentSketch, await fqbnFor(state.selectedBoard), state.selectedPort);
             if (!up?.success) {
                 container.innerHTML = '';
                 const pre = document.createElement('pre');
@@ -1018,7 +1022,7 @@ async function uploadUsingProgrammer() {
     if (!programmerId) return;
     if (!await saveFile({ quiet: true })) return;
     logToConsole(`Uploading with programmer ${programmerId}…`, 'info');
-    const res = await window.electronAPI.arduino.uploadWithProgrammer(state.currentSketch, state.selectedBoard, programmerId, state.selectedPort || '');
+    const res = await window.electronAPI.arduino.uploadWithProgrammer(state.currentSketch, await fqbnFor(state.selectedBoard), programmerId, state.selectedPort || '');
     if (res?.success) logToConsole('Upload using programmer finished', 'success');
     else logToConsole(res?.error || 'Upload using programmer failed', 'error');
 }
@@ -1485,6 +1489,7 @@ function syncDropdowns() {
             state.selectedPort = e.target.value;
             state.context.selectedPort = e.target.value;
             window.electronAPI.ui.updatePort(e.target.value);
+            syncBoardFqbn();
             const board = state.boards.find(b => b.fqbn === state.selectedBoard);
             updateBoardPortDisplay(board?.name || null, e.target.value || null);
             updateAIContext();
@@ -1723,6 +1728,7 @@ function setupEventListeners() {
 let serialLineBuffer = '';
 let serialFlushTimer = null;
 const SERIAL_BUFFER_MAX = 16384; // force-flush a never-terminated stream
+const SERIAL_MAX_LINES = 5000;
 
 function resetSerialBuffer() {
     serialLineBuffer = '';
@@ -1978,8 +1984,8 @@ async function loadPorts() {
                 logToConsole('No serial ports detected', 'warning');
             } else {
                 options = '<option value="">Select Port...</option>' +
-                    result.data.map(port =>
-                        `<option value="${escapeHtml(port.port)}">${escapeHtml(port.port)} - ${escapeHtml(port.board || 'Unknown')}</option>`
+                    sortPorts(result.data).map(port =>
+                        `<option value="${escapeHtml(port.port)}">${escapeHtml(port.port)} - ${escapeHtml(describePort(port))}</option>`
                     ).join('');
                 logToConsole(`Found ${result.data.length} port(s)`, 'info');
             }
@@ -2041,8 +2047,8 @@ async function refreshPortsQuiet() {
         const current = sel.value;
         sel.innerHTML = ports.length === 0
             ? '<option value="">No ports found</option>'
-            : '<option value="">Select Port...</option>' + ports.map(p =>
-                `<option value="${escapeHtml(p.port)}">${escapeHtml(p.port)} - ${escapeHtml(p.board || 'Unknown')}</option>`
+            : '<option value="">Select Port...</option>' + sortPorts(ports).map(p =>
+                `<option value="${escapeHtml(p.port)}">${escapeHtml(p.port)} - ${escapeHtml(describePort(p))}</option>`
             ).join('');
         if (current && ports.some(p => p.port === current)) {
             sel.value = current; // keep the user's selection
@@ -2766,7 +2772,7 @@ async function compileSketch() {
     clearProblems();
 
     try {
-        const result = await window.electronAPI.arduino.compile(state.currentSketch, boardFQBN);
+        const result = await window.electronAPI.arduino.compile(state.currentSketch, await fqbnFor(boardFQBN));
 
         if (result.success) {
             logToConsole('Compilation successful!', 'success');
@@ -2854,6 +2860,7 @@ async function uploadSketch() {
         }
     }
 
+    const reopenMonitor = state.serialConnected;
     if (state.serialConnected) {
         logToConsole('Disconnecting serial for upload...', 'info');
         await window.electronAPI.serial.disconnect();
@@ -2864,11 +2871,12 @@ async function uploadSketch() {
     clearProblems();
 
     try {
-        const result = await window.electronAPI.arduino.upload(state.currentSketch, boardFQBN, port);
+        const result = await window.electronAPI.arduino.upload(state.currentSketch, await fqbnFor(boardFQBN), port);
 
         if (result.success) {
             logToConsole('Upload successful!', 'success');
             logToConsole(`Uploaded to ${port}`, 'info');
+            if (reopenMonitor) reconnectSerialAfterUpload(port);
         } else {
             logToConsole('Upload failed!', 'error');
             if (result.error) {
@@ -2928,6 +2936,25 @@ async function connectSerial() {
         const statusText = document.getElementById('serialStatusText');
         if (statusText) statusText.textContent = `Error: ${error.message}`;
     }
+}
+
+/**
+ * Reopen the Serial Monitor after an upload, like Arduino IDE 2. Boards with
+ * native USB (ESP32-S3, Leonardo…) reset and re-enumerate, so the port may
+ * take a moment to come back.
+ */
+async function reconnectSerialAfterUpload(port) {
+    const baudRate = parseInt(document.getElementById('baudRate')?.value || '115200', 10);
+    for (let attempt = 0; attempt < 8; attempt++) {
+        await new Promise(r => setTimeout(r, attempt === 0 ? 400 : 750));
+        if (state.serialConnected) return;
+        const res = await window.electronAPI.serial.connect(port, baudRate).catch(() => null);
+        if (res?.success) {
+            appendSerialOutput(`Reconnected to ${port} after upload`, new Date().toISOString(), 'info');
+            return;
+        }
+    }
+    appendSerialOutput(`${port} didn't come back after the upload. Open the Serial Monitor again when the board is ready.`, new Date().toISOString(), 'info');
 }
 
 async function disconnectSerial() {
@@ -3000,6 +3027,8 @@ function appendSerialOutput(data, timestamp, type = 'received') {
     line.className = `serial-line ${className}`;
     line.textContent = `[${time}] ${prefix} ${data}`;
     contentArea.appendChild(line);
+    // Keep the newest lines so a long session can't grow without bound.
+    while (contentArea.childElementCount > SERIAL_MAX_LINES) contentArea.firstElementChild.remove();
     contentArea.scrollTop = contentArea.scrollHeight;
 }
 
@@ -4525,6 +4554,11 @@ function setupBoardPortSelector() {
         });
     }
 
+    document.getElementById('boardOptionsBtn')?.addEventListener('click', () => {
+        selector?.classList.remove('open');
+        openBoardOptions();
+    });
+
     // Open modal when "Select other board and port" is clicked
     if (selectOtherBtn && modal) {
         selectOtherBtn.addEventListener('click', () => {
@@ -4565,6 +4599,7 @@ function setupBoardPortSelector() {
                 document.getElementById('portSelectSidebar').value = port;
                 state.selectedPort = port;
                 state.context.selectedPort = port;
+                syncBoardFqbn();
                 const display = document.getElementById('boardPortDisplay');
                 const currentText = display.textContent;
                 updateBoardPortDisplay(currentText.split(' on ')[0], port);
@@ -4663,7 +4698,9 @@ function renderPortList(showAll) {
 
     portList.innerHTML = '';
 
-    const portsToShow = showAll ? state.ports : state.ports.filter(p => p.board || p.protocol === 'serial');
+    // USB ports by default; Bluetooth and system ports only with "Show all".
+    const usb = state.ports.filter(p => p.vid);
+    const portsToShow = sortPorts(showAll || !usb.length ? state.ports : usb);
 
     if (portsToShow.length === 0) {
         portList.innerHTML = '<div style="padding: 16px; color: var(--muted-foreground); text-align: center;">No ports available</div>';
@@ -4682,7 +4719,7 @@ function renderPortList(showAll) {
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" class="board-port-list-item-icon">
                 <path d="M21 16V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2h14a2 2 0 002-2zM7 10h10M7 14h10"/>
             </svg>
-            <span>${port.port} ${port.board ? `- ${port.board}` : ''}</span>
+            <span>${escapeHtml(port.port)} <span class="board-port-list-item-hint">${escapeHtml(describePort(port))}</span></span>
         `;
 
         item.addEventListener('click', () => {
@@ -4767,6 +4804,73 @@ function announceSketch() {
 
 function announceBoard() {
     window.dispatchEvent(new CustomEvent('impulse:board-changed', { detail: { fqbn: state.selectedBoard } }));
+    syncBoardFqbn();
+}
+
+// ============================================
+// Board options (Tools › Board Options)
+// ============================================
+const boardOptionCache = new Map();
+
+async function getBoardOptions(base) {
+    if (!base) return [];
+    if (!boardOptionCache.has(base)) {
+        const res = await window.electronAPI.arduino.boardOptions?.(base).catch(() => null);
+        if (!res?.success) return [];
+        boardOptionCache.set(base, res.data || []);
+    }
+    return boardOptionCache.get(base);
+}
+
+function selectedPortInfo() {
+    const port = document.getElementById('portSelectSidebar')?.value || state.selectedPort;
+    return (state.ports || []).find(p => p.port === port) || null;
+}
+
+const announcedSuggestions = new Set();
+
+/** The FQBN compile and upload use: the board plus its chosen options. */
+async function fqbnFor(board) {
+    const base = baseFqbn(board);
+    const options = await getBoardOptions(base);
+    const port = selectedPortInfo();
+    const suggested = suggestedChoices(options, port);
+    const own = loadChoices()[base] || {};
+    if (suggested.CDCOnBoot && !own.CDCOnBoot && !announcedSuggestions.has(base)) {
+        announcedSuggestions.add(base);
+        logToConsole('This ESP32 is on its built-in USB port, so "USB CDC On Boot" is on: Serial output appears in the Serial Monitor. Change it in Tools › Board Options.', 'info');
+    }
+    return composeFqbn(base, options, effectiveChoices(base, options, port));
+}
+
+/** Tell the main process (AI tools) the full FQBN, options included. */
+async function syncBoardFqbn() {
+    if (!state.selectedBoard) return;
+    const fqbn = await fqbnFor(state.selectedBoard).catch(() => state.selectedBoard);
+    state.context.selectedFqbn = fqbn;
+    window.electronAPI?.ui?.updateBoard?.(fqbn);
+}
+
+async function openBoardOptions() {
+    const base = baseFqbn(state.selectedBoard || document.getElementById('boardSelectSidebar')?.value);
+    if (!base) {
+        logToConsole('Select a board first.', 'warning');
+        document.getElementById('boardPortDropdown')?.click();
+        return;
+    }
+    const options = await getBoardOptions(base);
+    const boardName = state.boards.find(b => b.fqbn === base)?.name || base;
+    if (!options.length) {
+        await askDialog({ title: `${boardName} options`, message: 'This board has no options to choose.', confirmLabel: 'Done', cancelLabel: 'Close' });
+        return;
+    }
+    const port = selectedPortInfo();
+    const choices = await boardOptionsDialog({ boardName, options, choices: effectiveChoices(base, options, port), suggested: suggestedChoices(options, port) });
+    if (!choices) return;
+    saveChoices(base, choices);
+    const fqbn = composeFqbn(base, options, choices);
+    logToConsole(`Board options saved: ${fqbn}`, 'success');
+    syncBoardFqbn();
 }
 
 function setButtonState(buttonId, disabled, text) {

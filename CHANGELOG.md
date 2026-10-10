@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Help › Report a Problem: review exactly what will be sent (version, OS, recent errors with your home folder and keys removed), then open a pre-filled GitHub issue. Nothing is sent from the app itself.
 - Crash recovery: a crashed window offers to reload, and the next launch offers to report what happened.
 - "Request this part" in the part picker when a search finds nothing.
+- Board options (Tools › Board Options, or the board menu): USB CDC On Boot, flash size, PSRAM, CPU speed and the rest, saved per board and used for verify, upload, export and the AI tools. An ESP32 on its built-in USB port gets "USB CDC On Boot" turned on automatically so its Serial output shows up.
+- The Serial Monitor reopens by itself after an upload, as in Arduino IDE 2.
+- Port lists name the USB chip when the board isn't recognised (Espressif native USB, CH340, CP210x, FTDI…) and list USB ports first; Bluetooth and system ports appear under "Show all ports".
 - Simulator boards: Arduino Nano and Arduino Mega 2560 (ATmega2560: ports A–L, timers 0–5, Serial1–3, 16 analog inputs) alongside the Uno; switching boards keeps wires on matching pins.
 - Circuit engine with real nets and voltages: pull-ups, voltage dividers, breadboards (full, half, mini), short-circuit detection, and parts that react to each other as well as to the Arduino.
 - 89 simulated parts, including LCD 16×2/20×4 (I²C and parallel), SSD1306, ILI9341, NeoPixels, MAX7219, TM1637, HC-SR04, DHT11/22, DS18B20, MPU6050, DS1307, HX711, keypads, KY-040, IR remote, servos, steppers (NEMA 17, 28BYJ-48 + ULN2003, A4988), L293D, L298N, relays, 74HC595, NPN and MOSFET transistors, diodes, capacitors, batteries, logic gates and a D flip-flop.
@@ -42,6 +45,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- ESP32-S3/C3/C6 boards on their built-in USB port printed nothing to the Serial Monitor (USB CDC On Boot couldn't be set).
+- The Serial Monitor log grew without limit; it keeps the latest 5,000 lines.
 - CI failed before running anything because the lockfile was ignored.
 - A critical advisory in a development dependency (`shell-quote`, via `concurrently`).
 - Simulator: live speed dropped to about half real time with the logic analyzer recording busy pins; status lines no longer split a half-printed serial line; installed libraries were reported as missing.

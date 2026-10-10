@@ -1953,6 +1953,12 @@ body::after {
     color: var(--text-on-hover);
 }
 
+.board-port-list-item-hint {
+    margin-left: 6px;
+    color: var(--muted-foreground);
+    font-size: 12px;
+}
+
 .board-port-list-item-icon {
     width: 16px;
     height: 16px;

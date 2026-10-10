@@ -113,6 +113,11 @@ function register(ipcMain, ctx) {
     }
   }));
 
+  ipcMain.handle('arduino:board-options', withDebugLog('arduino:board-options', async (event, boardFQBN) => {
+    if (typeof boardFQBN !== 'string' || boardFQBN.length > 300) return { success: false, error: 'Invalid board' };
+    return { success: true, data: await arduinoService.boardOptions(boardFQBN) };
+  }));
+
   ipcMain.handle('arduino:list-ports', withDebugLog('arduino:list-ports', async () => {
     try {
       const ports = await arduinoService.listPorts();

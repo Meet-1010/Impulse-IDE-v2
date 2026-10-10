@@ -433,7 +433,8 @@ class ArduinoService {
           const boardName = item.matching_boards && item.matching_boards[0]
             ? item.matching_boards[0].name
             : (port.protocol_label || 'Unknown');
-          ports.push({ port: port.address, protocol: port.protocol || 'serial', board: boardName });
+          const props = port.properties || {};
+          ports.push({ port: port.address, protocol: port.protocol || 'serial', board: boardName, vid: props.vid || null, pid: props.pid || null });
         }
       }
     }
@@ -676,6 +677,32 @@ class ArduinoService {
     const result = await this.runCommand(['sketch', 'archive', dir, destinationZip], { timeout: 120000 });
     if (!result.success) return { success: false, error: result.stderr.trim() || 'Archive failed' };
     return { success: true, archivePath: destinationZip };
+  }
+
+  /**
+   * A board's menu options (USB CDC On Boot, Flash Size, PSRAM, CPU…), as
+   * Arduino IDE shows them under Tools.
+   * @returns {Promise<{ option: string, label: string, values: { value: string, label: string, isDefault: boolean }[] }[]>}
+   */
+  async boardOptions(boardFQBN) {
+    const base = String(boardFQBN || '').split(':').slice(0, 3).join(':');
+    if (!this.validateFQBN(base)) return [];
+    this._optionCache = this._optionCache || new Map();
+    if (this._optionCache.has(base)) return this._optionCache.get(base);
+    const result = await this.runCommand(['board', 'details', '-b', base, '--format', 'json']);
+    if (!result.success) return [];
+    try {
+      const data = JSON.parse(result.stdout);
+      const options = (data.config_options || []).filter(o => o && o.option && Array.isArray(o.values)).map(o => ({
+        option: o.option,
+        label: o.option_label || o.option,
+        values: o.values.map(v => ({ value: v.value, label: v.value_label || v.value, isDefault: !!v.selected }))
+      }));
+      this._optionCache.set(base, options);
+      return options;
+    } catch {
+      return [];
+    }
   }
 
   /**

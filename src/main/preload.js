@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     exportBinaries: (sketchPath, boardFQBN) => ipcRenderer.invoke('arduino:export-binaries', sketchPath, boardFQBN),
     archiveSketch: (sketchPath) => ipcRenderer.invoke('arduino:archive-sketch', sketchPath),
     listProgrammers: (boardFQBN) => ipcRenderer.invoke('arduino:list-programmers', boardFQBN),
+    boardOptions: (boardFQBN) => ipcRenderer.invoke('arduino:board-options', boardFQBN),
     uploadWithProgrammer: (sketchPath, boardFQBN, programmerId, port) => ipcRenderer.invoke('arduino:upload-programmer', sketchPath, boardFQBN, programmerId, port),
     boardInfo: (port) => ipcRenderer.invoke('arduino:board-info', port)
   },

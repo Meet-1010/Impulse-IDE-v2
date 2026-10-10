@@ -252,3 +252,70 @@ export function reportProblemDialog({ details, crash = null }) {
     (crash ? form.description : form.title).focus();
   });
 }
+
+/**
+ * Board options (Tools › Board Options): one select per menu option.
+ * @param {{ boardName: string, options: { option: string, label: string, values: { value: string, label: string, isDefault: boolean }[] }[],
+ *   choices: Record<string, string>, suggested?: Record<string, string> }} spec
+ * @returns {Promise<Record<string, string> | null>} the chosen value for every option, or null when cancelled
+ */
+export function boardOptionsDialog({ boardName, options, choices, suggested = {} }) {
+  if (open) close(null);
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.className = 'impulse-dialog-overlay';
+    const form = document.createElement('form');
+    form.className = 'impulse-dialog wide';
+    form.setAttribute('role', 'dialog');
+    form.setAttribute('aria-modal', 'true');
+    form.setAttribute('aria-labelledby', 'impulseBoardOptsTitle');
+    form.innerHTML = `
+      <h3 class="impulse-dialog-title" id="impulseBoardOptsTitle"></h3>
+      <p class="impulse-dialog-message">Used when you verify and upload, like Tools › Board options in the Arduino IDE.</p>
+      <div class="impulse-dialog-fields board-options"></div>
+      <div class="impulse-dialog-actions">
+        <button type="button" class="impulse-dialog-btn secondary" data-act="reset">Defaults</button>
+        <span class="impulse-dialog-spacer"></span>
+        <button type="button" class="impulse-dialog-btn secondary" data-act="cancel">Cancel</button>
+        <button type="submit" class="impulse-dialog-btn primary">Save</button>
+      </div>`;
+    form.querySelector('.impulse-dialog-title').textContent = `${boardName} options`;
+    const fields = form.querySelector('.impulse-dialog-fields');
+    const selects = [];
+    for (const opt of options) {
+      const field = document.createElement('label');
+      field.className = 'impulse-dialog-field';
+      const name = document.createElement('span');
+      name.textContent = opt.label;
+      const select = document.createElement('select');
+      select.className = 'impulse-dialog-input';
+      select.name = opt.option;
+      const fallback = opt.values.find(v => v.isDefault)?.value ?? opt.values[0]?.value;
+      for (const v of opt.values) {
+        const o = document.createElement('option');
+        o.value = v.value;
+        o.textContent = suggested[opt.option] === v.value ? `${v.label} (recommended for this port)` : v.label;
+        select.appendChild(o);
+      }
+      select.value = choices[opt.option] && opt.values.some(v => v.value === choices[opt.option]) ? choices[opt.option] : fallback;
+      select.dataset.default = fallback;
+      field.append(name, select);
+      fields.appendChild(field);
+      selects.push(select);
+    }
+    overlay.appendChild(form);
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      close(Object.fromEntries(selects.map(s => [s.name, s.value])));
+    });
+    form.querySelector('[data-act="reset"]').addEventListener('click', () => {
+      for (const s of selects) s.value = suggested[s.name] || s.dataset.default;
+    });
+    form.querySelector('[data-act="cancel"]').addEventListener('click', () => close(null));
+    overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) close(null); });
+    overlay.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); close(null); } });
+    open = { overlay, resolve, previousFocus: document.activeElement };
+    document.body.appendChild(overlay);
+    (selects[0] || form.querySelector('button[type="submit"]')).focus();
+  });
+}

@@ -325,6 +325,7 @@ function buildMenu() {
         { type: 'separator' },
         { label: 'Board…', click: () => sendMenuAction('tools-board') },
         { label: 'Port…', click: () => sendMenuAction('tools-port') },
+        { label: 'Board Options…', click: () => sendMenuAction('tools-board-options') },
         { label: 'Reload Board Data', click: () => sendMenuAction('tools-reload-boards') },
         { label: 'Get Board Info', click: () => sendMenuAction('tools-get-board-info') }
       ]
