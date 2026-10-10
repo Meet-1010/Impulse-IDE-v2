@@ -20,8 +20,9 @@
     --ds-line-strong: #d4d4da;
     --ds-text: #1b1c1e;
     --ds-text-2: #4a4e55;
-    --ds-text-3: #6b6f76;
-    --ds-text-4: #9da1a8;
+    /* text-3 and text-4 keep 4.5:1 contrast on every light surface (WCAG AA) */
+    --ds-text-3: #555960;
+    --ds-text-4: #63676e;
 
     --ds-primary-bg: #1b1c1e;
     --ds-primary-fg: #ffffff;
@@ -30,9 +31,10 @@
     --ds-go-bg: #2e6b39;
     --ds-go-bg-hover: #357a42;
     --ds-go-fg: #e6f7e8;
-    --ds-signal: #2e9447;
-    --ds-danger: #d4483f;
-    --ds-warn: #a86b0a;
+    /* status colors are used for text too: 4.5:1 on every light surface */
+    --ds-signal: #247438;
+    --ds-danger: #b43d36;
+    --ds-warn: #8f5b09;
     --ds-link: #2563c9;
 
     --ds-floating-bg: rgba(255, 255, 255, 0.92);
@@ -41,7 +43,7 @@
     --ds-sim-dot: #d9dade;
 
     --syn-keyword: #8a6420;
-    --syn-comment: #6b7a90;
+    --syn-comment: #5b687b; /* 4.6:1 on the active line */
     --syn-string: #3c7a3a;
     --syn-number: #a1467e;
     --syn-def: #2f5fb8;
@@ -63,8 +65,9 @@
     --ds-line-strong: #34343a;
     --ds-text: #f7f8f8;
     --ds-text-2: #d0d6e0;
-    --ds-text-3: #8a8f98;
-    --ds-text-4: #62666d;
+    /* text-3 and text-4 keep 4.5:1 contrast on every dark surface (WCAG AA) */
+    --ds-text-3: #9ba0a8;
+    --ds-text-4: #868b93;
 
     --ds-primary-bg: #f7f8f8;
     --ds-primary-fg: #08090a;
@@ -84,7 +87,7 @@
     --ds-sim-dot: #1f2125;
 
     --syn-keyword: #bd9f65;
-    --syn-comment: #6f839f;
+    --syn-comment: #7388a4; /* 4.7:1 on the active line */
     --syn-string: #a3c49a;
     --syn-number: #d4a0c7;
     --syn-def: #86aee8;
@@ -660,7 +663,8 @@ body {
 }
 
 .CodeMirror-linenumber {
-    color: var(--ds-text-4);
+    /* text-3, not text-4: line numbers are text and need 4.5:1 contrast */
+    color: var(--ds-text-3);
     padding: 0 12px 0 8px;
 }
 
@@ -1199,7 +1203,7 @@ li.CodeMirror-hint-active {
 
 .ai-status {
     font-size: 11px;
-    color: var(--ds-text-4);
+    color: var(--ds-text-3);
     padding: 0 4px;
 }
 
@@ -1403,6 +1407,16 @@ li.CodeMirror-hint-active {
     width: min(560px, 100%);
 }
 
+/* The form inside a dialog is only for submit handling; it adds no box. */
+.impulse-dialog-form {
+    display: contents;
+}
+
+.impulse-dialog-details.doc {
+    max-height: 46vh;
+    margin-bottom: 12px;
+}
+
 .impulse-dialog-fields.stacked .impulse-dialog-field {
     grid-template-columns: 1fr;
     gap: 6px;
@@ -1455,6 +1469,86 @@ li.CodeMirror-hint-active {
 
 .impulse-dialog-spacer {
     flex: 1;
+}
+
+.setup-steps {
+    list-style: none;
+    margin: 4px 0 12px;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.setup-step {
+    display: grid;
+    grid-template-columns: 18px 1fr auto;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    color: var(--ds-text);
+}
+
+.setup-step-mark {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    border: 1.5px solid var(--ds-line-strong);
+}
+
+.setup-step.done .setup-step-mark {
+    border-color: var(--ds-signal);
+    background: var(--ds-signal);
+    box-shadow: inset 0 0 0 3px var(--ds-surface-1);
+}
+
+.setup-step.active .setup-step-mark {
+    border-color: var(--ds-text);
+    border-top-color: transparent;
+    animation: setup-spin 0.9s linear infinite;
+}
+
+.setup-step-state {
+    font-size: 12px;
+    color: var(--ds-text-3);
+}
+
+.setup-progress {
+    margin: 0 0 8px;
+}
+
+.setup-progress-label {
+    font-size: 12px;
+    color: var(--ds-text-3);
+    margin-bottom: 6px;
+}
+
+.setup-progress-track {
+    height: 4px;
+    border-radius: 2px;
+    background: var(--ds-line);
+    overflow: hidden;
+}
+
+.setup-progress-bar {
+    height: 100%;
+    width: 0;
+    background: var(--ds-signal);
+    transition: width 0.25s ease;
+}
+
+.setup-progress-bar.indeterminate {
+    width: 40% !important;
+    animation: setup-slide 1.2s ease-in-out infinite;
+}
+
+@keyframes setup-spin { to { transform: rotate(360deg); } }
+@keyframes setup-slide { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
+
+@media (prefers-reduced-motion: reduce) {
+    .setup-step.active .setup-step-mark, .setup-progress-bar.indeterminate { animation: none; }
 }
 
 .impulse-dialog-actions {

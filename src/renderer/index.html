@@ -20,9 +20,10 @@
 
 <body>
     <a href="#arduinoWorkspace" class="skip-link">Skip to editor</a>
-    <div class="app-container" role="application" aria-label="Impulse IDE">
+    <div class="app-container">
         <!-- Top Row: Tool strip (extreme left) + Menu bar -->
         <header class="top-row">
+            <h1 class="sr-only">Impulse IDE</h1>
             <div class="tool-strip">
                 <button id="compileBtn" class="action-btn verify" title="Verify (Ctrl+R)">
                     <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
@@ -93,7 +94,7 @@
         <!-- Workspace: Activity Bar + Sidebar (Explorer a step down) + Main Area -->
         <div class="workspace-row">
             <!-- Activity Bar: Sketchbook, Board Manager, Library Manager, Debug, Search -->
-            <div class="activity-bar">
+            <nav class="activity-bar" aria-label="Activity bar">
                 <div class="activity-bar-top">
                     <button class="activity-icon active" data-panel="explorer" title="Sketchbook (Ctrl+Shift+E)">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -173,10 +174,10 @@
                         <span class="user-status-dot" id="userStatusDot"></span>
                     </button>
                 </div>
-            </div>
+            </nav>
 
             <!-- Sidebar -->
-            <div class="sidebar" id="sidebar">
+            <div class="sidebar" id="sidebar" role="complementary" aria-label="Sidebar">
                 <!-- Explorer Panel -->
                 <div class="sidebar-panel active" id="explorerPanel">
                     <div class="sidebar-header">
@@ -415,7 +416,7 @@
             <div id="sidebarResizer" class="resizer-vertical"></div>
 
             <!-- Main Content Area (Explorer is a step down; toolbar is in top-row above) -->
-            <div class="main-area" id="arduinoWorkspace" style="flex-direction:column;">
+            <div class="main-area" id="arduinoWorkspace" role="main" style="flex-direction:column;">
                 <!-- Board/Port Selection Modal -->
                 <div id="boardPortModal" class="board-port-modal">
                     <div class="board-port-modal-content">
@@ -529,7 +530,7 @@
                                 </select>
                                 <button id="serialClearBtn" class="serial-ctrl-btn" title="Clear">Clear</button>
                             </div>
-                            <div class="serial-output-content"></div>
+                            <div class="serial-output-content" tabindex="0" aria-label="Serial output"></div>
                         </div>
                         <div id="plotterOutput" class="output-content plotter-content">
                             <div class="plotter-toolbar">
@@ -564,7 +565,7 @@
                 </div>
             </div>
             <!-- Simulation View (Wokwi-style: editor left, live circuit right) -->
-            <div class="sim-view" id="simView">
+            <div class="sim-view" id="simView" role="main" aria-label="Editor and simulator">
                 <div id="simEditorSlot"></div>
                 <div id="simPanel"></div>
             </div>
@@ -609,7 +610,7 @@
                                 <circle cx="15" cy="14" r="1" fill="currentColor"/>
                             </svg>
                         </div>
-                        <h3 class="ai-empty-title">What are we building?</h3>
+                        <h2 class="ai-empty-title">What are we building?</h2>
                         <p class="ai-empty-copy">The agent writes the sketch, wires the circuit, runs it in the simulator and fixes what breaks.</p>
                         <div class="ai-starters">
                             <button type="button" class="ai-starter" data-prompt="Blink the onboard LED every 500 ms and print each toggle to Serial.">Blink an LED and log to Serial</button>
@@ -628,13 +629,13 @@
                                 <path
                                     d="M4 12c0-2 2-4 4-4s4 2 4 4-2 4-4 4-4-2-4-4zm8 0c0-2 2-4 4-4s4 2 4 4-2 4-4 4-4-2-4-4" />
                             </svg>
-                            <select id="aiModeSelect" class="ai-mode-select" title="Mode">
+                            <select id="aiModeSelect" class="ai-mode-select" title="Mode" aria-label="AI mode">
                                 <option value="agent">Agent</option>
                                 <option value="ask">Ask</option>
                                 <option value="debug">Debug</option>
                             </select>
                         </span>
-                        <select id="aiModelSelect" class="ai-model-select" title="Model">
+                        <select id="aiModelSelect" class="ai-model-select" title="Model" aria-label="AI model">
                             <option value="">Model…</option>
                         </select>
                         <button id="aiPinModelBtn" type="button" class="ai-ico"

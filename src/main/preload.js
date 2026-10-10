@@ -167,6 +167,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
     }
   },
 
+  toolchain: {
+    status: () => ipcRenderer.invoke('toolchain:status'),
+    setup: () => ipcRenderer.invoke('toolchain:setup'),
+    onProgress: (callback) => {
+      const handler = (event, progress) => callback(progress);
+      ipcRenderer.on('toolchain:progress', handler);
+      return () => ipcRenderer.removeListener('toolchain:progress', handler);
+    }
+  },
   problem: {
     details: (crashId) => ipcRenderer.invoke('problem:details', { crashId }),
     report: (spec) => ipcRenderer.invoke('problem:report', spec),
@@ -177,7 +186,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   app: {
     quit: () => ipcRenderer.send('app:quit'),
     getVersion: () => ipcRenderer.invoke('app:get-version'),
-    logError: (entry) => ipcRenderer.send('app:log-renderer-error', entry)
+    logError: (entry) => ipcRenderer.send('app:log-renderer-error', entry),
+    readDoc: (name) => ipcRenderer.invoke('app:read-doc', name)
   },
   clipboard: {
     readText: () => ipcRenderer.invoke('clipboard:read-text'),

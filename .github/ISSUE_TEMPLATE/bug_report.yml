@@ -1,0 +1,39 @@
+name: Bug report
+description: Something doesn't work as it should
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: "Tip: Help › Report a Problem in the app fills in your version and recent errors for you."
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Impulse version
+      placeholder: Help › About, e.g. 2.0.0-beta.1
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options: [macOS (Apple silicon), macOS (Intel), Windows, Linux]
+    validations:
+      required: true
+  - type: input
+    id: board
+    attributes:
+      label: Board (if relevant)
+      placeholder: e.g. Arduino Uno, ESP32-S3 Dev Module, or the simulator
+  - type: textarea
+    id: details
+    attributes:
+      label: Sketch, circuit or error output
+      description: Paste the relevant code, the Console output, or attach the sketch's diagram.json.
+      render: text

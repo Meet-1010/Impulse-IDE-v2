@@ -17,16 +17,11 @@ const notifications = require('../utils/notifications');
  * Never use shell string interpolation with user-controlled input.
  */
 class ArduinoService {
-  constructor() {
-    // GUI-launched apps on macOS don't inherit the shell PATH, so prefer a
-    // known absolute install location before falling back to PATH lookup.
-    const fsSync = require('fs');
-    const candidates = [
-      '/usr/local/bin/arduino-cli',
-      '/opt/homebrew/bin/arduino-cli',
-      path.join(require('os').homedir(), 'bin', 'arduino-cli'),
-    ];
-    this.cliPath = candidates.find(p => { try { return fsSync.existsSync(p); } catch { return false; } }) || 'arduino-cli';
+  /** @param {{ cliPath?: string|null }} [opts] the arduino-cli to run (see services/toolchain.js) */
+  constructor({ cliPath = null } = {}) {
+    // GUI-launched apps on macOS don't inherit the shell PATH, so the
+    // toolchain service resolves an absolute path; PATH lookup is the fallback.
+    this.cliPath = cliPath || 'arduino-cli';
     this.coreIndexed = false;
   }
 

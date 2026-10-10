@@ -38,19 +38,21 @@ export function compileSketch(code, fqbn = 'arduino:avr:uno', name = 'sketch') {
     cache.set(key, hex);
     return hex;
   }
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'impulse-e2e-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'impulse-compile-'));
   const sketchDir = path.join(dir, name);
   const outDir = path.join(dir, 'out');
   fs.mkdirSync(sketchDir);
   fs.writeFileSync(path.join(sketchDir, `${name}.ino`), code);
+  let hex;
   try {
     const libs = EXTRA_LIBS.flatMap(lib => ['--libraries', lib]);
     execFileSync(CLI, ['compile', '--fqbn', fqbn, ...libs, '--output-dir', outDir, sketchDir], { stdio: 'pipe' });
+    hex = fs.readFileSync(path.join(outDir, `${name}.ino.hex`), 'utf8');
   } catch (err) {
     throw new Error(`Compile failed for ${fqbn}:\n${err.stderr?.toString() || err.message}`);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
   }
-  const hex = fs.readFileSync(path.join(outDir, `${name}.ino.hex`), 'utf8');
-  fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(CACHE_DIR, { recursive: true });
   fs.writeFileSync(cached, hex);
   cache.set(key, hex);

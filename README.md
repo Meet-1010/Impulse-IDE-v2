@@ -54,6 +54,7 @@ npm run dev
 npm test             # unit tests (includes a real compile → simulate test when arduino-cli is installed)
 npm run lint         # ESLint; CI runs it with --max-warnings=0
 npm run test:smoke   # launches the app with a throwaway profile, opens every panel and the simulator, fails on any runtime error
+npm run test:e2e     # opens an example, compiles and runs it, presses its button; accessibility audit (axe) of the main screens in both themes
 ```
 
 Example and part tests compile real sketches; tests whose libraries aren't installed are skipped. To run them without installing libraries globally, point `IMPULSE_TEST_LIBRARIES` at a folder of libraries (for example one filled with `ARDUINO_DIRECTORIES_USER=/tmp/libs arduino-cli lib install OneWire DallasTemperature TM1637`, then `IMPULSE_TEST_LIBRARIES=/tmp/libs/libraries npm test`).

@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- First-run setup: when arduino-cli, the AVR core or (on Apple silicon) Rosetta is missing, Impulse explains what's needed and installs it with progress. arduino-cli 1.5.1 is downloaded from its official release and checked against a SHA-256 built into the app. Existing installs, including the one inside Arduino IDE 2, are found and used. Tools › Set Up Arduino Tools reruns it.
+- Release pipeline: pushing a version tag builds macOS (Intel and Apple silicon), Windows and Linux installers with auto-update metadata into a draft GitHub Release; signing and notarization run when the certificates are configured.
+- PRIVACY.md, SECURITY.md (private vulnerability reporting), CONTRIBUTING.md, THIRD_PARTY_NOTICES.md (`npm run notices`), Dependabot, and issue forms for bugs, features and part requests. Privacy and open-source licenses are readable in Help › About.
+- `npm run test:e2e`: opens an example, compiles and runs it, presses its button, and audits accessibility (axe) on the main screens in both themes; runs in CI on all three systems.
+- Keyboard and screen-reader access in the simulator: `[` and `]` select parts, the selection is announced, and part settings are labelled controls in the inspector. The part picker follows the combobox pattern.
 - Help › Report a Problem: review exactly what will be sent (version, OS, recent errors with your home folder and keys removed), then open a pre-filled GitHub issue. Nothing is sent from the app itself.
 - Crash recovery: a crashed window offers to reload, and the next launch offers to report what happened.
 - "Request this part" in the part picker when a search finds nothing.
@@ -34,6 +39,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Secondary text and status colors meet WCAG AA contrast (4.5:1) in both themes.
+- Beta builds update to newer betas; stable builds only to stable releases.
 - The app is Impulse IDE 2.0.0-beta.1; updates and problem reports go to github.com/Meet-1010/Impulse-IDE-v2. Data from pre-2.0 development builds (`arduino-ide-cursor`) keeps being used, so nothing resets. AI keys saved by those builds may need to be entered once more.
 - `package-lock.json` is committed for reproducible installs; CI compiles and simulates every example on Linux with pinned library versions.
 - Installers no longer carry renderer-only packages that are already bundled.
@@ -45,6 +52,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Accessibility: wrong ARIA roles on the activity bar, file list, editor tabs and dialogs; unlabelled AI and editor controls; nested interactive elements in tabs and part thumbnails; logs that couldn't be scrolled from the keyboard.
+- The welcome tour waited for nothing and appeared on top of first-run setup.
 - ESP32-S3/C3/C6 boards on their built-in USB port printed nothing to the Serial Monitor (USB CDC On Boot couldn't be set).
 - The Serial Monitor log grew without limit; it keeps the latest 5,000 lines.
 - CI failed before running anything because the lockfile was ignored.

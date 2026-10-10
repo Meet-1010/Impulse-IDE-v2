@@ -75,3 +75,11 @@ jobs:
       - name: Smoke test (launch app, open every panel and the simulator)
         if: runner.os != 'Linux'
         run: npm run test:smoke
+
+      - name: End-to-end flows and accessibility audit
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm run test:e2e
+
+      - name: End-to-end flows and accessibility audit
+        if: runner.os != 'Linux'
+        run: npm run test:e2e

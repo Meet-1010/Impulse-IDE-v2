@@ -27,6 +27,7 @@ const { registerAllIpc } = require('./ipc');
 const { debug } = require('./utils/logger');
 const notifications = require('./utils/notifications');
 const WorkspaceStore = require('./services/workspaceStore');
+const { Toolchain } = require('./services/toolchain');
 const { validatePath } = require('./utils/pathValidator');
 
 const logger = require('./utils/logger');
@@ -327,6 +328,7 @@ function buildMenu() {
         { label: 'Port…', click: () => sendMenuAction('tools-port') },
         { label: 'Board Options…', click: () => sendMenuAction('tools-board-options') },
         { label: 'Reload Board Data', click: () => sendMenuAction('tools-reload-boards') },
+        { label: 'Set Up Arduino Tools…', click: () => sendMenuAction('tools-setup') },
         { label: 'Get Board Info', click: () => sendMenuAction('tools-get-board-info') }
       ]
     },
@@ -359,7 +361,12 @@ app.whenReady().then(() => {
   workspace = new WorkspaceStore();
   workspace.restore();
   workspace.on('recent-changed', () => buildMenu());
-  arduinoService = new ArduinoService();
+  // IMPULSE_TOOLCHAIN_ISOLATED=1 ignores system installs (testing first-run setup).
+  const toolchain = new Toolchain({
+    managedDir: path.join(app.getPath('userData'), 'toolchain'),
+    ignoreSystem: process.env.IMPULSE_TOOLCHAIN_ISOLATED === '1'
+  });
+  arduinoService = new ArduinoService({ cliPath: toolchain.findCli()?.path || null });
   serialMonitor = new SerialMonitor();
   errorMemory = new ErrorMemory();
   apiKeyManager = new APIKeyManager();
@@ -489,7 +496,8 @@ app.whenReady().then(() => {
     shell,
     app,
     workspace,
-    problemReporter
+    problemReporter,
+    toolchain
   };
   registerAllIpc(ipcMain, ctx);
 

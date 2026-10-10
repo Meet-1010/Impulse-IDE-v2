@@ -22,9 +22,14 @@ export class PartPicker {
   constructor(host, opts) {
     this.opts = opts;
     this.el = h('div', { class: 'sim-picker', role: 'dialog', 'aria-label': 'Add a part', hidden: true });
-    this.search = h('input', { type: 'search', class: 'sim-picker-input', placeholder: `Search ${Object.keys(PARTS).length} parts — try “distance”, “oled”, “motor”…`, 'aria-label': 'Search parts', autocomplete: 'off', spellcheck: 'false' });
+    // Combobox pattern: the search box announces the highlighted part.
+    this.search = h('input', {
+      type: 'search', class: 'sim-picker-input', placeholder: `Search ${Object.keys(PARTS).length} parts — try “distance”, “oled”, “motor”…`,
+      'aria-label': 'Search parts', autocomplete: 'off', spellcheck: 'false',
+      role: 'combobox', 'aria-expanded': 'true', 'aria-autocomplete': 'list', 'aria-controls': 'simPickerOptions',
+    });
     this.nav = h('nav', { class: 'sim-picker-nav', 'aria-label': 'Categories' });
-    this.list = h('div', { class: 'sim-picker-list', role: 'listbox', tabindex: '-1' });
+    this.list = h('div', { class: 'sim-picker-list', tabindex: '-1' });
     this.footer = h('div', { class: 'sim-picker-footer' });
     this.el.append(
       h('div', { class: 'sim-picker-head' }, icon('search', 16), this.search, h('kbd', { class: 'sim-kbd' }, 'Esc')),
@@ -77,6 +82,7 @@ export class PartPicker {
   _tile(def, { detail = false, section = 'list' } = {}) {
     const tile = h('button', {
       type: 'button', class: `sim-tile${detail ? ' detail' : ''}`, role: 'option', title: def.description,
+      id: `sim-part-${String(section).replace(/[^a-z0-9]+/gi, '-')}-${def.type}`, 'aria-selected': 'false',
       dataset: { type: def.type },
     },
     this._thumb(def, section),
@@ -91,7 +97,7 @@ export class PartPicker {
   }
 
   _section(title, defs, hint) {
-    const sec = h('section', { class: 'sim-picker-section', dataset: { cat: title } },
+    const sec = h('section', { class: 'sim-picker-section', role: 'group', 'aria-label': title, dataset: { cat: title } },
       h('header', {}, h('span', { class: 'sim-picker-cat' }, title), hint ? h('span', { class: 'sim-picker-hint' }, hint) : null),
       h('div', { class: 'sim-picker-grid' }, defs.map(d => this._tile(d, { section: title }))));
     return sec;
@@ -104,6 +110,9 @@ export class PartPicker {
     this.list.innerHTML = '';
     this.nav.innerHTML = '';
     this.nav.hidden = !!q;
+    this.search.removeAttribute('aria-activedescendant');
+    // Parts go in one listbox; messages and action buttons sit outside it.
+    const options = h('div', { class: 'sim-picker-options', role: 'listbox', id: 'simPickerOptions', 'aria-label': q ? `Parts matching ${q}` : 'Parts' });
 
     if (!q) {
       const recent = this._recent();
@@ -111,9 +120,10 @@ export class PartPicker {
       if (recent.length) groups.push(['Recent', recent.map(t => PARTS[t])]);
       groups.push(['Popular', POPULAR.map(t => PARTS[t]).filter(Boolean)]);
       for (const cat of CATEGORY_ORDER) groups.push([cat, Object.values(PARTS).filter(p => p.category === cat)]);
+      this.list.appendChild(options);
       for (const [title, defs] of groups) {
         const sec = this._section(title, defs, CATEGORY_HINTS[title]);
-        this.list.appendChild(sec);
+        options.appendChild(sec);
         const link = h('button', { type: 'button', class: 'sim-picker-navlink' }, title, h('span', { class: 'sim-picker-count' }, String(defs.length)));
         link.addEventListener('click', () => sec.scrollIntoView({ block: 'start', behavior: 'smooth' }));
         this.nav.appendChild(link);
@@ -125,7 +135,8 @@ export class PartPicker {
     const results = searchParts(q);
     if (results.length) {
       const grid = h('div', { class: 'sim-picker-results' }, results.map(r => this._tile(r.part, { detail: true, section: 'results' })));
-      this.list.append(h('div', { class: 'sim-picker-cat result-count' }, `${results.length} part${results.length === 1 ? '' : 's'} match “${q}”`), grid);
+      options.appendChild(grid);
+      this.list.append(h('div', { class: 'sim-picker-cat result-count', role: 'status' }, `${results.length} part${results.length === 1 ? '' : 's'} match “${q}”`), options);
       this._setFocus(0);
       return;
     }
@@ -134,10 +145,10 @@ export class PartPicker {
     const empty = h('div', { class: 'sim-picker-empty' },
       h('p', { class: 'sim-picker-empty-title' }, advice ? advice.title : `No part called “${q}” yet`),
       h('p', { class: 'sim-picker-empty-text' }, advice ? advice.text : 'Most sensors have a digital or analog output: the generic stand-ins below behave like them, so you can keep building and testing your code.'));
-    this.list.appendChild(empty);
-    if (advice?.parts.length) this.list.appendChild(this._section('Try instead', advice.parts));
-    if (generic.length && !advice) this.list.appendChild(this._section('Stand-ins', generic));
-    if (similar.length) this.list.appendChild(this._section('Related parts', similar));
+    this.list.append(empty, options);
+    if (advice?.parts.length) options.appendChild(this._section('Try instead', advice.parts));
+    if (generic.length && !advice) options.appendChild(this._section('Stand-ins', generic));
+    if (similar.length) options.appendChild(this._section('Related parts', similar));
     if (this.opts.onAskAi) {
       const ai = h('button', { type: 'button', class: 'sim-btn ghost sim-picker-ai' }, icon('sparkle', 14), 'Build the circuit from my code with AI');
       ai.addEventListener('click', () => { this.toggle(false); this.opts.onAskAi(q); });
@@ -164,8 +175,12 @@ export class PartPicker {
   _setFocus(i) {
     if (!this.items.length) return;
     this.focus = Math.max(0, Math.min(this.items.length - 1, i));
-    this.items.forEach((it, j) => it.tile.classList.toggle('focused', j === this.focus));
+    this.items.forEach((it, j) => {
+      it.tile.classList.toggle('focused', j === this.focus);
+      it.tile.setAttribute('aria-selected', j === this.focus ? 'true' : 'false');
+    });
     const it = this.items[this.focus];
+    this.search.setAttribute('aria-activedescendant', it.tile.id);
     it.tile.scrollIntoView({ block: 'nearest' });
     this._describe(it.def);
   }

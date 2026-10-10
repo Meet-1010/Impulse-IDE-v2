@@ -74,6 +74,10 @@ export const mod = isMac ? '⌘' : 'Ctrl+';
 export function partThumb(def, boxW = 56, boxH = 44) {
   const wrap = document.createElement('div');
   wrap.className = 'sim-thumb';
+  // A picture of the part: its live controls (a pot's slider…) must not be
+  // reachable by keyboard or screen readers.
+  wrap.inert = true;
+  wrap.setAttribute('aria-hidden', 'true');
   wrap.style.width = `${boxW}px`;
   wrap.style.height = `${boxH}px`;
   const el = document.createElement(def.tag);

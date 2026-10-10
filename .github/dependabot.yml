@@ -1,0 +1,20 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # Electron and its builder move together; review them as one PR.
+      electron:
+        patterns: ["electron", "electron-builder", "electron-updater"]
+      ai-sdks:
+        patterns: ["@anthropic-ai/sdk", "openai", "@google/generative-ai"]
+      dev-tools:
+        dependency-type: development
+        update-types: [minor, patch]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

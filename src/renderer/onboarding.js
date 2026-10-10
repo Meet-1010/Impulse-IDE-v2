@@ -326,8 +326,9 @@ window.onboarding = new OnboardingManager();
 
 // Auto-start onboarding when page loads (only for new users)
 document.addEventListener('DOMContentLoaded', () => {
-  // Delay to ensure UI is fully loaded
-  setTimeout(() => {
+  // Wait until the UI is up and any first-run setup dialog is closed.
+  const whenIdle = (fn) => (document.querySelector('.setup-dialog') ? setTimeout(() => whenIdle(fn), 1000) : fn());
+  setTimeout(() => whenIdle(() => {
     // Only show tour on first visit
     const hasSeenOnboarding = localStorage.getItem('arduino-ide-onboarding-completed');
     const isFirstVisit = !hasSeenOnboarding;
@@ -355,7 +356,7 @@ document.addEventListener('DOMContentLoaded', () => {
         window.onboarding.start();
       }
     }
-  }, 2000); // Increased delay to let everything load
+  }), 2000);
 });
 
 // Export for module use

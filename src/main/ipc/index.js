@@ -16,6 +16,7 @@ const apiKeysHandlers = require('./apiKeysHandlers');
 const appHandlers = require('./appHandlers');
 const sketchHandlers = require('./sketchHandlers');
 const problemHandlers = require('./problemHandlers');
+const toolchainHandlers = require('./toolchainHandlers');
 
 /**
  * Register all IPC handlers. Requires ipcMain and a context object with services and state.
@@ -48,6 +49,7 @@ function registerAllIpc(ipcMain, ctx) {
   apiKeysHandlers.register(ipcMain, ctx);
   sketchHandlers.register(ipcMain, ctx);
   problemHandlers.register(ipcMain, ctx);
+  toolchainHandlers.register(ipcMain, ctx);
 }
 
 module.exports = { registerAllIpc };

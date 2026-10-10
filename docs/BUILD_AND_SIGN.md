@@ -36,16 +36,38 @@ To sign the Windows executable so users don’t see SmartScreen / “Windows pro
    npm run build:win
    ```
 
-4. **CI (e.g. GitHub Actions)**  
-   Store the PFX (or its base64) and password as **secrets**. Decode PFX in the workflow and set `WIN_CSC_LINK` and `WIN_CSC_KEY_PASSWORD` before running `npm run build:win`. See [electron-builder code signing](https://www.electron.build/code-signing).
+4. **CI (GitHub Actions)**
+   Add the PFX as a base64 secret and its password; the release workflow passes them to electron-builder. See [electron-builder code signing](https://www.electron.build/code-signing).
 
 If these env vars are **not** set, the build still runs but the exe is **unsigned**; users may see SmartScreen or “Unknown publisher”.
+
+## macOS signing and notarization
+
+You need an Apple Developer account ($99/year) and a **Developer ID Application** certificate.
+
+1. Export the certificate with its private key from Keychain Access as a `.p12` with a password.
+2. Create an app-specific password at appleid.apple.com.
+3. Add the secrets below. electron-builder signs with the certificate and notarizes automatically when the Apple ID secrets are present.
+
+## Release secrets (repository › Settings › Secrets and variables › Actions)
+
+| Secret | Used for |
+|---|---|
+| `MAC_CSC_LINK` | base64 of the Developer ID Application `.p12` (`base64 -i cert.p12 \| pbcopy`) |
+| `MAC_CSC_KEY_PASSWORD` | password of that `.p12` |
+| `APPLE_ID` | Apple ID email used for notarization |
+| `APPLE_APP_SPECIFIC_PASSWORD` | app-specific password for that Apple ID |
+| `APPLE_TEAM_ID` | your 10-character team ID |
+| `WIN_CSC_LINK` | base64 of the Windows code-signing `.pfx` |
+| `WIN_CSC_KEY_PASSWORD` | password of that `.pfx` |
+
+All are optional: missing secrets mean an unsigned build for that platform, not a failed one.
 
 ## Clean machine / portable testing
 
 After building:
 
-1. Copy the installer (e.g. `dist/Impulse IDE Setup 1.0.0.exe`) to a clean machine or VM.
+1. Copy the installer (e.g. `dist/Impulse-IDE-Setup-2.0.0-beta.1.exe`) to a clean machine or VM.
 2. Install and run. Confirm: open folder, compile, upload, serial monitor, AI panel.
 3. Check that user data (sketches, memory, settings) lives under the correct app data folder (e.g. `%APPDATA%\Impulse IDE` on Windows when built with this productName).
 
@@ -54,7 +76,5 @@ After building:
 The packaged app does **not** rely on any CDN:
 
 - **CodeMirror:** Bundled by Vite from `node_modules/codemirror`.
-- **Fonts:** Bundled from `bb-manual-mono-pro` (or local assets); Vite copies them into `dist-renderer/assets/`.
-- **CSP:** Allows `fonts.googleapis.com` / `fonts.gstatic.com` only for optional web font fallback; the app works fully offline.
-
-To make the app strictly offline, you can remove those origins from the CSP in `src/main/main.js` (see `Content-Security-Policy` there).
+- **Fonts:** Inter and JetBrains Mono come from `@fontsource-variable/*`; Vite copies them into `dist-renderer/assets/`.
+- **CSP:** `default-src 'self'`; fonts load only from the app itself (see `Content-Security-Policy` in `src/main/main.js`). Network access is limited to AI providers and update checks from the main process.

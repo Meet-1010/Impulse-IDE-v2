@@ -120,11 +120,13 @@ export class SimulationManager {
     this.notice = h('div', { class: 'sim-notice', hidden: true, role: 'status' });
     this.toasts = h('div', { class: 'sim-toasts', 'aria-live': 'polite' });
     this.empty = h('div', { class: 'sim-empty', hidden: true });
-    this.wrap = h('div', { class: 'sim-canvas-wrap', id: 'simCanvasWrap', tabindex: '0', 'aria-label': 'Circuit canvas' });
-    this.stage = h('div', { class: 'sim-stage', id: 'simStage' }, this.wrap, toolbar, this.stats, zoom, this.notice, this.empty, this.toasts);
+    // A keyboard-driven widget (arrows move, Delete removes, R rotates).
+    this.wrap = h('div', { class: 'sim-canvas-wrap', id: 'simCanvasWrap', tabindex: '0', role: 'application', 'aria-roledescription': 'circuit canvas', 'aria-label': 'Circuit canvas: [ and ] select parts, arrow keys move them, R rotates, Delete removes, A adds a part' });
+    this.announcer = h('div', { class: 'sr-only', role: 'status', 'aria-live': 'polite' });
+    this.stage = h('div', { class: 'sim-stage', id: 'simStage' }, this.wrap, toolbar, this.stats, zoom, this.notice, this.empty, this.toasts, this.announcer);
 
     // Bottom pane: serial monitor, logic analyzer, circuit checks.
-    this.serialOut = h('div', { id: 'simSerialOut', class: 'sim-serial-out', role: 'log', 'aria-label': 'Simulated serial output' });
+    this.serialOut = h('div', { id: 'simSerialOut', class: 'sim-serial-out', role: 'log', 'aria-label': 'Simulated serial output', tabindex: '0' });
     this.serialInput = h('input', { type: 'text', id: 'simSerialInput', placeholder: 'Message to send to the board — press Enter', autocomplete: 'off', spellcheck: 'false' });
     this.lineEnding = h('select', { class: 'sim-select small', title: 'Line ending', 'aria-label': 'Line ending' },
       h('option', { value: 'newline' }, 'Newline'), h('option', { value: 'none' }, 'No line ending'), h('option', { value: 'cr' }, 'Carriage return'), h('option', { value: 'both' }, 'Both NL & CR'));
@@ -146,7 +148,12 @@ export class SimulationManager {
       isInteractive: (part) => this.running && !!partDef(part.type)?.interactive,
     });
     this.canvas.onChange = (kind) => this._onCanvasChange(kind);
-    this.canvas.onSelect = (sel) => { this.inspector.show(sel); this._updateEmpty(); this._revealSelection(sel); };
+    this.canvas.onSelect = (sel) => {
+      this.inspector.show(sel);
+      this._updateEmpty();
+      this._revealSelection(sel);
+      this._announceSelection(sel);
+    };
     this.canvas.onPartPointerDown = (part) => this._partPress(part);
     this.canvas.onPartPointerUp = (part) => this._partRelease(part);
     this.canvas.onPartDoubleClick = (part) => this.canvas.select([part]);
@@ -553,6 +560,22 @@ export class SimulationManager {
     });
   }
 
+  /** Tell screen readers what is selected (the inspector shows its controls). */
+  _announceSelection(sel) {
+    const items = [...sel];
+    const parts = items.filter(i => i.el);
+    let text = '';
+    if (parts.length === 1 && items.length === 1) {
+      const p = parts[0];
+      text = `${partDef(p.type)?.label || p.type} ${p.id} selected. Its settings are in the inspector.`;
+    } else if (items.length === 1) {
+      text = 'Wire selected.';
+    } else if (items.length > 1) {
+      text = `${items.length} items selected.`;
+    }
+    if (text) this.announcer.textContent = text;
+  }
+
   /** Keep a newly selected part from hiding behind the inspector (after any drag ends). */
   _revealSelection(sel) {
     const items = [...sel];
@@ -906,7 +929,7 @@ export class SimulationManager {
       ai.addEventListener('click', () => this.buildCircuitFromCode());
       this.empty.append(
         h('div', { class: 'sim-empty-card' },
-          h('h3', {}, 'Build a circuit'),
+          h('h2', {}, 'Build a circuit'),
           h('p', {}, 'Add parts, then click one pin and another to wire them. Press ▶ to run your sketch on the simulated board.'),
           h('div', { class: 'sim-empty-actions' }, add, all, ai),
           h('div', { class: 'sim-empty-try' }, h('span', { class: 'sim-empty-label' }, 'Try:'), chips)));

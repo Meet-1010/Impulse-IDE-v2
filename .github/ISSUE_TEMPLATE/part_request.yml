@@ -1,0 +1,20 @@
+name: Part request
+description: Ask for a part the simulator doesn't have yet
+labels: [part request]
+body:
+  - type: input
+    id: part
+    attributes:
+      label: Part
+      placeholder: e.g. BME280, MFRC522 RFID reader, 28BYJ-48
+    validations:
+      required: true
+  - type: textarea
+    id: use
+    attributes:
+      label: What would you build with it?
+  - type: input
+    id: library
+    attributes:
+      label: Library you use with it (optional)
+      placeholder: e.g. Adafruit BME280 Library

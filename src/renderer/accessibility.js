@@ -68,12 +68,13 @@ class AccessibilityManager {
    * Called once on init, and can be called again after dynamic content loads.
    */
   _applyAriaRoles() {
-    // Activity bar = tablist
-    const activityBar = document.querySelector('.activity-bar');
-    if (activityBar) {
-      activityBar.setAttribute('role', 'tablist');
-      activityBar.setAttribute('aria-label', 'Activity Bar');
-      activityBar.setAttribute('aria-orientation', 'vertical');
+    // Activity bar: the panel switchers form a tablist; the buttons below
+    // them (theme, account) are ordinary buttons outside it.
+    const activityTabs = document.querySelector('.activity-bar-top');
+    if (activityTabs) {
+      activityTabs.setAttribute('role', 'tablist');
+      activityTabs.setAttribute('aria-label', 'Side panels');
+      activityTabs.setAttribute('aria-orientation', 'vertical');
     }
 
     // Activity icons = tabs
@@ -90,11 +91,11 @@ class AccessibilityManager {
       panel.setAttribute('aria-label', panel.querySelector('.sidebar-title')?.textContent || 'Panel');
     });
 
-    // File tree = tree
+    // File list: a labelled region (its rows are buttons, not tree items).
     const fileTree = document.getElementById('fileTree');
     if (fileTree) {
-      fileTree.setAttribute('role', 'tree');
-      fileTree.setAttribute('aria-label', 'File Explorer');
+      fileTree.setAttribute('role', 'region');
+      fileTree.setAttribute('aria-label', 'Sketch files');
     }
 
     // File tabs = tablist
@@ -165,6 +166,7 @@ class AccessibilityManager {
     if (consoleOutput) {
       consoleOutput.setAttribute('role', 'log');
       consoleOutput.setAttribute('aria-label', 'Console Output');
+      consoleOutput.tabIndex = 0; // scrollable with the keyboard
     }
 
     // Notification container

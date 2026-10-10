@@ -24,13 +24,13 @@ export class ExamplesGallery {
     const scratch = h('button', { type: 'button', class: 'sim-btn ghost' }, 'Start from scratch');
     const close = h('button', { type: 'button', class: 'sim-icon-btn', 'aria-label': 'Close' }, icon('close', 16));
     const dialog = h('div', { class: 'sim-gallery', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Examples' },
-      h('header', { class: 'sim-gallery-head' },
+      h('div', { class: 'sim-gallery-head' },
         h('div', {}, h('h2', {}, 'Examples'), h('p', {}, `${EXAMPLES.length} projects that run in the simulator — open one to get its sketch and its wired circuit.`)),
         close),
       h('div', { class: 'sim-gallery-body' },
         nav,
         h('div', { class: 'sim-gallery-main' }, h('div', { class: 'sim-gallery-searchrow' }, icon('search', 15), search), list)),
-      h('footer', { class: 'sim-gallery-foot' }, h('span', { class: 'sim-gallery-hint' }, h('kbd', { class: 'sim-kbd' }, '↑↓'), ' to choose'), h('div', { class: 'sim-gallery-actions' }, scratch, openBtn)));
+      h('div', { class: 'sim-gallery-foot' }, h('span', { class: 'sim-gallery-hint' }, h('kbd', { class: 'sim-kbd' }, '↑↓'), ' to choose'), h('div', { class: 'sim-gallery-actions' }, scratch, openBtn)));
     const overlay = h('div', { class: 'sim-overlay' }, dialog);
     document.body.appendChild(overlay);
     this.el = overlay;

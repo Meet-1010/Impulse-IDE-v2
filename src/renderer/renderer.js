@@ -5,8 +5,9 @@
 
 import { getCodeMirror } from './codemirror-ref.js';
 import { SimulationManager } from './simulation/index.js';
-import { askDialog, confirmDialog, preferencesDialog, reportProblemDialog, boardOptionsDialog } from './dialog.js';
+import { askDialog, confirmDialog, preferencesDialog, reportProblemDialog, boardOptionsDialog, aboutDialog } from './dialog.js';
 import { baseFqbn, composeFqbn, effectiveChoices, suggestedChoices, loadChoices, saveChoices, describePort, sortPorts } from './board-options.js';
+import { ensureToolchain } from './setup.js';
 import { runSimulatorCheck, renderTestReport, renderVerifyCard, isSimulatableBoard, simulationContext } from './verify.js';
 import { boardForFqbn } from './simulation/boards.js';
 import { attachPinInsights } from './pin-insights.js';
@@ -89,6 +90,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             getWiring: () => window.simManager?.getWiring?.() ?? null,
             onIssues: (issues) => window.dispatchEvent(new CustomEvent('impulse:pin-issues', { detail: issues }))
         });
+        // First run (or a missing core): offer to install the Arduino tools.
+        await ensureToolchain();
         await checkArduinoCLI();
         await loadBoards();
         await loadPorts();
@@ -318,7 +321,7 @@ async function editClipboardAction(kind) {
     if (selected) await window.electronAPI.clipboard.writeText(selected);
 }
 
-function handleMenuAction(action, payload) {
+async function handleMenuAction(action, payload) {
     switch (action) {
         // File
         case 'file-new':
@@ -535,6 +538,13 @@ function handleMenuAction(action, payload) {
             break;
         case 'tools-board-options':
             openBoardOptions();
+            break;
+        case 'tools-setup':
+            if (await ensureToolchain({ force: true })) {
+                await checkArduinoCLI();
+                await loadBoards();
+                await loadPorts();
+            }
             break;
         default:
             break;
@@ -1156,12 +1166,7 @@ async function getBoardInfo() {
 
 async function showAbout() {
     const version = await window.electronAPI.app?.getVersion?.().catch(() => null);
-    await askDialog({
-        title: 'Impulse',
-        message: `${version ? `Version ${version}\n` : ''}Write it, wire it, simulate it, ship it to the board.\nAI-assisted Arduino development with a built-in AVR simulator.`,
-        confirmLabel: 'Done',
-        cancelLabel: 'Close'
-    });
+    await aboutDialog({ version, readDoc: (name) => window.electronAPI.app.readDoc(name) });
 }
 
 function openHelpUrl(url) {
@@ -1593,6 +1598,8 @@ function initializeCodeMirror() {
         extraKeys: { "Ctrl-Space": "autocomplete" },
         hintOptions: { hint: CodeMirror.hint.arduino }
     });
+    // CodeMirror types into a hidden textarea; give it a name for screen readers.
+    state.editor.getInputField().setAttribute('aria-label', 'Code editor');
 
     state.editor.on('change', (cm, changeObj) => {
         // Only user edits (not programmatic setValue) mark the tab dirty.
@@ -2473,14 +2480,23 @@ function renderFileTabs() {
 
     state.openFiles.forEach((file, index) => {
         const tab = document.createElement('div');
-        tab.className = 'tab' + (index === state.activeTabIndex ? ' active' : '');
+        const active = index === state.activeTabIndex;
+        tab.className = 'tab' + (active ? ' active' : '');
         tab.dataset.tabIndex = String(index);
+        // A real tab for assistive tech; the × is mouse-only (Cmd/Ctrl+W closes from the keyboard).
+        tab.setAttribute('role', 'tab');
+        tab.setAttribute('aria-selected', active ? 'true' : 'false');
+        tab.setAttribute('aria-label', file.name);
+        tab.tabIndex = active ? 0 : -1;
 
         tab.innerHTML = `
-            <span class="tab-icon">${fileIcon(file.name)}</span>
+            <span class="tab-icon" aria-hidden="true">${fileIcon(file.name)}</span>
             <span class="tab-name">${escapeHtml(file.name)}</span>
-            <button type="button" class="tab-close" data-tab-index="${index}" title="Close">×</button>
+            <span class="tab-close" data-tab-index="${index}" title="Close (Cmd/Ctrl+W)" aria-hidden="true">×</span>
         `;
+        tab.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); switchToTab(index); }
+        });
 
         tab.addEventListener('click', (e) => {
             if (e.target.classList.contains('tab-close')) {
@@ -3016,6 +3032,7 @@ function appendSerialOutput(data, timestamp, type = 'received') {
     if (!contentArea) {
         contentArea = document.createElement('div');
         contentArea.className = 'serial-output-content';
+        contentArea.tabIndex = 0;
         outputEl.appendChild(contentArea);
     }
 

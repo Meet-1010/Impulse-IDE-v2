@@ -21,7 +21,8 @@ class AutoUpdaterService {
     // Configure electron-updater
     autoUpdater.autoDownload = false; // Let user decide
     autoUpdater.autoInstallOnAppQuit = true;
-    autoUpdater.allowPrerelease = false;
+    // Beta builds follow the beta channel; stable builds only see stable releases.
+    autoUpdater.allowPrerelease = /-/.test(require('electron').app.getVersion());
 
     this._bindEvents();
   }

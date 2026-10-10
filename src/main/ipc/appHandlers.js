@@ -1,8 +1,10 @@
 /**
- * App-level IPC handlers (quit, clipboard).
+ * App-level IPC handlers (quit, clipboard, bundled documents).
  * @module main/ipc/appHandlers
  */
 
+const fs = require('fs');
+const path = require('path');
 const { clipboard } = require('electron');
 const logger = require('../utils/logger');
 
@@ -15,6 +17,19 @@ function register(ipcMain, ctx) {
   const { app } = ctx;
   ipcMain.on('app:quit', () => app.quit());
   ipcMain.handle('app:get-version', () => app.getVersion());
+  // Privacy policy and open-source notices shipped with the app (About dialog).
+  const DOCS = { privacy: 'PRIVACY.md', licenses: 'THIRD_PARTY_NOTICES.md' };
+  ipcMain.handle('app:read-doc', async (event, name) => {
+    const file = Object.prototype.hasOwnProperty.call(DOCS, name) ? DOCS[name] : null;
+    if (!file) return { success: false, error: 'Unknown document' };
+    try {
+      const text = await fs.promises.readFile(path.join(app.getAppPath(), file), 'utf8');
+      return { success: true, text };
+    } catch (error) {
+      return { success: false, error: error?.message ?? 'Could not read the document' };
+    }
+  });
+
   ipcMain.on('app:log-renderer-error', (event, entry) => {
     if (!entry || typeof entry !== 'object') return;
     const clip = (v, n) => (typeof v === 'string' ? v.slice(0, n) : undefined);

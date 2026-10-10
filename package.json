@@ -35,7 +35,9 @@
     "lint": "eslint src/ scripts/ test/ --ext .js,.mjs",
     "lint:fix": "eslint src/ scripts/ test/ --ext .js,.mjs --fix",
     "audit": "npm audit --omit=dev",
-    "test:smoke": "node scripts/smoke.mjs"
+    "test:smoke": "node scripts/smoke.mjs",
+    "notices": "node scripts/third-party-notices.mjs",
+    "test:e2e": "node scripts/e2e.mjs"
   },
   "keywords": [
     "arduino",
@@ -49,6 +51,7 @@
   "devDependencies": {
     "@babel/core": "^8.0.6",
     "@babel/preset-env": "^8.0.6",
+    "axe-core": "^4.14.0",
     "concurrently": "^9.2.1",
     "electron": "^44.5.1",
     "electron-builder": "^26.15.3",
@@ -92,6 +95,8 @@
       "src/main/**/*",
       "dist-renderer/**/*",
       "assets/**/*",
+      "THIRD_PARTY_NOTICES.md",
+      "PRIVACY.md",
       "!**/*.map",
       "!node_modules/@wokwi/**",
       "!node_modules/avr8js/**",
@@ -100,7 +105,10 @@
       "!node_modules/lit/**",
       "!node_modules/lit-html/**",
       "!node_modules/lit-element/**",
-      "!node_modules/@lit/**"
+      "!node_modules/@lit/**",
+      "!node_modules/@lit-labs/**",
+      "!node_modules/@types/**",
+      "!node_modules/csstype/**"
     ],
     "publish": {
       "provider": "github",
@@ -121,19 +129,26 @@
       "signtoolOptions": {
         "signingHashAlgorithms": [
           "sha256"
-        ],
-        "certificateSubjectName": "${env.WIN_CSC_SUBJECT_NAME}"
+        ]
       }
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "differentialPackage": true
+      "differentialPackage": true,
+      "artifactName": "Impulse-IDE-Setup-${version}.${ext}"
     },
     "mac": {
       "target": [
         {
           "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
           "arch": [
             "x64",
             "arm64"
@@ -146,10 +161,10 @@
       "gatekeeperAssess": false,
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
-      "identity": "${env.MAC_CSC_NAME}"
+      "artifactName": "Impulse-IDE-${version}-${arch}-mac.${ext}"
     },
     "dmg": {
-      "artifactName": "${productName}-${version}-${arch}.${ext}"
+      "artifactName": "Impulse-IDE-${version}-${arch}.${ext}"
     },
     "linux": {
       "target": [
@@ -172,10 +187,11 @@
         "entry": {
           "StartupWMClass": "impulse-ide"
         }
-      }
+      },
+      "artifactName": "impulse-ide_${version}_${arch}.${ext}"
     },
     "appImage": {
-      "artifactName": "${productName}-${version}-${arch}.${ext}"
+      "artifactName": "Impulse-IDE-${version}-${arch}.${ext}"
     },
     "npmRebuild": false
   }

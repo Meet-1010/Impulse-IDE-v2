@@ -145,7 +145,7 @@ export function preferencesDialog(current) {
     const overlay = document.createElement('div');
     overlay.className = 'impulse-dialog-overlay';
     overlay.innerHTML = `
-      <form class="impulse-dialog" role="dialog" aria-modal="true" aria-labelledby="impulsePrefsTitle">
+      <div class="impulse-dialog" role="dialog" aria-modal="true" aria-labelledby="impulsePrefsTitle"><form class="impulse-dialog-form">
         <h3 class="impulse-dialog-title" id="impulsePrefsTitle">Preferences</h3>
         <div class="impulse-dialog-fields">
           <label class="impulse-dialog-field">
@@ -171,7 +171,7 @@ export function preferencesDialog(current) {
           <button type="button" class="impulse-dialog-btn secondary" data-act="cancel">Cancel</button>
           <button type="submit" class="impulse-dialog-btn primary">Save</button>
         </div>
-      </form>`;
+      </form></div>`;
     const form = overlay.querySelector('form');
     form.theme.value = current.theme;
     form.fontSize.value = String(current.fontSize);
@@ -202,7 +202,7 @@ export function reportProblemDialog({ details, crash = null }) {
     const overlay = document.createElement('div');
     overlay.className = 'impulse-dialog-overlay';
     overlay.innerHTML = `
-      <form class="impulse-dialog wide" role="dialog" aria-modal="true" aria-labelledby="impulseReportTitle">
+      <div class="impulse-dialog wide" role="dialog" aria-modal="true" aria-labelledby="impulseReportTitle"><form class="impulse-dialog-form">
         <h3 class="impulse-dialog-title" id="impulseReportTitle">Report a problem</h3>
         <p class="impulse-dialog-message">This opens a GitHub issue in your browser with what you write below. Nothing is sent until you submit it there.</p>
         <div class="impulse-dialog-fields stacked">
@@ -225,7 +225,7 @@ export function reportProblemDialog({ details, crash = null }) {
           <button type="button" class="impulse-dialog-btn secondary" data-act="cancel">Cancel</button>
           <button type="submit" class="impulse-dialog-btn primary">Open GitHub issue</button>
         </div>
-      </form>`;
+      </form></div>`;
     const form = overlay.querySelector('form');
     const pre = overlay.querySelector('.impulse-dialog-details');
     pre.textContent = details || 'No technical details available.';
@@ -264,11 +264,14 @@ export function boardOptionsDialog({ boardName, options, choices, suggested = {}
   return new Promise((resolve) => {
     const overlay = document.createElement('div');
     overlay.className = 'impulse-dialog-overlay';
+    const box = document.createElement('div');
+    box.className = 'impulse-dialog wide';
+    box.setAttribute('role', 'dialog');
+    box.setAttribute('aria-modal', 'true');
+    box.setAttribute('aria-labelledby', 'impulseBoardOptsTitle');
     const form = document.createElement('form');
-    form.className = 'impulse-dialog wide';
-    form.setAttribute('role', 'dialog');
-    form.setAttribute('aria-modal', 'true');
-    form.setAttribute('aria-labelledby', 'impulseBoardOptsTitle');
+    form.className = 'impulse-dialog-form';
+    box.appendChild(form);
     form.innerHTML = `
       <h3 class="impulse-dialog-title" id="impulseBoardOptsTitle"></h3>
       <p class="impulse-dialog-message">Used when you verify and upload, like Tools › Board options in the Arduino IDE.</p>
@@ -303,7 +306,7 @@ export function boardOptionsDialog({ boardName, options, choices, suggested = {}
       fields.appendChild(field);
       selects.push(select);
     }
-    overlay.appendChild(form);
+    overlay.appendChild(box);
     form.addEventListener('submit', (e) => {
       e.preventDefault();
       close(Object.fromEntries(selects.map(s => [s.name, s.value])));
@@ -317,5 +320,48 @@ export function boardOptionsDialog({ boardName, options, choices, suggested = {}
     open = { overlay, resolve, previousFocus: document.activeElement };
     document.body.appendChild(overlay);
     (selects[0] || form.querySelector('button[type="submit"]')).focus();
+  });
+}
+
+/**
+ * About Impulse, with the privacy policy and open-source notices one click away.
+ * @param {{ version: string|null, readDoc: (name: 'privacy'|'licenses') => Promise<{ success: boolean, text?: string, error?: string }> }} spec
+ */
+export function aboutDialog({ version, readDoc }) {
+  if (open) close(null);
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.className = 'impulse-dialog-overlay';
+    overlay.innerHTML = `
+      <div class="impulse-dialog wide" role="dialog" aria-modal="true" aria-labelledby="impulseAboutTitle">
+        <h3 class="impulse-dialog-title" id="impulseAboutTitle">Impulse</h3>
+        <p class="impulse-dialog-message"></p>
+        <pre class="impulse-dialog-details doc" hidden tabindex="0"></pre>
+        <div class="impulse-dialog-actions">
+          <button type="button" class="impulse-dialog-btn secondary" data-doc="privacy">Privacy</button>
+          <button type="button" class="impulse-dialog-btn secondary" data-doc="licenses">Open-source licenses</button>
+          <span class="impulse-dialog-spacer"></span>
+          <button type="button" class="impulse-dialog-btn primary" data-act="done">Done</button>
+        </div>
+      </div>`;
+    const $ = (sel) => overlay.querySelector(sel);
+    const intro = `${version ? `Version ${version}\n` : ''}Write it, wire it, simulate it, ship it to the board.\nAI-assisted Arduino development with a built-in circuit simulator.`;
+    $('.impulse-dialog-message').textContent = intro;
+    const pre = $('.impulse-dialog-details');
+    for (const btn of overlay.querySelectorAll('[data-doc]')) {
+      btn.addEventListener('click', async () => {
+        const res = await readDoc(btn.dataset.doc).catch((e) => ({ success: false, error: e.message }));
+        pre.hidden = false;
+        pre.textContent = res?.success ? res.text : `Could not open it: ${res?.error || 'unknown error'}`;
+        pre.scrollTop = 0;
+        pre.focus();
+      });
+    }
+    $('[data-act="done"]').addEventListener('click', () => close(true));
+    overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) close(true); });
+    overlay.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); close(true); } });
+    open = { overlay, resolve, previousFocus: document.activeElement };
+    document.body.appendChild(overlay);
+    $('[data-act="done"]').focus();
   });
 }

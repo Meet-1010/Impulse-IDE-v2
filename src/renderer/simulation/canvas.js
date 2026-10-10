@@ -18,6 +18,20 @@ const AUTO_COLORS = ['green', 'blue', 'orange', 'purple', 'cyan', 'yellow', 'mag
 const CSS_COLOR = { green: '#2ea44f', red: '#e5484d', black: '#2b2b2e', blue: '#3e7bfa', orange: '#f08c00', yellow: '#e8c53a', purple: '#8e4ec6', white: '#e8e8e8', gray: '#8a8f98', brown: '#8d5524', cyan: '#12b5cb', magenta: '#d6409f' };
 export const cssColor = (c) => CSS_COLOR[c] || c || CSS_COLOR.green;
 
+/**
+ * Take a part element's built-in controls (a pot's slider, a keypad's keys)
+ * out of the Tab order; the mouse still works and the inspector offers
+ * labelled equivalents. Runs again once the element has rendered.
+ */
+function quietControls(el) {
+  const apply = () => {
+    for (const c of el.shadowRoot?.querySelectorAll('input, button, select, textarea, [tabindex]') || []) c.setAttribute('tabindex', '-1');
+  };
+  apply();
+  if (el.updateComplete) el.updateComplete.then(apply).catch(() => {});
+  else requestAnimationFrame(apply);
+}
+
 export class CircuitCanvas {
   /**
    * @param {HTMLElement} rootEl
@@ -44,6 +58,9 @@ export class CircuitCanvas {
 
     this.partsLayer = document.createElement('div');
     this.partsLayer.className = 'sim-parts-layer';
+    // Part drawings are pictures to assistive tech; their values are edited
+    // through the inspector's labelled controls.
+    this.partsLayer.setAttribute('aria-hidden', 'true');
     this.svg = document.createElementNS(SVG_NS, 'svg');
     this.svg.setAttribute('class', 'sim-wires-svg');
     this.pinLayer = document.createElementNS(SVG_NS, 'svg');
@@ -106,6 +123,7 @@ export class CircuitCanvas {
     if (def.category === 'Breadboards') this.partsLayer.prepend(el);
     else this.partsLayer.appendChild(el);
     this.parts.push(part);
+    quietControls(el);
 
     el.addEventListener('pointerdown', (e) => this._onPartDown(part, e));
     el.addEventListener('pointerup', (e) => this.onPartPointerUp?.(part, e));
@@ -152,6 +170,7 @@ export class CircuitCanvas {
     else part.attrs[key] = String(value);
     applyAttrs(part.el, { [key]: value });
     requestAnimationFrame(() => { this._renderPins(part); this._refreshWiresOf(part); });
+    quietControls(part.el);
     this._emit('attr');
   }
 
@@ -585,6 +604,19 @@ export class CircuitCanvas {
     return true;
   }
 
+  /** Pan so a part that is out of view comes to the middle of the canvas. */
+  _keepInView(part) {
+    const rect = this.root.getBoundingClientRect();
+    const b = this.bounds(part);
+    const left = this._panX + b.x * this._scale;
+    const top = this._panY + b.y * this._scale;
+    const inside = left >= 0 && top >= 0 && left + b.w * this._scale <= rect.width && top + b.h * this._scale <= rect.height;
+    if (inside) return;
+    this._panX = rect.width / 2 - (b.x + b.w / 2) * this._scale;
+    this._panY = rect.height / 2 - (b.y + b.h / 2) * this._scale;
+    this._applyTransform();
+  }
+
   /** Pan just enough that `part` isn't hidden behind `cover` (a client rect, e.g. a floating panel). */
   reveal(part, cover) {
     const rect = this.root.getBoundingClientRect();
@@ -826,6 +858,15 @@ export class CircuitCanvas {
     }
     if ((e.key === 'Delete' || e.key === 'Backspace') && this.selection.size) {
       this.deleteSelected();
+      return true;
+    }
+    // [ and ] step the selection through the parts (keyboard and screen-reader access).
+    if ((e.key === '[' || e.key === ']') && !e.metaKey && !e.ctrlKey && this.parts.length) {
+      const n = this.parts.length;
+      const cur = this.selectedParts.length === 1 ? this.parts.indexOf(this.selectedParts[0]) : -1;
+      const next = e.key === ']' ? (cur + 1) % n : (cur <= 0 ? n - 1 : cur - 1);
+      this.select([this.parts[next]]);
+      this._keepInView(this.parts[next]);
       return true;
     }
     if ((e.key === 'r' || e.key === 'R') && !e.metaKey && !e.ctrlKey && this.selectedParts.length) {
