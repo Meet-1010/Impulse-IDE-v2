@@ -12,6 +12,7 @@ import { runSimulatorCheck, renderTestReport, renderVerifyCard, isSimulatableBoa
 import { boardForFqbn } from './simulation/boards.js';
 import { attachPinInsights } from './pin-insights.js';
 import { attachBreakpoints } from './breakpoints.js';
+import { setupSourceControl } from './source-control.js';
 import { detectBaud, diffSerial, captureBoardSerial, renderCompareReport } from './compare.js';
 import { runHeadless } from './simulation/headless.js';
 import { programOf } from './simulation/runners.js';
@@ -138,6 +139,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         setupUpdater();
         startPortAutoRefresh();
         document.getElementById('statusPio')?.addEventListener('click', choosePioEnv);
+        sourceControl = setupSourceControl({
+            // The open folder, or the current sketch's folder.
+            getFolder: () => state.folderRoot || (state.currentFile ? state.currentFile.replace(/[/\\][^/\\]+$/, '') : null),
+            log: logToConsole
+        });
         if (state.currentFile) syncPlatformio(state.currentFile);
 
         logToConsole('Impulse IDE initialized', 'info');
@@ -220,6 +226,9 @@ function switchPanel(panelId) {
     }
     if (panelId === 'search') {
         document.getElementById('searchInput')?.focus();
+    }
+    if (panelId === 'scm') {
+        sourceControl?.refresh();
     }
 
     // If user opens Serial panel, also show Serial output tab
@@ -433,6 +442,10 @@ async function handleMenuAction(action, payload) {
             if (state.editor) state.editor.execCommand('replace');
             break;
         // View
+        case 'view-scm':
+            if (state.sidebarCollapsed) toggleSidebar();
+            switchPanel('scm');
+            break;
         case 'view-explorer':
             if (state.sidebarCollapsed) toggleSidebar();
             switchPanel('explorer');
@@ -771,6 +784,7 @@ async function saveFile({ quiet = false } = {}) {
             state.openFiles[state.activeTabIndex].dirty = false;
         }
         if (!quiet) logToConsole('Saved', 'success');
+        if (state.activePanel === 'scm') sourceControl?.refresh();
         return true;
     } catch (e) {
         logToConsole(`Save error: ${e.message}`, 'error');
@@ -4966,6 +4980,9 @@ async function choosePioEnv() {
     renderPioStatus();
     logToConsole(`PlatformIO environment: ${state.pio.env}`, 'info');
 }
+
+/** The Source Control panel (set up once the UI is ready). */
+let sourceControl = null;
 
 /** Read a short message to screen readers. */
 function announceStatus(text) {

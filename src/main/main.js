@@ -289,6 +289,7 @@ function buildMenu() {
       label: 'View',
       submenu: [
         { label: 'Sketchbook', accelerator: 'CmdOrCtrl+Shift+E', click: () => sendMenuAction('view-explorer') },
+        { label: 'Source Control', accelerator: 'CmdOrCtrl+Shift+G', click: () => sendMenuAction('view-scm') },
         { label: 'Board Manager', accelerator: 'CmdOrCtrl+Shift+B', click: () => sendMenuAction('view-boards') },
         { label: 'Library Manager', accelerator: 'CmdOrCtrl+Shift+I', click: () => sendMenuAction('tools-manage-libs') },
         { label: '2D Simulator', accelerator: 'CmdOrCtrl+Shift+D', click: () => sendMenuAction('view-simulator') },

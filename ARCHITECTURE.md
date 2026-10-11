@@ -245,6 +245,9 @@ Display in AI panel
 - `arduino:compile-hex` - Compile for a simulated board and return the application HEX
 - `arduino:compile-debug` - Debug build (-Og, no LTO): HEX, ELF and the sketch folder's paths
 - `platformio:project` / `platformio:select-env` - The PlatformIO project of a file, its environments, and the one to build
+
+### Source control
+- `git:status` / `git:init` / `git:diff` / `git:identity` / `git:commit` / `git:log` / `git:push` / `git:pull` - The system's git for a folder the user opened (`services/git.js`): argument arrays, no shell, no interactive prompts (`GIT_TERMINAL_PROMPT=0`), file paths confined to the repository
 - `sketch:create-example` - Write an example sketch and its `diagram.json` into the sketchbook
 - `dialog:open-diagram` / `dialog:save-diagram` - Import and export circuits
 - `ai:generate-circuit` - Build a circuit for the current sketch

@@ -101,6 +101,14 @@
                             <path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
                         </svg>
                     </button>
+                    <button class="activity-icon" data-panel="scm" title="Source Control (Ctrl+Shift+G)">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                            <circle cx="6" cy="5" r="2.2" />
+                            <circle cx="6" cy="19" r="2.2" />
+                            <circle cx="18" cy="8" r="2.2" />
+                            <path d="M6 7.2v9.6M18 10.2c0 4.2-6.5 3.6-11.2 6.9" />
+                        </svg>
+                    </button>
                     <button class="activity-icon" data-panel="boards" title="Board Manager (Ctrl+Shift+B)">
                         <svg viewBox="0 0 24 24" class="activity-icon-img" width="24" height="24" fill="none"
                             stroke="currentColor" stroke-width="2">
@@ -289,6 +297,20 @@
                             <div id="debugBreakpoints" class="debug-section-content" role="list"></div>
                         </div>
                     </div>
+                </div>
+
+                <!-- Source Control Panel -->
+                <div class="sidebar-panel" id="scmPanel">
+                    <div class="sidebar-header">
+                        <span class="sidebar-title">Source Control</span>
+                        <button class="sidebar-collapse-btn" title="Collapse">
+                            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <path d="M15 18l-6-6 6-6" />
+                            </svg>
+                        </button>
+                    </div>
+                    <div class="sidebar-content" id="scmContent"></div>
                 </div>
 
                 <!-- Search Panel -->

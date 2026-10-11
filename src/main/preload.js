@@ -32,6 +32,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
     selectEnv: (root, env) => ipcRenderer.invoke('platformio:select-env', root, env)
   },
 
+  // Source control (the system's git) for an opened folder
+  git: {
+    status: (dir) => ipcRenderer.invoke('git:status', dir),
+    init: (dir) => ipcRenderer.invoke('git:init', dir),
+    diff: (root, file) => ipcRenderer.invoke('git:diff', root, file),
+    identity: (root) => ipcRenderer.invoke('git:identity', root),
+    commit: (root, message, identity) => ipcRenderer.invoke('git:commit', root, message, identity),
+    log: (root, count) => ipcRenderer.invoke('git:log', root, count),
+    push: (root) => ipcRenderer.invoke('git:push', root),
+    pull: (root) => ipcRenderer.invoke('git:pull', root)
+  },
+
   // Serial Monitor methods
   serial: {
     connect: (port, baudRate) => ipcRenderer.invoke('serial:connect', port, baudRate),

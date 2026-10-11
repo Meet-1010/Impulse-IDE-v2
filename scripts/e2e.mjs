@@ -54,7 +54,9 @@ async function assertPortFree(port) {
 const args = [root, `--remote-debugging-port=${PORT}`, `--inspect=${INSPECT_PORT}`, `--user-data-dir=${profile}`];
 if (process.platform === 'linux') args.push('--no-sandbox', '--disable-gpu');
 // The example is written into a throwaway sketchbook, never the real one.
-const env = { ...process.env, ELECTRON_ENABLE_LOGGING: '1', ARDUINO_DIRECTORIES_USER: sketchbook };
+// Git reads a throwaway config, so commits never use (or change) the user's own identity.
+const env = { ...process.env, ELECTRON_ENABLE_LOGGING: '1', ARDUINO_DIRECTORIES_USER: sketchbook,
+  GIT_CONFIG_GLOBAL: path.join(temp, 'gitconfig'), GIT_CONFIG_NOSYSTEM: '1' };
 const app = spawn(electron, args, { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env });
 let mainOutput = '';
 app.stdout.on('data', d => { mainOutput += d; });
@@ -235,6 +237,32 @@ try {
     const header = fs.readFileSync(path.join(dir, 'helper.h'), 'utf8');
     if (ino !== '// sketch edit\n#include "helper.h"\nvoid setup() {}\nvoid loop() {}\n') throw new Error(`tabs.ino on disk: ${JSON.stringify(ino)}`);
     if (header !== '// header edit\nint helper();\n') throw new Error(`helper.h on disk: ${JSON.stringify(header)}`);
+  });
+
+  await step('source control starts a repository, commits and shows a diff', async () => {
+    const dir = path.join(sketchbook, 'tabs');
+    if (await evaluate(`document.getElementById('simView')?.style.display === 'flex'`)) await evaluate(`document.querySelector('.activity-icon[data-panel="simulate"]').click()`);
+    await evaluate(`window.impulse.openSketch(${JSON.stringify(dir)}, ${JSON.stringify(path.join(dir, 'tabs.ino'))})`);
+    await evaluate(`document.querySelector('.activity-icon[data-panel="scm"]').click()`);
+    await waitFor(`/isn’t a Git repository yet/.test(document.getElementById('scmContent').textContent)`, 10000, 'the "not a repository" state');
+    await audit('the Source Control panel (no repository)');
+    await evaluate(`[...document.querySelectorAll('#scmContent button')].find(b => /Initialize repository/.test(b.textContent)).click()`);
+    await waitFor(`[...document.querySelectorAll('#scmContent .scm-path')].map(p => p.textContent).join() === '.gitignore,helper.h,tabs.ino'`, 10000, 'the new files');
+    await evaluate(`(() => { const t = document.getElementById('scmMessage'); t.value = 'First version'; t.dispatchEvent(new Event('input')); [...document.querySelectorAll('#scmContent button')].find(b => /^Commit all/.test(b.textContent)).click(); })()`);
+    await waitFor(`!!document.querySelector('.impulse-dialog input[name=email]')`, 10000, 'the name and email dialog');
+    await audit('the name and email dialog');
+    await evaluate(`(() => { const f = document.querySelector('.impulse-dialog form'); f.name.value = 'Test Person'; f.email.value = 'test@example.com'; f.requestSubmit(); })()`);
+    await waitFor(`/First version/.test(document.querySelector('#scmContent .scm-subject')?.textContent || '')`, 10000, 'the commit in the history');
+    if (!/No changes since the last commit/.test(await evaluate(`document.getElementById('scmContent').textContent`))) throw new Error('changes left after committing');
+    fs.appendFileSync(path.join(dir, 'tabs.ino'), '// changed outside\n');
+    await evaluate(`window.dispatchEvent(new Event('focus'))`);
+    await waitFor(`document.querySelector('#scmContent .scm-file.modified .scm-path')?.textContent === 'tabs.ino'`, 10000, 'the modified file');
+    await audit('the Source Control panel');
+    await evaluate(`document.querySelector('#scmContent .scm-file.modified').click()`);
+    await waitFor(`/^\\+\\/\\/ changed outside$/m.test(document.querySelector('.diff-view')?.textContent || '')`, 10000, 'the diff');
+    await audit('the diff');
+    await evaluate(`document.querySelector('.diff-dialog [data-act=done]').click()`);
+    await evaluate(`document.querySelector('.activity-icon[data-panel="explorer"]').click()`);
   });
 
   await step('the sidebar Debug panel lists breakpoints and is accessible', async () => {

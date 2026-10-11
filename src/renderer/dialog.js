@@ -365,3 +365,92 @@ export function aboutDialog({ version, readDoc }) {
     $('[data-act="done"]').focus();
   });
 }
+
+/**
+ * Name and email for commits, saved in this repository's git config.
+ * @returns {Promise<{ name: string, email: string } | null>}
+ */
+export function identityDialog() {
+  if (open) close(null);
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.className = 'impulse-dialog-overlay';
+    overlay.innerHTML = `
+      <div class="impulse-dialog" role="dialog" aria-modal="true" aria-labelledby="impulseIdentityTitle"><form class="impulse-dialog-form">
+        <h3 class="impulse-dialog-title" id="impulseIdentityTitle">Who's committing?</h3>
+        <p class="impulse-dialog-message">Git records a name and email with every commit. They're saved for this repository only.</p>
+        <div class="impulse-dialog-fields">
+          <label class="impulse-dialog-field">
+            <span>Name</span>
+            <input name="name" type="text" autocomplete="name" required class="impulse-dialog-input">
+          </label>
+          <label class="impulse-dialog-field">
+            <span>Email</span>
+            <input name="email" type="email" autocomplete="email" required class="impulse-dialog-input">
+          </label>
+        </div>
+        <p class="impulse-dialog-error" role="alert"></p>
+        <div class="impulse-dialog-actions">
+          <button type="button" class="impulse-dialog-btn secondary" data-act="cancel">Cancel</button>
+          <button type="submit" class="impulse-dialog-btn primary">Commit</button>
+        </div>
+      </form></div>`;
+    const form = overlay.querySelector('form');
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const name = form.name.value.trim();
+      const email = form.email.value.trim();
+      if (!name || !/^[^\s@]+@[^\s@]+$/.test(email)) {
+        overlay.querySelector('.impulse-dialog-error').textContent = 'Enter a name and an email address.';
+        return;
+      }
+      close({ name, email });
+    });
+    overlay.querySelector('[data-act="cancel"]').addEventListener('click', () => close(null));
+    overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) close(null); });
+    overlay.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); close(null); } });
+    open = { overlay, resolve, previousFocus: document.activeElement };
+    document.body.appendChild(overlay);
+    form.name.focus();
+  });
+}
+
+/** A file's changes as a unified diff, added and removed lines colored. */
+export function diffDialog({ title, diff }) {
+  if (open) close(null);
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.className = 'impulse-dialog-overlay';
+    const box = document.createElement('div');
+    box.className = 'impulse-dialog wide diff-dialog';
+    box.setAttribute('role', 'dialog');
+    box.setAttribute('aria-modal', 'true');
+    box.setAttribute('aria-labelledby', 'impulseDiffTitle');
+    box.innerHTML = `
+      <h3 class="impulse-dialog-title" id="impulseDiffTitle"></h3>
+      <pre class="diff-view" tabindex="0" aria-label="Changes"></pre>
+      <div class="impulse-dialog-actions">
+        <button type="button" class="impulse-dialog-btn primary" data-act="done">Close</button>
+      </div>`;
+    box.querySelector('.impulse-dialog-title').textContent = title;
+    const view = box.querySelector('.diff-view');
+    const lines = String(diff || '').replace(/\n$/, '').split('\n');
+    if (!diff) view.textContent = 'No changes.';
+    for (const line of diff ? lines : []) {
+      const el = document.createElement('span');
+      el.className = /^(diff |index |--- |\+\+\+ |new file|deleted file|similarity|rename )/.test(line) ? 'diff-meta'
+        : line.startsWith('@@') ? 'diff-hunk'
+          : line.startsWith('+') ? 'diff-add'
+            : line.startsWith('-') ? 'diff-del' : 'diff-ctx';
+      el.textContent = `${line}\n`;
+      view.appendChild(el);
+    }
+    overlay.appendChild(box);
+    box.querySelector('[data-act="done"]').addEventListener('click', () => close(true));
+    overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) close(true); });
+    overlay.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); close(true); } });
+    open = { overlay, resolve, previousFocus: document.activeElement };
+    document.body.appendChild(overlay);
+    view.focus();
+  });
+}

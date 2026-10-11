@@ -2094,3 +2094,197 @@ h2.debug-section-header {
     background: var(--ds-hover);
     color: var(--ds-text);
 }
+
+/* ── Source Control ──────────────────────────────────────────────────────── */
+.scm-note {
+    margin: 0 0 8px;
+    color: var(--ds-text-3);
+    font: 12px/1.5 var(--font-ui);
+}
+
+.scm-error {
+    margin: 6px 0 0;
+    color: var(--ds-danger);
+    font: 12px/1.45 var(--font-ui);
+    white-space: pre-wrap;
+}
+
+.btn-small:disabled {
+    opacity: 0.45;
+    cursor: default;
+}
+
+.btn-small.scm-primary {
+    width: 100%;
+    margin-top: 6px;
+}
+
+.btn-small.scm-primary:not(:disabled) {
+    border-color: transparent;
+    background: var(--ds-primary-bg);
+    color: var(--ds-primary-fg);
+}
+
+.btn-small.scm-primary:not(:disabled):hover {
+    background: var(--ds-primary-hover);
+}
+
+.scm-branch {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.scm-branch-name {
+    overflow: hidden;
+    color: var(--ds-text);
+    font: 600 12.5px var(--font-mono);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.scm-sync {
+    margin-left: 6px;
+    color: var(--ds-text-3);
+    font-weight: 500;
+}
+
+.scm-actions {
+    display: flex;
+    flex: none;
+    gap: 4px;
+}
+
+textarea.scm-message {
+    width: 100%;
+    box-sizing: border-box;
+    resize: vertical;
+    min-height: 54px;
+    font: 12.5px/1.4 var(--font-ui);
+}
+
+h2.scm-heading {
+    margin: 0 0 4px;
+    color: var(--ds-text-3);
+    font: 600 11px var(--font-ui);
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+}
+
+.scm-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+
+.scm-file {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    width: 100%;
+    padding: 3px 6px;
+    border: none;
+    border-radius: 5px;
+    background: transparent;
+    color: var(--ds-text-2);
+    font: 12.5px var(--font-ui);
+    text-align: left;
+    cursor: pointer;
+}
+
+.scm-file:hover {
+    background: var(--ds-hover);
+    color: var(--ds-text);
+}
+
+.scm-letter {
+    flex: none;
+    width: 12px;
+    font: 700 11px var(--font-mono);
+    text-align: center;
+}
+
+.scm-file.modified .scm-letter,
+.scm-file.renamed .scm-letter,
+.scm-file.copied .scm-letter { color: var(--ds-warn); }
+.scm-file.added .scm-letter,
+.scm-file.untracked .scm-letter { color: var(--ds-signal); }
+.scm-file.deleted .scm-letter,
+.scm-file.conflicted .scm-letter { color: var(--ds-danger); }
+.scm-file.deleted .scm-path { text-decoration: line-through; }
+
+.scm-path {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.scm-commit {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: baseline;
+    gap: 8px;
+    padding: 3px 6px;
+    color: var(--ds-text-2);
+    font: 12px var(--font-ui);
+}
+
+.scm-hash {
+    color: var(--ds-text-3);
+    font: 11px var(--font-mono);
+}
+
+.scm-subject {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.scm-when {
+    color: var(--ds-text-3);
+    font-size: 11px;
+    white-space: nowrap;
+}
+
+/* Diff viewer */
+.diff-dialog {
+    width: min(860px, calc(100vw - 48px));
+}
+
+.diff-view {
+    max-height: min(60vh, 560px);
+    margin: 4px 0 12px;
+    overflow: auto;
+    padding: 8px 0;
+    border: 1px solid var(--ds-line);
+    border-radius: 8px;
+    background: var(--ds-surface-1);
+    color: var(--ds-text-2);
+    font: 12px/1.55 var(--font-mono);
+}
+
+.diff-view span {
+    display: block;
+    padding: 0 12px;
+    white-space: pre;
+}
+
+.diff-view .diff-add {
+    background: color-mix(in srgb, var(--ds-signal) 14%, transparent);
+    color: var(--ds-text);
+}
+
+.diff-view .diff-del {
+    background: color-mix(in srgb, var(--ds-danger) 14%, transparent);
+    color: var(--ds-text);
+}
+
+.diff-view .diff-hunk {
+    margin-top: 6px;
+    color: var(--ds-link);
+}
+
+.diff-view .diff-meta {
+    color: var(--ds-text-3);
+}
