@@ -33,7 +33,8 @@ const hasGit = !!new GitService().findGit();
   let temp;
   let git;
   beforeEach(() => {
-    temp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'impulse-git-test-')));
+    // .native expands Windows 8.3 names (RUNNER~1), which git reports in full.
+    temp = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'impulse-git-test-')));
     fs.mkdirSync(path.join(temp, 'home'));
     git = new GitService({ env: { ...process.env, HOME: path.join(temp, 'home'), XDG_CONFIG_HOME: path.join(temp, 'home'), GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: path.join(temp, 'home', '.gitconfig') } });
   });
