@@ -37,6 +37,18 @@ const extraCores = (() => {
   }
 })();
 
+// Builds through that configuration still see the libraries of arduino-cli's
+// own sketchbook, which installedLibraries() lists (read, never installed to).
+const SKETCHBOOK_LIBS = (() => {
+  if (!CLI || !EXTRA_CONFIG.length) return [];
+  try {
+    const dir = execFileSync(CLI, ['config', 'get', 'directories.user'], { stdio: 'pipe' }).toString().trim();
+    return dir && fs.existsSync(path.join(dir, 'libraries')) ? [path.join(dir, 'libraries')] : [];
+  } catch {
+    return [];
+  }
+})();
+
 export const PICO = extraCores.includes('rp2040:rp2040');
 export const ATTINY = extraCores.includes('ATTinyCore:avr');
 
@@ -69,7 +81,7 @@ export function compileSketch(code, fqbn = 'arduino:avr:uno', name = 'sketch') {
   fs.writeFileSync(path.join(sketchDir, `${name}.ino`), code);
   let hex;
   try {
-    const libs = EXTRA_LIBS.flatMap(lib => ['--libraries', lib]);
+    const libs = [...EXTRA_LIBS, ...(isExtraCore(fqbn) ? SKETCHBOOK_LIBS : [])].flatMap(lib => ['--libraries', lib]);
     execFileSync(CLI, [...(isExtraCore(fqbn) ? EXTRA_CONFIG : []), 'compile', '--fqbn', fqbn, ...libs, '--output-dir', outDir, sketchDir], { stdio: 'pipe' });
     hex = isPico(fqbn)
       ? new Uint8Array(fs.readFileSync(path.join(outDir, `${name}.ino.uf2`)))

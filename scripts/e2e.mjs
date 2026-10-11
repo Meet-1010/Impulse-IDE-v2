@@ -143,6 +143,17 @@ try {
 
   await step('main window is accessible (dark)', () => audit('the main window'));
 
+  // The first-run welcome toast fades in and out; audit it fully shown, then
+  // skip the tour so it can't sit, half faded, under a later audit.
+  await step('the welcome toast is accessible and can be skipped', async () => {
+    const toast = `document.querySelector('[data-action="start-tour"]')?.closest('.notification')`;
+    await waitFor(`!!${toast}`, 20000, 'the welcome toast');
+    await waitFor(`getComputedStyle(${toast}).opacity === '1'`, 5000, 'the toast to finish appearing');
+    await audit('the welcome toast');
+    await evaluate(`document.querySelector('[data-action="skip-tour"]').click()`);
+    await waitFor(`!${toast} && localStorage.getItem('arduino-ide-onboarding-completed') === 'true'`, 5000, 'the toast to close');
+  });
+
   await step('examples gallery opens and is accessible', async () => {
     await evaluate(`window.impulse.showSimulator()`);
     await waitFor(`window.simManager.visible`, 5000, 'the simulator');

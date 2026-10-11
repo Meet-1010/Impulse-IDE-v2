@@ -169,6 +169,8 @@ export const BOARDS = {
     // USI: SDA/DI on PB0, SCL/USCK on PB2, DO on PB1 (pins_arduino.h).
     i2c: { sda: 0, scl: 2 },
     spi: { ss: 3, mosi: 1, miso: 0, sck: 2 },
+    // The USI clocks SPI out on the pins, so parts read it bit by bit.
+    spiByPins: true,
     // Serial is TinySoftwareSerial: TX on AIN0 (PB0), RX on AIN1 (PB1).
     serial: [{ tx: 0, rx: 1 }],
     softSerial: { tx: 0, rx: 1 },

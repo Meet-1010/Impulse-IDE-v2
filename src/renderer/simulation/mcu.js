@@ -13,6 +13,7 @@ import {
   eepromConfig, watchdogConfig, ADCMuxInputType, ADCReference,
 } from 'avr8js';
 import { tinyTimer1Config } from './tiny-timer1.js';
+import { usiConfig } from './usi.js';
 
 const vec = (n) => n * 2;
 
@@ -161,8 +162,8 @@ ATMEGA328P.ports.D = { ...portDConfig, pinChange: PCINT2, externalInterrupts: [n
 //
 // From the ATtiny25/45/85 datasheet (register summary and table 9-1). Flash is
 // 8 KB, so each interrupt vector is a single word: vector n sits at word n.
-// One port (B), Timer0, the ATtiny Timer/Counter1, a 4-channel ADC, EEPROM
-// and the watchdog; no UART, TWI or SPI (the USI does those in software).
+// One port (B), Timer0, the ATtiny Timer/Counter1, the USI (I²C and SPI), a
+// 4-channel ADC, EEPROM and the watchdog; no UART, TWI or SPI peripheral.
 
 const TINY = { PINB: 0x36, DDRB: 0x37, PORTB: 0x38, GIMSK: 0x5b, GIFR: 0x5a, MCUCR: 0x55, PCMSK: 0x35, TIFR: 0x58, TIMSK: 0x59 };
 
@@ -190,6 +191,7 @@ export const ATTINY85 = {
     TOV: 1 << 1, OCFA: 1 << 4, OCFB: 1 << 3, OCFC: 0, TOIE: 1 << 1, OCIEA: 1 << 4, OCIEB: 1 << 3, OCIEC: 0,
   }],
   tinyTimer1: tinyTimer1Config,
+  usi: usiConfig,
   usarts: [],
   adc: {
     ADMUX: 0x27, ADCSRA: 0x26, ADCSRB: 0x23, ADCL: 0x24, ADCH: 0x25, DIDR0: 0x34,
@@ -222,6 +224,8 @@ export const ATTINY85 = {
   spi: null,
   eeprom: { ...eepromConfig, EECR: 0x3c, EEDR: 0x3d, EEARL: 0x3e, EEARH: 0x3f, eepromReadyInterrupt: 6 },
   watchdog: { ...watchdogConfig, MCUSR: 0x54, WDTCSR: 0x41, watchdogInterrupt: 12 },
+  // CLKPR is an I/O register here; avr8js' default (0x61) is SRAM on this chip.
+  clock: { CLKPR: 0x46 },
 };
 
 export const MCUS = {

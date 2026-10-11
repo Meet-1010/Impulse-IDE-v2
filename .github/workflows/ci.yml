@@ -157,6 +157,8 @@ jobs:
           URLS=https://github.com/earlephilhower/arduino-pico/releases/download/global/package_rp2040_index.json,https://drazzy.com/package_drazzy.com_index.json
           arduino-cli core update-index --additional-urls "$URLS"
           arduino-cli core install arduino:avr@1.8.8 rp2040:rp2040@6.3.0 ATTinyCore:avr@1.5.2 --additional-urls "$URLS"
+          ARDUINO_DIRECTORIES_USER="$RUNNER_TEMP/arduino-user" arduino-cli lib install --no-deps "LiquidCrystal I2C@1.1.2"
+          echo "IMPULSE_TEST_LIBRARIES=$RUNNER_TEMP/arduino-user/libraries" >> "$GITHUB_ENV"
 
       - name: Install dependencies
         run: npm ci

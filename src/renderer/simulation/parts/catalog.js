@@ -72,8 +72,8 @@ const defs = {
   'impulse-attiny85': {
     label: 'ATtiny85', category: 'Boards', board: 'attiny85', behavior: BoardBehavior,
     keywords: ['attiny85', 'attiny', 'tiny85', 'attiny 85', 'attinycore', 'avr', 'dip-8', 'dip8', 'chip', 'microcontroller', 'digispark', 'small', 'low power'],
-    description: 'An 8-pin AVR chip at 16 MHz: PB0–PB5 as pins 0–5, PWM on 0, 1 and 4, analog inputs A1 (PB2), A2 (PB4), A3 (PB3) and A0 (PB5, the RESET pin). Serial is software: TX on PB0, RX on PB1. Plug it across a breadboard\'s center gap and power VCC and GND. Compiles with ATTinyCore.',
-    pins: { PB0: 'Pin 0 · PWM · Serial TX · SDA', PB1: 'Pin 1 · PWM · LED_BUILTIN · Serial RX', PB2: 'Pin 2 · A1 · SCL · INT0', PB3: 'Pin 3 · A3', PB4: 'Pin 4 · A2 · PWM', PB5: 'Pin 5 · A0 · RESET', VCC: 'Supply (5 V)', GND: 'Ground' },
+    description: 'An 8-pin AVR chip at 16 MHz: PB0–PB5 as pins 0–5, PWM on 0, 1 and 4, analog inputs A1 (PB2), A2 (PB4), A3 (PB3) and A0 (PB5, the RESET pin). Serial is software: TX on PB0, RX on PB1. I²C (Wire) and SPI run on its USI: SDA PB0, SCL PB2, DO PB1. Plug it across a breadboard\'s center gap and power VCC and GND. Compiles with ATTinyCore.',
+    pins: { PB0: 'Pin 0 · PWM · Serial TX · I²C SDA · SPI DI', PB1: 'Pin 1 · PWM · LED_BUILTIN · Serial RX · SPI DO', PB2: 'Pin 2 · A1 · I²C SCL · SPI USCK · INT0', PB3: 'Pin 3 · A3', PB4: 'Pin 4 · A2 · PWM', PB5: 'Pin 5 · A0 · RESET', VCC: 'Supply (5 V)', GND: 'Ground' },
   },
 
   // ── Breadboards ────────────────────────────────────────────────────────────

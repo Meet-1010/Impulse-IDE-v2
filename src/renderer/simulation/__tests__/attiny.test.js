@@ -133,6 +133,26 @@ void loop() {}`, 'tiny_pwm');
     expect(Math.abs(brightness('c') - 32 / 256)).toBeLessThan(0.05);
   }, 300000);
 
+  test('every SRAM byte holds what the sketch stores (no ATmega register hooks in it)', () => {
+    // avr8js' peripherals default to ATmega addresses; on the ATtiny85 0x60 and
+    // up is SRAM, where a stray hook (CLKPR at 0x61 was one) eats writes.
+    const hex = build(`
+#include <EEPROM.h>
+void setup() {
+  volatile byte *ram = (volatile byte *)0x60;
+  byte bad = 0;
+  for (int i = 0; i < 0x40; i++) ram[i] = i ^ 0x5A;
+  for (int i = 0; i < 0x40; i++) if (ram[i] != (i ^ 0x5A)) bad++;
+  EEPROM.write(0, bad);
+  EEPROM.write(1, 0x42);
+}
+void loop() {}`, 'tiny_sram');
+    const b = new Bench('attiny85');
+    b.load(hex).run(0.05);
+    expect(Array.from(b.runner.eeprom.backend.memory.slice(0, 2))).toEqual([0, 0x42]);
+    expect(b.runner.clock.config.CLKPR).toBe(0x46);
+  }, 300000);
+
   test('EEPROM survives a reset; pin-change interrupts on PB3', () => {
     const hex = build(`
 #include <EEPROM.h>
@@ -167,6 +187,76 @@ void loop() {
     b.runner.reset();
     b.run(0.1);
     expect(b.serial).toContain('boots=2');
+  }, 300000);
+
+  test('I²C through the USI: an RTC\'s RAM round trip, its clock, and a missing device', () => {
+    // Serial shares PB0 with SDA, so results go to EEPROM.
+    const hex = build(`
+#include <Wire.h>
+#include <EEPROM.h>
+void setup() {
+  Wire.begin();
+  // Three bytes into the DS1307's RAM at 0x10, then read back.
+  Wire.beginTransmission(0x68);
+  Wire.write(0x10);
+  Wire.write(0xA5); Wire.write(0x5A); Wire.write(0x3C);
+  EEPROM.write(0, Wire.endTransmission());
+  Wire.beginTransmission(0x68);
+  Wire.write(0x10);
+  EEPROM.write(1, Wire.endTransmission(false));
+  EEPROM.write(2, Wire.requestFrom(0x68, 3));
+  for (int i = 0; i < 3; i++) EEPROM.write(3 + i, Wire.read());
+  // Seconds, in BCD.
+  Wire.beginTransmission(0x68);
+  Wire.write(0);
+  Wire.endTransmission();
+  Wire.requestFrom(0x68, 1);
+  EEPROM.write(6, Wire.read());
+  // Nobody answers at 0x50.
+  Wire.beginTransmission(0x50);
+  EEPROM.write(7, Wire.endTransmission());
+  EEPROM.write(8, 0x42); // done
+}
+void loop() {}`, 'tiny_i2c');
+    const b = new Bench('attiny85');
+    b.add('wokwi-ds1307', 'rtc1');
+    b.wire('rtc1:SDA', 'attiny85:PB0', 'rtc1:SCL', 'attiny85:PB2', 'rtc1:5V', 'attiny85:VCC', 'rtc1:GND', 'attiny85:GND');
+    b.load(hex).run(0.2);
+    const rom = Array.from(b.runner.eeprom.backend.memory.slice(0, 9));
+    expect(rom[8]).toBe(0x42);
+    expect(rom.slice(0, 6)).toEqual([0, 0, 3, 0xa5, 0x5a, 0x3c]);
+    expect(rom[6] >> 4).toBeLessThan(6); // BCD seconds
+    expect(rom[6] & 0x0f).toBeLessThan(10);
+    expect(rom[7]).not.toBe(0);
+  }, 300000);
+
+  test('SPI through the USI: SPI.transfer() into a 74HC595, fast and slow clocks', () => {
+    const hex = build(`
+#include <SPI.h>
+const int LATCH = 3;
+void send(byte b) {
+  digitalWrite(LATCH, LOW);
+  SPI.transfer(b);
+  digitalWrite(LATCH, HIGH);
+}
+void setup() {
+  pinMode(LATCH, OUTPUT);
+  SPI.begin();
+  send(0xA5);
+  delay(10);
+  SPI.beginTransaction(SPISettings(100000, MSBFIRST, SPI_MODE0));
+  send(0x3C);
+  SPI.endTransaction();
+}
+void loop() {}`, 'tiny_spi');
+    const b = new Bench('attiny85');
+    b.add('impulse-74hc595', 'sr1');
+    b.wire('sr1:DS', 'attiny85:PB1', 'sr1:SHCP', 'attiny85:PB2', 'sr1:STCP', 'attiny85:PB3',
+      'sr1:VCC', 'attiny85:VCC', 'sr1:MR', 'attiny85:VCC', 'sr1:GND', 'attiny85:GND', 'sr1:OE', 'attiny85:GND');
+    b.load(hex).run(0.005);
+    expect(b.behavior('sr1').reg.latched).toBe(0xa5);
+    b.run(0.05);
+    expect(b.behavior('sr1').reg.latched).toBe(0x3c);
   }, 300000);
 
   test('a button on INT0 (PB2) with the pull-up, and the 1.1 V reference', () => {

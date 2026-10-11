@@ -48,6 +48,15 @@ describe('diagnosePins', () => {
     expect(diagnose('analogWrite(9, 128);')).toEqual([]);
   });
 
+  it('flags Serial with I²C on the ATtiny85, where both use PB0', () => {
+    const tiny = { hasCircuit: false, pins: {}, board: 'attiny85' };
+    const code = '#include <Wire.h>\nvoid setup() {\n  Wire.begin();\n  Serial.begin(9600);\n}';
+    const issues = diagnose(code, tiny);
+    expect(issues).toEqual([expect.objectContaining({ line: 4, severity: 'warning', message: expect.stringContaining('PB0, which is also I²C SDA') })]);
+    expect(diagnose('void setup() { Serial.begin(9600); }', tiny)).toEqual([]);
+    expect(diagnose(code, { hasCircuit: false, pins: {}, board: 'uno' })).toEqual([]);
+  });
+
   it('flags pins 0 and 1 when Serial is in use', () => {
     const issues = diagnose('void setup(){ Serial.begin(9600); pinMode(1, OUTPUT); }');
     expect(issues[0].message).toContain('Serial TX');

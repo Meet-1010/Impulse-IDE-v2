@@ -542,6 +542,17 @@ const circuits = {
     return L.done();
   },
 
+  tinyLcd() {
+    const L = circuits.tiny(new Layout('impulse-attiny85'));
+    L.at('wokwi-lcd1602', 'lcd1', 'GND', { x: 350, y: 40 });
+    // SDA is PB0 (column 11), SCL is PB2 (column 9).
+    L.wire('lcd1:SDA', 'bb:11t.a', 'blue');
+    L.wire('lcd1:SCL', 'bb:9t.a', 'purple');
+    L.wire('lcd1:VCC', 'bb:tp.24', 'red');
+    L.wire('lcd1:GND', 'bb:tn.25', 'black');
+    return L.done();
+  },
+
   nano() {
     const L = new Layout('wokwi-arduino-nano', 0, 0);
     L.parts = [];
@@ -2008,6 +2019,36 @@ void loop() {
   Serial.print("Reading: ");
   Serial.println(reading);
   delay(100);
+}
+`,
+  }),
+  ex({
+    id: 'attiny-lcd', title: 'ATtiny85: I²C LCD', category: 'Boards', board: 'attiny85', level: 'Intermediate',
+    summary: 'An ATtiny85 drives a 16×2 I²C LCD through its USI: Wire on PB0 (SDA) and PB2 (SCL).',
+    tags: ['ATtiny85', 'ATTinyCore', 'I2C', 'USI', 'LCD', 'LiquidCrystal_I2C'], libraries: ['LiquidCrystal I2C'],
+    circuit: circuits.tinyLcd,
+    code: `// ATtiny85: I2C LCD
+// The ATtiny85 has no I2C peripheral: ATTinyCore's Wire drives its USI, with
+// SDA on PB0 and SCL on PB2. A 16x2 LCD with an I2C backpack (address 0x27)
+// says hello and counts. Serial would share PB0 with SDA, so the LCD shows
+// what the sketch is doing.
+
+#include <LiquidCrystal_I2C.h>
+
+LiquidCrystal_I2C lcd(0x27, 16, 2);
+unsigned int count = 0;
+
+void setup() {
+  lcd.init();
+  lcd.backlight();
+  lcd.print("Hello, ATtiny85");
+}
+
+void loop() {
+  lcd.setCursor(0, 1);
+  lcd.print("Count: ");
+  lcd.print(count++);
+  delay(250);
 }
 `,
   }),

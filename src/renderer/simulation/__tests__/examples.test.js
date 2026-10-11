@@ -135,6 +135,14 @@ const CHECKS = {
       expect(Math.abs(b.part('led1').el.brightness - reading / 1023)).toBeLessThan(0.1);
     },
   },
+  'attiny-lcd': {
+    // LiquidCrystal_I2C's begin() waits a second before it talks to the LCD.
+    run: 1.8,
+    check: (b) => {
+      expect(lcdText(b, 'lcd1').slice(0, 15)).toBe('Hello, ATtiny85');
+      expect(lcdText(b, 'lcd1').slice(16)).toMatch(/^Count: [1-9]/);
+    },
+  },
   'mega-wave': { run: 0.4, check: (b) => expect([1, 2, 3, 4, 5, 6, 7, 8].filter(i => b.part(`led${i}`).el.value)).toHaveLength(1) },
   'nano-breadboard': {
     run: 0.3, actions: [[0.1, press('btn1')]],

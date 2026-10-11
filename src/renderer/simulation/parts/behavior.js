@@ -118,6 +118,7 @@ export class PartContext {
 
   /** True when this part pin shares a net with the board's hardware SPI pin. */
   onSpiPin(pin, role) {
+    if (this.board.spiByPins) return false;
     const p = this.mcuPin(pin);
     return p !== null && p === this.board.spi[role];
   }

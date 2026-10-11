@@ -22,6 +22,7 @@ import {
 } from 'avr8js';
 import { SoftUartTx, SoftUartRx } from './soft-uart.js';
 import { TinyTimer1 } from './tiny-timer1.js';
+import { TinyUsi } from './usi.js';
 import { parseHex, hexImageSize } from './hex-loader.js';
 import { MCUS } from './mcu.js';
 import { boardById } from './boards.js';
@@ -178,7 +179,7 @@ export class AvrRunner {
     for (const t of mcu.timers) new AVRTimer(cpu, t);
     if (mcu.tinyTimer1) new TinyTimer1(cpu, mcu.tinyTimer1);
 
-    this.clock = new AVRClock(cpu, F_CPU);
+    this.clock = new AVRClock(cpu, F_CPU, mcu.clock);
     this.usarts = mcu.usarts.map((cfg, index) => {
       const usart = new AVRUSART(cpu, cfg, F_CPU);
       usart.onByteTransmit = (byte) => {
@@ -205,6 +206,8 @@ export class AvrRunner {
     this._softTx = null;
     this._softRx = null;
     if (this.board.softSerial && this._comparator) this._buildSoftSerial(cpu);
+    // The ATtiny85's USI: I²C (two-wire) and SPI (three-wire) on PB0-PB2.
+    this.usi = mcu.usi ? new TinyUsi(cpu, cpu.gpioByPort[mcu.usi.PORT], mcu.usi, this.i2c) : null;
 
     let backend = this._eepromBackends.get(this.board.id);
     if (!backend || backend.memory.length !== mcu.eepromBytes) {
@@ -347,6 +350,7 @@ export class AvrRunner {
     if (mcu.twi) zero(mcu.twi.TWCR);
     if (mcu.spi) zero(mcu.spi.SPCR);
     if (mcu.analogComparator) zero(mcu.analogComparator.ACSR);
+    this.usi?.reset();
   }
 
   _refreshPin(p, port) {

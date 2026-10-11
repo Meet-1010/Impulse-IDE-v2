@@ -6,6 +6,7 @@ import { boardById, parseBoardPin, pinLabel as boardPinLabel } from './simulatio
 const PIN_FUNCTIONS = /\b(pinMode|digitalWrite|digitalRead|analogRead|analogWrite|tone|noTone|pulseIn|pulseInLong|digitalPinToInterrupt)\s*\(\s*([A-Za-z_]\w*|\d+)/g;
 const SERVO_ATTACH = /\.\s*attach\s*\(\s*([A-Za-z_]\w*|\d+)/g;
 const SERIAL_BEGIN = /\bSerial\s*\.\s*begin\s*\(/;
+const USES_I2C = /\bWire\s*\.\s*begin\s*\(|#\s*include\s*<(Wire|TinyWireM|LiquidCrystal_I2C|Adafruit_SSD1306|Tiny4kOLED)\.h>/;
 const INT_TYPES = new Set(['int', 'byte', 'uint8_t', 'int8_t', 'uint16_t', 'int16_t', 'short', 'long', 'char', 'pin_size_t']);
 const QUALIFIERS = new Set(['static', 'const', 'constexpr', 'unsigned', 'volatile']);
 
@@ -216,6 +217,14 @@ export function diagnosePins(usages, { code, wiring } = {}) {
       issues.push({ line: reads.line, severity: 'warning',
         message: `${label} reads ${names}, which the Arduino should drive. Set it to OUTPUT and write to it.` });
     }
+  }
+  // A software Serial on the I²C data pin (the ATtiny85's PB0).
+  const masked = maskCode(String(code || ''));
+  const soft = board.softSerial;
+  if (soft && usesSerial && soft.tx === board.i2c.sda && USES_I2C.test(masked)) {
+    const line = masked.slice(0, masked.search(SERIAL_BEGIN)).split('\n').length;
+    issues.push({ line, severity: 'warning',
+      message: `On the ${board.label}, Serial sends on ${pinLabel(soft.tx)}, which is also I²C SDA, so Serial and Wire garble each other. Use one of them: show output on an I²C display, or leave I²C out.` });
   }
   return issues.sort((a, b) => a.line - b.line);
 }

@@ -138,7 +138,7 @@ class NotificationUI {
         <div class="notification-header">
           <span class="notification-icon">${icon}</span>
           <span class="notification-title">${this.escapeHtml(notification.title)}</span>
-          <button class="notification-close" data-action="close">×</button>
+          <button class="notification-close" data-action="close" aria-label="Dismiss">×</button>
         </div>
         <div class="notification-message">${this.escapeHtml(notification.message)}</div>
         ${progressBar}
