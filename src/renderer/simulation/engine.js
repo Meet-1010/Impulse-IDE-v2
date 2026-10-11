@@ -3,7 +3,8 @@
 // It rebuilds nets whenever the wiring or a switch changes, resolves every
 // Arduino input pin from the circuit (rails, outputs, pull-ups, resistors,
 // sensor outputs), feeds ADC voltages, measures PWM duty per pin each frame
-// and routes pin edges to the parts that decode them.
+// and routes pin edges to the parts that decode them. Islands with capacitors
+// are stepped in simulated time while they charge or discharge.
 
 import { Circuit, solveIsland, logicLevel } from './netlist.js';
 import { PinState, F_CPU } from './avr-runner.js';
@@ -13,6 +14,14 @@ import { partDef } from './parts/catalog.js';
 
 const PULLUP_OHMS = 35000; // ATmega internal pull-up (datasheet: 20-50 kΩ)
 const NEIGHBOR_HOPS = 2;
+
+// RC stepping: each step aims at CAP_DV volts of change, within these bounds;
+// an island whose capacitors move slower than CAP_SETTLED volts per second has settled.
+const CAP_DV = 0.02;
+const CAP_MIN_STEP = 20e-6;
+const CAP_MAX_STEP = 20e-3;
+const CAP_SETTLED = 1e-3;
+const THRESHOLD = 2.5; // volts: an input reads HIGH from here (see _settleIsland)
 
 export class CircuitEngine {
   /** @param {import('./avr-runner.js').AvrRunner} runner */
@@ -25,6 +34,7 @@ export class CircuitEngine {
     this.behaviors = new Map();
     this.contexts = new Map();
     this.drivers = new Map();     // node → { volts, ohms }
+    this._capCharge = new Map();  // capacitor tag → volts, kept across rebuilds
     this.circuit = null;
     this.active = false;
     this._resetHeld = false;
@@ -65,6 +75,7 @@ export class CircuitEngine {
     const nodes = [];
     const links = [];
     const resistors = [];
+    const capacitors = [];
     for (const w of this.wires) links.push([`${w.from.partId}:${w.from.pin}`, `${w.to.partId}:${w.to.pin}`]);
     for (const l of this.extraLinks) links.push(l);
 
@@ -81,6 +92,9 @@ export class CircuitEngine {
       };
       add(def?.links?.(part.attrs || {}, names), links, false);
       add(def?.resistors?.(part.attrs || {}), resistors, true);
+      for (const [a, b, farads] of def?.capacitors?.(part.attrs || {}) || []) {
+        capacitors.push([`${part.id}:${a}`, `${part.id}:${b}`, farads, `${part.id}:${a}-${b}`]);
+      }
       if (def?.board) {
         const board = boardByTag(def.tag);
         // Header pins that are the same copper on the board.
@@ -109,7 +123,7 @@ export class CircuitEngine {
         }
       }
     }
-    return new Circuit({ nodes, links, resistors });
+    return new Circuit({ nodes, links, resistors, capacitors });
   }
 
   /** Connectivity from wires and fixed part internals only (no running state). */
@@ -175,6 +189,16 @@ export class CircuitEngine {
     }
     this._dirty = new Uint8Array(islands).fill(1);
     this._volts = new Float64Array(nets).fill(NaN);
+
+    // Capacitors keep their charge through a rebuild; stepping starts afresh.
+    for (const h of this._capTimers || []) if (h) this.runner.cancel(h);
+    this._capVolts = Float64Array.from(circuit.capacitors, c => this._capCharge.get(c.tag) || 0);
+    this._capLast = new Float64Array(islands).fill(this.runner.time);
+    this._capActive = new Uint8Array(islands);
+    this._capStep = new Float64Array(islands).fill(CAP_MIN_STEP * 5);
+    this._capTimers = new Array(islands).fill(null);
+    this._capSources = new Array(islands).fill(null); // sources in effect since an island's last solve
+    this._capPinVolts = new Map(); // net → volts at the last step, for input pins in RC islands
     this._floating = new Uint8Array(nets).fill(1);
 
     // Nearest Arduino pin for each net (direct, or through resistors).
@@ -219,7 +243,7 @@ export class CircuitEngine {
 
     for (let i = 0; i < islands; i++) {
       if (this._islandMcu[i].length) this._settleIsland(i);
-      else if (this._islandWatch[i]) this._solve(i);
+      else if (this._islandWatch[i] || circuit.islandCapacitors[i].length) this._solve(i);
     }
     this._checkReset();
   }
@@ -249,7 +273,31 @@ export class CircuitEngine {
   };
 
   _solve(island) {
-    const { volts, shorts } = solveIsland(this.circuit, island, this._sourcesOf);
+    const caps = this.circuit.islandCapacitors[island];
+    let sourcesOf = this._sourcesOf;
+    let dt = 0;
+    let maxDv = 0;
+    if (caps.length) {
+      // Every change of a source re-solves its island, so the sources of the
+      // last solve held until now: step the capacitors over that interval with
+      // them, then apply the present sources at this instant (capacitors hold
+      // their voltage through it). A settled island needs no step.
+      const now = this.runner.time;
+      dt = this._capActive[island] ? Math.max(0, now - this._capLast[island]) : 0;
+      this._capLast[island] = now;
+      const before = this._capSources[island];
+      if (dt > 0 && before) {
+        ({ maxDv } = solveIsland(this.circuit, island, (net) => before.get(net) || [], { dt, capVolts: this._capVolts }));
+      }
+      const seen = new Map();
+      this._capSources[island] = seen;
+      sourcesOf = (net) => {
+        const list = this._sourcesOf(net);
+        seen.set(net, list);
+        return list;
+      };
+    }
+    const { volts, shorts } = solveIsland(this.circuit, island, sourcesOf, caps.length ? { dt: 0, capVolts: this._capVolts } : null);
     for (const net of this.circuit.islandNets[island]) {
       const v = volts.get(net);
       if (v === null || v === undefined) { this._volts[net] = NaN; this._floating[net] = 1; }
@@ -257,7 +305,55 @@ export class CircuitEngine {
     }
     this._dirty[island] = 0;
     for (const s of shorts) this._reportShort(s);
+    if (caps.length) this._stepCapacitors(island, dt, maxDv);
     if (this._islandWatch?.[island]) this._notifyNets(island);
+  }
+
+  /** Keep an island with capacitors stepping until they stop moving. */
+  _stepCapacitors(island, dt, maxDv) {
+    for (const ci of this.circuit.islandCapacitors[island]) this._capCharge.set(this.circuit.capacitors[ci].tag, this._capVolts[ci]);
+    // Input pins: extrapolate toward the logic threshold so the edge lands on time.
+    let crossing = Infinity;
+    for (const p of this._islandMcu[island]) {
+      const st = this.runner.pinState(p);
+      if (st !== PinState.Input && st !== PinState.InputPullUp) continue;
+      const net = this._mcuNet[p];
+      const v = this._volts[net];
+      const prev = this._capPinVolts.get(net);
+      this._capPinVolts.set(net, v);
+      if (!(dt > 0) || prev === undefined || !Number.isFinite(v) || !Number.isFinite(prev) || v === prev) continue;
+      const t = (THRESHOLD - v) / ((v - prev) / dt);
+      if (t > 0) crossing = Math.min(crossing, t);
+    }
+    if (dt > 0) {
+      if (maxDv / dt < CAP_SETTLED) {
+        this._capActive[island] = 0;
+        return;
+      }
+      // Step size for about CAP_DV of change, growing at most twofold per step.
+      const ideal = (CAP_DV * dt) / Math.max(maxDv, 1e-12);
+      this._capStep[island] = Math.min(CAP_MAX_STEP, Math.max(CAP_MIN_STEP, Math.min(ideal, this._capStep[island] * 2)));
+    }
+    this._capActive[island] = 1;
+    if (this._capTimers[island] || !this.runner.schedule) return;
+    const step = Math.min(this._capStep[island], crossing + 1e-6);
+    this._capTimers[island] = this.runner.schedule(step * F_CPU, () => {
+      this._capTimers[island] = null;
+      if (!this.active || !this.circuit) return;
+      this._dirty[island] = 1;
+      if (this._islandMcu[island].length) this._settleIsland(island);
+      else this._solve(island);
+    });
+  }
+
+  /** Voltage across a capacitor part (lead 1 − lead 2), or null when it isn't in a running circuit. */
+  capacitorVolts(partId) {
+    if (!this.circuit) return null;
+    const ci = this.circuit.capacitors.findIndex(c => c.tag.startsWith(`${partId}:`));
+    if (ci < 0) return null;
+    const island = this.circuit.islandOf[this.circuit.capacitors[ci].a];
+    if (this._dirty[island]) this._solve(island);
+    return this._capVolts[ci];
   }
 
   _notifyNets(island) {
@@ -297,7 +393,7 @@ export class CircuitEngine {
       if (st === PinState.Input || st === PinState.InputPullUp) {
         if (entry.port) {
           if (floating) runner.setPinFloating(p);
-          else runner.setInputPin(p, v >= 2.5);
+          else runner.setInputPin(p, v >= THRESHOLD);
         }
       }
       if (entry.adc !== undefined) runner.setAnalogVoltage(entry.adc, floating ? 0 : v);
@@ -387,7 +483,7 @@ export class CircuitEngine {
     const island = this.circuit.islandOf[net];
     this._dirty[island] = 1;
     if (this._islandMcu[island].length) this._settleIsland(island);
-    else if (this._islandWatch[island]) this._solve(island);
+    else if (this._islandWatch[island] || this.circuit.islandCapacitors[island].length) this._solve(island);
   }
 
   // ── Runner events ────────────────────────────────────────────────────────
@@ -413,7 +509,8 @@ export class CircuitEngine {
     if (net < 0) return;
     const island = this.circuit.islandOf[net];
     this._dirty[island] = 1;
-    if (this._islandMcu[island].length > 1 || state === PinState.Input || state === PinState.InputPullUp || this._islandWatch[island]) {
+    if (this._islandMcu[island].length > 1 || state === PinState.Input || state === PinState.InputPullUp || this._islandWatch[island]
+      || this.circuit.islandCapacitors[island].length) {
       this._settleIsland(island);
     } else if (this._resetNet >= 0 && island === this.circuit.islandOf[this._resetNet]) {
       this._checkReset();
@@ -475,6 +572,7 @@ export class CircuitEngine {
     this._netLevels = new Map();
     this._notifyReady = false;
     this._notifyDepth = 0;
+    this._capCharge = new Map(); // every capacitor starts discharged
 
     for (const part of this.parts) {
       const def = partDef(part.type);
@@ -506,6 +604,8 @@ export class CircuitEngine {
   stop() {
     if (this.active) this.runner.onPinState = this._prevOnPinState || null;
     this.active = false;
+    for (const h of this._capTimers || []) if (h) this.runner.cancel(h);
+    this._capTimers = [];
     for (const [id, beh] of this.behaviors) {
       try { beh.stop(); } catch { /* visuals only */ }
       this.contexts.get(id)?.dispose();
@@ -576,7 +676,7 @@ export class CircuitEngine {
     for (let i = 0; i < this._dirty.length; i++) {
       if (!this._dirty[i]) continue;
       if (this._islandMcu[i].length) this._settleIsland(i);
-      else if (this._islandWatch[i]) this._solve(i);
+      else if (this._islandWatch[i] || this.circuit.islandCapacitors[i].length) this._solve(i);
     }
     for (const beh of this.behaviors.values()) {
       try { beh.frame(dt); } catch (err) { this.log?.(`[sim] ${err.message}`); }

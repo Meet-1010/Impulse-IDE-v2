@@ -53,6 +53,15 @@ const CHECKS = {
     check: (b) => expect(b.serial).toContain('Motion detected!'),
   },
   'night-light': { run: 0.4, check: (b) => expect(b.part('led1').el.brightness).toBeGreaterThan(0.5) },
+  'rc-charge': {
+    // One reading every 0.1 s along 5·(1 − e^(−t/1 s)).
+    run: 2.05,
+    check: (b) => {
+      const volts = b.lines().map(l => Number(l.replace('Volts: ', '')));
+      expect(volts[0]).toBeLessThan(0.05);
+      for (const i of [5, 10, 20]) expect(Math.abs(volts[i] - 5 * (1 - Math.exp(-i / 10)))).toBeLessThan(0.05);
+    },
+  },
   'tilt-sensor': { run: 0.8, check: (b) => expect(b.serial).toMatch(/Pitch: 0\.0 {2}Roll: 0\.0/) },
   'rtc-clock': { run: 1.5, check: (b) => expect(lcdText(b, 'lcd1').slice(0, 4)).toBe(String(new Date().getFullYear())) },
   'kitchen-scale': {

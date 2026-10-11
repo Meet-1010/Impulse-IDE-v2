@@ -282,6 +282,17 @@ const circuits = {
     return L.done();
   },
 
+  rcCharge() {
+    const L = new Layout('wokwi-arduino-uno', 0, 160);
+    L.at('wokwi-resistor', 'r1', '1', { x: 190, y: 420 }, { attrs: { value: '10k' } });
+    L.at('impulse-capacitor', 'c1', '1', { x: 280, y: 425 }, { attrs: { value: '100uF', type: 'electrolytic' } });
+    L.wire('uno:A1', 'r1:1', 'orange');
+    L.wire('r1:2', 'uno:A0', 'green');
+    L.wire('r1:2', 'c1:1', 'green');
+    L.wire('c1:2', 'uno:GND.2', 'black');
+    return L.done();
+  },
+
   imu() {
     const L = new Layout('wokwi-arduino-uno', 0, 160);
     L.at('wokwi-mpu6050', 'imu1', 'SDA', { x: 330, y: 60 });
@@ -1167,6 +1178,43 @@ void loop() {
   analogWrite(LED, map(darkness, 0, 1023, 0, 255));
   Serial.print("Light sensor: ");
   Serial.println(darkness);
+  delay(100);
+}
+`,
+  }),
+  ex({
+    id: 'rc-charge', title: 'Capacitor charging (RC)', category: 'Sensors', board: 'uno', level: 'Beginner',
+    summary: 'Watch a capacitor charge and discharge through a resistor: the RC curve on the Serial Plotter.',
+    tags: ['capacitor', 'RC', 'time constant', 'analogRead', 'Serial Plotter'],
+    circuit: circuits.rcCharge,
+    code: `// Capacitor charging (RC)
+// A1 charges a 100 µF capacitor through 10 kΩ and A0 reads its voltage.
+// RC = 10 kΩ × 100 µF = 1 second: after 1 s the capacitor is at 63% of 5 V,
+// after 5 s it is practically full. Then A1 goes LOW and it discharges.
+// Open Tools › Serial Plotter to see the curve, or change the capacitor or
+// resistor value in the inspector and run it again.
+// @run 1.05s
+// @expect serial contains "Volts: 3.1"
+
+const int CHARGE = A1;
+const int SENSE = A0;
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(CHARGE, OUTPUT);
+}
+
+void loop() {
+  digitalWrite(CHARGE, HIGH);   // charge for 5 s
+  for (int i = 0; i < 50; i++) report();
+  digitalWrite(CHARGE, LOW);    // then discharge for 5 s
+  for (int i = 0; i < 50; i++) report();
+}
+
+void report() {
+  float volts = analogRead(SENSE) * 5.0 / 1023;
+  Serial.print("Volts: ");
+  Serial.println(volts, 2);
   delay(100);
 }
 `,

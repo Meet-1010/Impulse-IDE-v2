@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Capacitors charge and discharge in simulated time: RC delays, button debouncing, PWM smoothed into a voltage, and analogRead along the charging curve all behave like the real circuit (within about 1% of the RC formula in the tests). The inspector shows the voltage across each capacitor, and a new example plots the RC curve.
 - PlatformIO projects: a folder with platformio.ini is built and uploaded with PlatformIO Core. Choose the environment in the status bar; Arduino-framework environments for the Uno, Nano and Mega 2560 can be simulated, debugged and tested like sketches, with diagram.json at the project root.
 - Debugger for the simulated Uno, Nano and Mega: breakpoints in the editor gutter, step over/into/out, run to cursor, the call stack (unwound from the compiler's frame information, with each frame's locals), and the values of locals, globals and registers in a Debug tab, with changed values highlighted. Debug › Start Debugging (F5). Debug builds are compiled with -Og and without link-time optimization so every line can be stopped on.
 - `impulse-test`: hardware tests on the command line and in CI. It compiles each sketch, simulates it with its `diagram.json` circuit, checks its `// @expect` lines, fails on short circuits, and writes human, JSON or JUnit reports with exit codes for CI. Releases include it as a single file that needs only Node.js and arduino-cli (docs/TESTING.md).
@@ -28,7 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 89 simulated parts, including LCD 16×2/20×4 (I²C and parallel), SSD1306, ILI9341, NeoPixels, MAX7219, TM1637, HC-SR04, DHT11/22, DS18B20, MPU6050, DS1307, HX711, keypads, KY-040, IR remote, servos, steppers (NEMA 17, 28BYJ-48 + ULN2003, A4988), L293D, L298N, relays, 74HC595, NPN and MOSFET transistors, diodes, capacitors, batteries, logic gates and a D flip-flop.
 - Part picker with search, categories, thumbnails and drag-to-place; advice when a part or board isn't simulated.
 - Inspector with live controls (distance, temperature, light…), pin documentation, wiring and library install.
-- 36 example projects (Sketch + circuit) in a searchable gallery, each compiled and simulated by the test suite.
+- 37 example projects (Sketch + circuit) in a searchable gallery, each compiled and simulated by the test suite.
 - Circuit check tab; `diagram.json` saved with each sketch; Wokwi diagram import/export; undo/redo, copy/paste, rotate, multi-select.
 - Serial pane with line endings and Serial1–3 on the Mega; buzzers play through the speakers (mutable).
 - Hardware tests: `// @expect` and `// @run` comments checked by a headless simulator run (Sketch › Run Hardware Tests).

@@ -25,6 +25,16 @@ export class BatteryBehavior extends Behavior {
   }
 }
 
+/** Reports the voltage across a capacitor; the engine does the charging. */
+export class CapacitorBehavior extends Behavior {
+  status() {
+    const v = this.ctx.engine.capacitorVolts(this.ctx.id);
+    if (v === null) return null;
+    const reversed = this.ctx.attr('type', 'ceramic') === 'electrolytic' && v < -0.5;
+    return `${v.toFixed(2)} V across it${reversed ? ' · reversed: a real electrolytic capacitor can fail like this' : ''}`;
+  }
+}
+
 /** Conducts from A to C once forward-biased past 0.6 V; blocks the other way. */
 export class DiodeBehavior extends Behavior {
   start() {

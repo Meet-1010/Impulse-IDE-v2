@@ -20,7 +20,7 @@ import { ServoBehavior, StepperBehavior, BiaxialStepperBehavior, StepperDriverBe
   Stepper28byjBehavior } from './motion.js';
 import { DigitalModuleBehavior, AnalogOutModuleBehavior, LdrBehavior, TransistorBehavior, ReedSwitchBehavior,
   breadboardLinks, breadboardPins } from './modules.js';
-import { BatteryBehavior, DiodeBehavior, MosfetBehavior } from './power.js';
+import { BatteryBehavior, CapacitorBehavior, DiodeBehavior, MosfetBehavior } from './power.js';
 import { AndGateBehavior, NandGateBehavior, OrGateBehavior, NorGateBehavior, XorGateBehavior, NotGateBehavior,
   FlipFlopDBehavior } from './logic.js';
 import { PART_PINS } from './pins.js';
@@ -648,11 +648,12 @@ const defs = {
     pins: { A: 'Anode', C: 'Cathode (band)' },
   },
   'impulse-capacitor': {
-    label: 'Capacitor', category: 'Logic & power',
-    keywords: ['capacitor', 'cap', 'electrolytic', 'ceramic', '100nf', '10uf', '100uf', 'decoupling', 'filter', 'smoothing', 'bypass'],
-    description: 'For complete circuits: the simulator treats capacitors as open at DC, so timing, filtering and smoothing are not simulated.',
+    label: 'Capacitor', category: 'Logic & power', behavior: CapacitorBehavior,
+    keywords: ['capacitor', 'cap', 'electrolytic', 'ceramic', '100nf', '10uf', '100uf', 'decoupling', 'filter', 'smoothing', 'bypass', 'rc', 'rc filter', 'low pass', 'debounce', 'timing', 'charge'],
+    description: 'Stores charge: with a resistor it sets a time (RC = seconds when ohms × farads), smooths PWM into a steady voltage, or debounces a button. The simulator charges and discharges it in real time. Electrolytics have a + lead (1).',
     attrs: { type: 'ceramic', value: '100nF' },
     props: [sel('type', 'Type', ['ceramic', 'electrolytic']), text('value', 'Value')],
+    capacitors: (attrs) => [['1', '2', parseCapacitance(attrs.value)]],
     pins: { 1: 'Lead 1 (+ on electrolytic)', 2: 'Lead 2' },
   },
   'impulse-battery': {
@@ -706,6 +707,15 @@ const defs = {
     pins: { D: 'Data', CLK: 'Clock (rising edge)', Q: 'Output', QN: 'Inverted output' },
   },
 };
+
+/** "100nF", "10uF", "4.7µF", "22pF", "1mF", "0.1u" → farads (100 nF when unreadable). */
+export function parseCapacitance(value) {
+  const m = /^\s*([\d.]+)\s*([pnuµm]?)/i.exec(String(value ?? ''));
+  if (!m) return 100e-9;
+  const scale = { p: 1e-12, n: 1e-9, u: 1e-6, 'µ': 1e-6, m: 1e-3 }[m[2].toLowerCase()] ?? 1;
+  const f = parseFloat(m[1]) * scale;
+  return f > 0 && f < 10 ? f : 100e-9;
+}
 
 /** "220", "4.7k", "10K", "1M", "330Ω" → ohms. */
 export function parseResistance(value) {

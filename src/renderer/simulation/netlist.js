@@ -1,18 +1,23 @@
-// Circuit connectivity and DC operating point.
+// Circuit connectivity, DC operating point and RC transients.
 //
 // Nodes are part pins ("led1:A"). Zero-ohm links (wires, breadboard strips,
-// closed switch contacts) merge nodes into nets. Resistors connect nets into
-// islands; each island's node voltages come from a small nodal analysis with
-// rails, outputs and sensor outputs as voltage sources. The simulator uses the
-// result for digital input levels, ADC readings and short-circuit warnings.
+// closed switch contacts) merge nodes into nets. Resistors and capacitors
+// connect nets into islands; each island's node voltages come from a small
+// nodal analysis with rails, outputs and sensor outputs as voltage sources.
+// Capacitors are open at DC; stepped in time they follow backward Euler
+// (a conductance C/dt beside a source holding their last voltage), so a
+// capacitor keeps its voltage across an instant change and charges through
+// its resistors. The simulator uses the result for digital input levels, ADC
+// readings and short-circuit warnings.
 
 const HIGH_THRESHOLD = 2.5;
 
 export class Circuit {
   /**
-   * @param {{ nodes?: Iterable<string>, links?: [string, string][], resistors?: [string, string, number, string?][] }} spec
+   * @param {{ nodes?: Iterable<string>, links?: [string, string][], resistors?: [string, string, number, string?][],
+   *   capacitors?: [string, string, number, string?][] }} spec - capacitors in farads
    */
-  constructor({ nodes = [], links = [], resistors = [] } = {}) {
+  constructor({ nodes = [], links = [], resistors = [], capacitors = [] } = {}) {
     const index = new Map();
     const parent = [];
     const id = (node) => {
@@ -38,6 +43,7 @@ export class Circuit {
       if (ra !== rb) parent[ra] = rb;
     }
     for (const [a, b] of resistors) { id(a); id(b); }
+    for (const [a, b] of capacitors) { id(a); id(b); }
 
     // Compact net ids.
     const rootToNet = new Map();
@@ -63,13 +69,21 @@ export class Circuit {
       this.resistors.push({ a: na, b: nb, ohms, tag: tag || `${a}~${b}` });
     }
 
-    // Islands: nets joined through resistors.
+    this.capacitors = [];
+    for (const [a, b, farads, tag] of capacitors) {
+      const na = this.netByNode.get(a);
+      const nb = this.netByNode.get(b);
+      if (na === nb || !(farads > 0)) continue;
+      this.capacitors.push({ a: na, b: nb, farads, tag: tag || `${a}~${b}` });
+    }
+
+    // Islands: nets joined through resistors and capacitors.
     const ip = this.netNodes.map((_, i) => i);
     const ifind = (i) => {
       while (ip[i] !== i) { ip[i] = ip[ip[i]]; i = ip[i]; }
       return i;
     };
-    for (const r of this.resistors) {
+    for (const r of [...this.resistors, ...this.capacitors]) {
       const ra = ifind(r.a);
       const rb = ifind(r.b);
       if (ra !== rb) ip[ra] = rb;
@@ -78,6 +92,7 @@ export class Circuit {
     this.islandOf = new Int32Array(this.netNodes.length);
     this.islandNets = [];
     this.islandResistors = [];
+    this.islandCapacitors = []; // indexes into this.capacitors
     for (let net = 0; net < this.netNodes.length; net++) {
       const root = ifind(net);
       let island = rootToIsland.get(root);
@@ -86,11 +101,13 @@ export class Circuit {
         rootToIsland.set(root, island);
         this.islandNets.push([]);
         this.islandResistors.push([]);
+        this.islandCapacitors.push([]);
       }
       this.islandOf[net] = island;
       this.islandNets[island].push(net);
     }
     for (const r of this.resistors) this.islandResistors[this.islandOf[r.a]].push(r);
+    this.capacitors.forEach((c, i) => this.islandCapacitors[this.islandOf[c.a]].push(i));
   }
 
   get netCount() {
@@ -143,17 +160,39 @@ export class Circuit {
  *   ohms > 0 is a source behind a resistance (pull-up, open sensor output).
  */
 
+/** Shortest step a capacitor is integrated over: an "instant" change, during which it holds its voltage. */
+const MIN_DT = 1e-9;
+
 /**
- * DC operating point of one island.
+ * Operating point of one island: DC, or one backward-Euler step when
+ * `transient` is given.
  * @param {Circuit} circuit
  * @param {number} island
  * @param {(net: number) => Source[]} sourcesOf
- * @returns {{ volts: Map<number, number|null>, shorts: { net: number, tags: string[] }[] }}
+ * @param {{ dt: number, capVolts: Float64Array }} [transient] - seconds since the last step, and each
+ *   capacitor's voltage (a − b) then; updated in place with the new voltages
+ * @returns {{ volts: Map<number, number|null>, shorts: { net: number, tags: string[] }[], maxDv: number }}
+ *   maxDv: the largest change of a capacitor voltage in this step
  */
-export function solveIsland(circuit, island, sourcesOf) {
+export function solveIsland(circuit, island, sourcesOf, transient = null) {
   const nets = circuit.islandNets[island];
+  const caps = transient ? circuit.islandCapacitors[island] : [];
   const volts = new Map();
   const shorts = [];
+  // New capacitor voltages from the solution (a floating side keeps the old one).
+  const finish = () => {
+    let maxDv = 0;
+    for (const ci of caps) {
+      const c = circuit.capacitors[ci];
+      const va = volts.get(c.a);
+      const vb = volts.get(c.b);
+      if (typeof va !== 'number' || typeof vb !== 'number') continue;
+      const v = va - vb;
+      maxDv = Math.max(maxDv, Math.abs(v - transient.capVolts[ci]));
+      transient.capVolts[ci] = v;
+    }
+    return { volts, shorts, maxDv };
+  };
   const fixed = new Map();
   const soft = new Map(); // net → [{ g, volts }]
 
@@ -181,10 +220,16 @@ export function solveIsland(circuit, island, sourcesOf) {
 
   for (const [net, s] of fixed) volts.set(net, s.volts);
   const unknown = nets.filter(n => !fixed.has(n));
-  if (!unknown.length) return { volts, shorts };
+  if (!unknown.length) return finish();
 
   const resistors = circuit.islandResistors[island];
-  if (!resistors.length) {
+  // Each stepped capacitor: a conductance g = C/dt, and the current g·v_prev it keeps flowing.
+  const g0 = transient ? 1 / Math.max(transient.dt, MIN_DT) : 0;
+  const stamps = caps.map(ci => {
+    const c = circuit.capacitors[ci];
+    return { a: c.a, b: c.b, g: c.farads * g0, i: c.farads * g0 * transient.capVolts[ci] };
+  });
+  if (!resistors.length && !stamps.length) {
     // Single floating net: only soft sources (pull-ups) can set it.
     for (const net of unknown) {
       const list = soft.get(net);
@@ -192,12 +237,12 @@ export function solveIsland(circuit, island, sourcesOf) {
       const g = list.reduce((a, x) => a + x.g, 0);
       volts.set(net, list.reduce((a, x) => a + x.g * x.volts, 0) / g);
     }
-    return { volts, shorts };
+    return finish();
   }
 
   // Nets that can't reach any source float.
   const adj = new Map(unknown.map(n => [n, []]));
-  for (const r of resistors) {
+  for (const r of [...resistors, ...stamps]) {
     if (adj.has(r.a)) adj.get(r.a).push(r.b);
     if (adj.has(r.b)) adj.get(r.b).push(r.a);
   }
@@ -212,7 +257,7 @@ export function solveIsland(circuit, island, sourcesOf) {
   }
   const solveNets = unknown.filter(n => anchored.has(n));
   for (const n of unknown) if (!anchored.has(n)) volts.set(n, null);
-  if (!solveNets.length) return { volts, shorts };
+  if (!solveNets.length) return finish();
 
   const row = new Map(solveNets.map((n, i) => [n, i]));
   const N = solveNets.length;
@@ -240,6 +285,23 @@ export function solveIsland(circuit, island, sourcesOf) {
       G[i][N] += s.g * s.volts;
     }
   }
+  // Capacitor companions: i(a→b) = g·(Va − Vb) − g·v_prev.
+  for (const c of stamps) {
+    const ia = row.get(c.a);
+    const ib = row.get(c.b);
+    if (ia !== undefined) {
+      G[ia][ia] += c.g;
+      G[ia][N] += c.i;
+      if (ib !== undefined) G[ia][ib] -= c.g;
+      else if (fixed.has(c.b)) G[ia][N] += c.g * fixed.get(c.b).volts;
+    }
+    if (ib !== undefined) {
+      G[ib][ib] += c.g;
+      G[ib][N] -= c.i;
+      if (ia !== undefined) G[ib][ia] -= c.g;
+      else if (fixed.has(c.a)) G[ib][N] += c.g * fixed.get(c.a).volts;
+    }
+  }
 
   // Gaussian elimination with partial pivoting.
   for (let c = 0; c < N; c++) {
@@ -258,7 +320,7 @@ export function solveIsland(circuit, island, sourcesOf) {
     const d = G[i][i];
     volts.set(solveNets[i], Math.abs(d) < 1e-15 ? null : G[i][N] / d);
   }
-  return { volts, shorts };
+  return finish();
 }
 
 /** Logic level for a voltage (null = floating). */

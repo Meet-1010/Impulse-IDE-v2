@@ -165,7 +165,7 @@ arduino-cli compile ──► app .hex ──► AvrRunner (avr8js) ◄──►
 |---|---|
 | `mcu.js`, `boards.js` | ATmega328P / ATmega2560 descriptions and the Uno, Nano and Mega 2560 pin maps (PWM, analog, I²C, SPI, serial, interrupts). |
 | `avr-runner.js` | Runs the CPU in real time (12 ms budget per frame), exposes pin states, ADC voltages, an I²C bus and an SPI bus, keeps EEPROM per board, handles the watchdog and RESET. |
-| `netlist.js` | Union-find nets plus nodal analysis per resistive island: pull-ups, voltage dividers, shorts. |
+| `netlist.js` | Union-find nets plus nodal analysis per island: pull-ups, voltage dividers, shorts, and capacitors (backward Euler: a capacitor holds its voltage through an instant change and charges through its resistors). The engine steps an island with capacitors on the CPU clock while they move (about 20 mV per step, 20 µs to 20 ms), integrating each interval with the sources that held during it, and lands a step on each input pin's threshold crossing. |
 | `engine.js` | Builds nets from wires, breadboard plugs and part internals; resolves every input pin; measures PWM duty and frequency; routes Arduino pin edges to `onPin` and any net level change to `onNet` (so gates can feed gates). |
 | `parts/catalog.js` | Every part: label, category, search keywords, description, pins, editable props, live controls, libraries, behavior, Wokwi aliases. `parts/pins.js` holds pin positions captured from the rendered elements for headless use. |
 | `parts/*.js`, `devices/*.js` | Behaviors (basic, displays, input, sensors, motion, power, logic, modules) and protocol models (HD44780, SSD1306, ILI9341, WS2812, DHT, DS18B20 1-Wire, TM1637, MAX7219/74HC595, NEC IR, DS1307/MPU6050 registers). |
