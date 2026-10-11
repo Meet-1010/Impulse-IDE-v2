@@ -273,33 +273,20 @@
                     </div>
                     <div class="sidebar-content">
                         <div class="sidebar-section debug-toolbar">
-                            <button id="debugStartBtn" class="debug-play-btn" title="Start Debugging">
-                                <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+                            <button id="debugStartBtn" class="debug-play-btn" title="Start debugging (F5)" aria-label="Start debugging">
+                                <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">
                                     <path d="M8 5v14l11-7z" />
                                 </svg>
                             </button>
-                            <span id="debugBoardLabel" class="debug-board-label">No board selected</span>
-                            <button id="debugConfigBtn" class="debug-gear-btn" title="Debug configuration">⚙</button>
+                            <span id="debugBoardLabel" class="debug-board-label">Simulated Arduino Uno</span>
+                        </div>
+                        <div class="sidebar-section debug-help">
+                            <p>Click left of a line number to set a breakpoint (F9), then start debugging (F5). The sketch runs in the simulator and stops there; step with F10, F11 and ⇧F11.</p>
+                            <p>Variables, the call stack and registers appear in the simulator's <strong>Debug</strong> tab.</p>
                         </div>
                         <div class="sidebar-section">
-                            <div class="debug-section-header" data-debug-section="threads">Threads</div>
-                            <div id="debugThreads" class="debug-section-content"></div>
-                        </div>
-                        <div class="sidebar-section">
-                            <div class="debug-section-header" data-debug-section="callstack">Call stack</div>
-                            <div id="debugCallStack" class="debug-section-content"></div>
-                        </div>
-                        <div class="sidebar-section">
-                            <div class="debug-section-header" data-debug-section="variables">Variables</div>
-                            <div id="debugVariables" class="debug-section-content"></div>
-                        </div>
-                        <div class="sidebar-section">
-                            <div class="debug-section-header" data-debug-section="watch">Watch</div>
-                            <div id="debugWatch" class="debug-section-content"></div>
-                        </div>
-                        <div class="sidebar-section">
-                            <div class="debug-section-header" data-debug-section="breakpoints">Breakpoints</div>
-                            <div id="debugBreakpoints" class="debug-section-content"></div>
+                            <h2 class="debug-section-header">Breakpoints</h2>
+                            <div id="debugBreakpoints" class="debug-section-content" role="list"></div>
                         </div>
                     </div>
                 </div>

@@ -97,7 +97,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         window.impulse.breakpoints = attachBreakpoints(state.editor, {
             getFile: () => state.currentFile,
             announce: announceStatus,
-            onChange: () => window.simManager?.onBreakpointsChanged?.()
+            onChange: () => {
+                window.simManager?.onBreakpointsChanged?.();
+                if (state.activePanel === 'debug') updateDebugPanel();
+            }
         });
         // First run (or a missing core): offer to install the Arduino tools.
         await ensureToolchain();
@@ -2309,22 +2312,49 @@ async function loadExamplesIntoDropdown(listEl, filter = '') {
 }
 
 function setupDebugPanel() {
-    const startBtn = document.getElementById('debugStartBtn');
-    const configBtn = document.getElementById('debugConfigBtn');
-    startBtn?.addEventListener('click', () => {
-        logToConsole('Debug: start debugging (configure launch.json for your board)', 'info');
-    });
-    configBtn?.addEventListener('click', () => {
-        logToConsole('Debug configuration: add launch.json to your sketch folder for board-specific debugging', 'info');
+    document.getElementById('debugStartBtn')?.addEventListener('click', () => {
+        window.impulse.showSimulator();
+        window.simManager?.debugStart();
     });
 }
 
+/** The sidebar Debug panel: the board the debugger runs on, and the breakpoints. */
 function updateDebugPanel() {
     const labelEl = document.getElementById('debugBoardLabel');
-    if (!labelEl) return;
-    const boardFQBN = document.getElementById('boardSelectSidebar')?.value;
-    const boardName = state.boards?.find(b => b.fqbn === boardFQBN)?.name;
-    labelEl.textContent = boardName ? (boardName.length > 18 ? boardName.slice(0, 15) + '...' : boardName) : 'No board selected';
+    const board = window.simManager?.board;
+    if (labelEl && board) {
+        labelEl.textContent = board.family === 'rp2040'
+            ? `${board.short}: the debugger runs AVR boards`
+            : `Simulated ${board.label}`;
+    }
+    const listEl = document.getElementById('debugBreakpoints');
+    const bps = window.impulse?.breakpoints;
+    if (!listEl || !bps) return;
+    listEl.innerHTML = '';
+    const entries = [...bps.all()].flatMap(([file, lines]) => lines.map(line => ({ file, line })));
+    if (!entries.length) {
+        listEl.innerHTML = '<div class="lib-msg">No breakpoints yet.</div>';
+        return;
+    }
+    for (const { file, line } of entries) {
+        const row = document.createElement('div');
+        row.className = 'debug-bp-row';
+        row.setAttribute('role', 'listitem');
+        const open = document.createElement('button');
+        open.type = 'button';
+        open.className = 'debug-bp-open';
+        open.textContent = `${file.split(/[/\\]/).pop()}:${line}`;
+        open.title = file;
+        open.addEventListener('click', () => window.impulse.revealLine(file, line));
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'debug-bp-remove';
+        remove.setAttribute('aria-label', `Remove breakpoint at line ${line}`);
+        remove.textContent = '×';
+        remove.addEventListener('click', () => bps.remove(file, line));
+        row.append(open, remove);
+        listEl.appendChild(row);
+    }
 }
 
 function setupSearchPanel() {

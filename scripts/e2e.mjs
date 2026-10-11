@@ -237,6 +237,17 @@ try {
     if (header !== '// header edit\nint helper();\n') throw new Error(`helper.h on disk: ${JSON.stringify(header)}`);
   });
 
+  await step('the sidebar Debug panel lists breakpoints and is accessible', async () => {
+    if (await evaluate(`document.getElementById('simView')?.style.display === 'flex'`)) await evaluate(`document.querySelector('.activity-icon[data-panel="simulate"]').click()`);
+    await evaluate(`window.impulse.breakpoints.toggle(2)`);
+    await evaluate(`document.querySelector('.activity-icon[data-panel="debug"]').click()`);
+    await waitFor(`/:2$/.test(document.querySelector('#debugBreakpoints .debug-bp-open')?.textContent || '')`, 3000, 'the breakpoint in the Debug panel');
+    await audit('the Debug panel');
+    await evaluate(`document.querySelector('#debugBreakpoints .debug-bp-remove').click()`);
+    await waitFor(`/No breakpoints/.test(document.getElementById('debugBreakpoints').textContent)`, 3000, 'the breakpoint to be removed');
+    await evaluate(`document.querySelector('.activity-icon[data-panel="explorer"]').click()`);
+  });
+
   await step('dialogs are accessible', async () => {
     await evaluate(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
     for (const [action, selector, close] of [
