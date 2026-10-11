@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0-beta.1] - 2026-10-12
+
 ### Added
 
 - ATtiny85 in the simulator: ATTinyCore firmware runs on an emulated ATtiny85 at 16 MHz, drawn as a DIP-8 chip that plugs across a breadboard. Digital pins PB0–PB5, PWM on PB0 (Timer0) and PB1/PB4 (Timer/Counter1, modelled from the datasheet's fast PWM), the 4-channel ADC with its 1.1 V and 2.56 V references, INT0 and pin-change interrupts, EEPROM and the watchdog. ATTinyCore's software Serial is decoded from PB0 at whatever baud the sketch uses, and typed text goes in on PB1 through the analog comparator interrupt, half duplex like the real chip. The USI is modelled from the datasheet, so Wire (I²C: LCDs, RTCs, sensors) and SPI work on PB0–PB2, and the editor warns when a sketch uses Serial and I²C, which share PB0. The debugger works on it. The circuit check asks for a 2.7–5.5 V supply and warns about PB5 being the RESET pin. The first ATtiny85 build offers to install ATTinyCore (about 10 MB). Three examples (blink, a dimmer, an I²C LCD), and impulse-test runs ATtiny85 sketches too.
@@ -94,4 +96,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial Impulse IDE release: compile, upload, serial monitor, AI assistant, error memory, modern UI.
 
 [Unreleased]: https://github.com/Meet-1010/Impulse-IDE-v2/compare/v2.0.0-beta.1...HEAD
+[2.0.0-beta.1]: https://github.com/Meet-1010/Impulse-IDE-v2/releases/tag/v2.0.0-beta.1
 [1.0.0]: https://github.com/nate1029/Impulse/releases/tag/v1.0.0

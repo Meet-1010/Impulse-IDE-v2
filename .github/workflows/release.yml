@@ -37,8 +37,10 @@ jobs:
           if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             flags="--draft"
             case "$GITHUB_REF_NAME" in *-*) flags="$flags --prerelease" ;; esac
-            gh release create "$GITHUB_REF_NAME" $flags --title "Impulse IDE ${GITHUB_REF_NAME#v}" \
-              --notes "See CHANGELOG.md for what changed in this release."
+            # The notes are this version's section of CHANGELOG.md.
+            awk -v v="${GITHUB_REF_NAME#v}" 'index($0, "## [" v "]") == 1 { f = 1; next } f && /^## \[/ { exit } f' CHANGELOG.md > notes.md
+            [ -s notes.md ] || echo "See CHANGELOG.md for what changed in this release." > notes.md
+            gh release create "$GITHUB_REF_NAME" $flags --title "Impulse IDE ${GITHUB_REF_NAME#v}" --notes-file notes.md
           fi
 
   build:
