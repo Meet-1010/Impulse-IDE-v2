@@ -120,10 +120,10 @@ export function searchParts(query, parts = Object.values(PARTS)) {
 // Things people look for that the simulator can't run, with a way forward.
 const ADVICE = [
   {
-    match: /\b(esp ?32|esp ?8266|esp-?01|nodemcu|wemos|d1 mini|pico|rp2040|raspberry|stm32|blue ?pill|teensy|leonardo|pro micro|32u4|due|zero|mkr|r4|minima|giga|portenta|nano ?(33|every|esp32)|attiny|digispark)\b/,
+    match: /\b(esp ?32|esp ?8266|esp-?01|nodemcu|wemos|d1 mini|pico ?w|pico ?2|rp2350|raspberry ?pi ?([2-5]|zero|4b)|stm32|blue ?pill|teensy|leonardo|pro micro|32u4|due|zero|mkr|r4|minima|giga|portenta|nano ?(33|every|esp32|rp2040)|attiny|digispark)\b/,
     title: 'This board isn’t simulated',
-    text: 'The simulator runs the Arduino Uno, Nano and Mega 2560 (AVR chips). You can still write, compile and upload code for other boards — or try your logic on an Uno first.',
-    parts: ['wokwi-arduino-uno', 'wokwi-arduino-nano', 'wokwi-arduino-mega'],
+    text: 'The simulator runs the Arduino Uno, Nano and Mega 2560 and the Raspberry Pi Pico. You can still write, compile and upload code for other boards — or try your logic on one of these first (a Pico for 3.3 V and ARM projects).',
+    parts: ['wokwi-arduino-uno', 'wokwi-arduino-nano', 'wokwi-arduino-mega', 'impulse-pi-pico'],
   },
   {
     match: /\b(bluetooth|hc-?0[56]|hm-?10|ble)\b/,

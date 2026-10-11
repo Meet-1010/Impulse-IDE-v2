@@ -75,7 +75,26 @@ function progressPercent(text) {
   return Number.isFinite(pct) && pct >= 0 && pct <= 100 ? pct : null;
 }
 
-const PACKAGE_NAMES = { avr: 'the Arduino AVR core', 'avr-gcc': 'the AVR compiler', avrdude: 'the uploader (avrdude)', arduinoOTA: 'arduinoOTA' };
+const PACKAGE_NAMES = {
+  avr: 'the Arduino AVR core', 'avr-gcc': 'the AVR compiler', avrdude: 'the uploader (avrdude)', arduinoOTA: 'arduinoOTA',
+  rp2040: 'the Raspberry Pi Pico core', 'pqt-gcc': 'the ARM compiler', 'pqt-gcc-riscv': 'the RISC-V compiler',
+  'pqt-python3': 'Python for the build', 'pqt-picotool': 'picotool', 'pqt-openocd': 'OpenOCD', 'pqt-pioasm': 'the PIO assembler',
+  'pqt-mklittlefs': 'mklittlefs',
+};
+
+/**
+ * Board cores the simulator can install on request (the AVR core is part of
+ * first-run setup). Installed with --additional-urls, so arduino-cli's
+ * configuration is left as it is.
+ */
+const EXTRA_CORES = {
+  pico: {
+    id: 'rp2040:rp2040',
+    url: 'https://github.com/earlephilhower/arduino-pico/releases/download/global/package_rp2040_index.json',
+    label: 'Raspberry Pi Pico boards (Arduino-Pico core)',
+    size: 'about 450 MB',
+  },
+};
 
 /**
  * A progress update from a chunk of `arduino-cli core install` output, e.g.
@@ -134,15 +153,49 @@ class Toolchain extends EventEmitter {
   }
 
   async hasAvrCore(cli) {
+    return this.hasCore(cli, AVR_CORE);
+  }
+
+  async hasCore(cli, coreId) {
     const res = await this._run(cli, ['core', 'list', '--format', 'json'], { timeout: 30000 });
     if (!res.success) return false;
     try {
       const data = JSON.parse(res.stdout);
       const platforms = data.platforms || data;
-      return (Array.isArray(platforms) ? platforms : []).some(p => (p.id || p.ID) === AVR_CORE && (p.installed_version || p.installed || p.Installed));
+      return (Array.isArray(platforms) ? platforms : []).some(p => (p.id || p.ID) === coreId && (p.installed_version || p.installed || p.Installed));
     } catch {
       return false;
     }
+  }
+
+  /** Whether an extra core (EXTRA_CORES key) is installed, and what installing it means. */
+  async extraCore(key) {
+    const core = EXTRA_CORES[key];
+    if (!core) throw new Error(`Unknown core "${key}"`);
+    const cli = this.findCli();
+    return { key, label: core.label, size: core.size, installed: !!cli && await this.hasCore(cli.path, core.id) };
+  }
+
+  /** Install an extra core (EXTRA_CORES key) with progress events ('core' step). */
+  async installExtraCore(key) {
+    const core = EXTRA_CORES[key];
+    if (!core) throw new Error(`Unknown core "${key}"`);
+    const cli = this.findCli();
+    if (!cli) throw new Error('arduino-cli is not installed. Run Tools › Set Up Arduino Tools first.');
+    const urls = ['--additional-urls', core.url];
+    this._progress('core', 'Updating the board list…', null);
+    const index = await this._run(cli.path, ['core', 'update-index', ...urls]);
+    if (!index.success) throw new Error(`Could not update the board list: ${(index.stderr || index.stdout).trim().split('\n').pop()}`);
+    this._progress('core', `Installing ${core.label}…`, 0);
+    const res = await this._run(cli.path, ['core', 'install', core.id, ...urls], {
+      onOutput: (text) => {
+        const p = coreProgress(text);
+        if (p) this._progress('core', p.message, p.percent);
+      },
+    });
+    if (!res.success) throw new Error(`Could not install ${core.label}: ${(res.stderr || res.stdout).trim().split('\n').pop()}`);
+    this._progress('core', `${core.label} installed.`, 100);
+    return this.extraCore(key);
   }
 
   /** What's present and what's missing. */
@@ -254,4 +307,4 @@ class Toolchain extends EventEmitter {
   }
 }
 
-module.exports = { Toolchain, cliAsset, cliCandidates, progressPercent, coreProgress, CLI_VERSION };
+module.exports = { Toolchain, cliAsset, cliCandidates, progressPercent, coreProgress, CLI_VERSION, EXTRA_CORES };

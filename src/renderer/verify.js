@@ -3,6 +3,7 @@
 // lines. Used by Sketch > Run Hardware Tests and to verify AI code edits.
 
 import { runHeadless, summarizeTrace } from './simulation/headless.js';
+import { programOf } from './simulation/runners.js';
 import { parseExpectations, evaluateExpectations } from './simulation/expectations.js';
 import { boardForFqbn, BOARDS } from './simulation/boards.js';
 
@@ -31,7 +32,7 @@ export async function runSimulatorCheck({ sketchPath, code, context = simulation
   onStage?.('run');
   let run;
   try {
-    run = await runHeadless(compiled.hex, { seconds, signal, board: context.board, circuit: context.circuit });
+    run = await runHeadless(programOf(compiled), { seconds, signal, board: context.board, circuit: context.circuit });
   } catch (err) {
     return { ok: false, stage: 'run', error: err.message, parseErrors, board: context.label };
   }

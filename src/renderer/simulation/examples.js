@@ -13,7 +13,7 @@ class Layout {
   constructor(boardType, x = 0, y = 0) {
     this.parts = [];
     this.wires = [];
-    this.boardId = { 'wokwi-arduino-uno': 'uno', 'wokwi-arduino-nano': 'nano', 'wokwi-arduino-mega': 'mega' }[boardType];
+    this.boardId = { 'wokwi-arduino-uno': 'uno', 'wokwi-arduino-nano': 'nano', 'wokwi-arduino-mega': 'mega', 'impulse-pi-pico': 'pico' }[boardType];
     this.part(boardType, this.boardId, { x, y });
   }
 
@@ -485,6 +485,24 @@ const circuits = {
     L.wire('pot1:SIG', 'mega:A8', 'green');
     L.wire('pot1:VCC', 'mega:5V', 'red');
     L.wire('pot1:GND', 'mega:GND.2', 'black');
+    return L.done();
+  },
+
+  picoBlink() {
+    const L = new Layout('impulse-pi-pico', 0, 0);
+    ledOnPin(L, 'pico', 'GP15', 'led1', 'red', -70, 90);
+    L.wire('led1:C', 'pico:GND.4', 'black');
+    return L.done();
+  },
+
+  picoDimmer() {
+    const L = new Layout('impulse-pi-pico', 0, 0);
+    L.at('wokwi-potentiometer', 'pot1', 'SIG', { x: 190, y: 120 }, { attrs: { value: '512' } });
+    L.wire('pot1:SIG', 'pico:GP26', 'green');
+    L.wire('pot1:VCC', 'pico:3V3', 'red');
+    L.wire('pot1:GND', 'pico:AGND', 'black');
+    ledOnPin(L, 'pico', 'GP16', 'led1', 'green', 140, 240);
+    L.wire('led1:C', 'pico:GND.6', 'black');
     return L.done();
   },
 
@@ -1837,6 +1855,68 @@ void loop() {
     delay(1000);
   }
   Serial.println();
+}
+`,
+  }),
+  ex({
+    id: 'pico-blink', title: 'Raspberry Pi Pico: blink', category: 'Boards', board: 'pico', level: 'Beginner',
+    summary: 'The Pico’s own LED and an LED on GP15 blink, and the count goes to Serial over USB.',
+    tags: ['Raspberry Pi Pico', 'RP2040', '3.3 V', 'Serial'],
+    circuit: circuits.picoBlink,
+    code: `// Raspberry Pi Pico: blink
+// The Pico's own LED (GP25) and the LED on GP15 blink twice a second, and the
+// count goes to the Serial monitor over USB. Pico pins are 3.3 V.
+// @run 1.2s
+// @expect pin LED_BUILTIN frequency 2Hz ±5%
+// @expect serial contains "Blink 2"
+
+const int LED = 15;
+int count = 0;
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(LED_BUILTIN, OUTPUT);
+  pinMode(LED, OUTPUT);
+}
+
+void loop() {
+  digitalWrite(LED_BUILTIN, HIGH);
+  digitalWrite(LED, HIGH);
+  delay(250);
+  digitalWrite(LED_BUILTIN, LOW);
+  digitalWrite(LED, LOW);
+  delay(250);
+  Serial.print("Blink ");
+  Serial.println(++count);
+}
+`,
+  }),
+  ex({
+    id: 'pico-dimmer', title: 'Raspberry Pi Pico: dimmer', category: 'Boards', board: 'pico', level: 'Beginner',
+    summary: 'A potentiometer on GP26 sets the brightness of an LED on GP16 with PWM.',
+    tags: ['Raspberry Pi Pico', 'RP2040', 'analogRead', 'PWM', 'potentiometer'],
+    circuit: circuits.picoDimmer,
+    code: `// Raspberry Pi Pico: dimmer
+// The potentiometer on GP26 (A0) sets the brightness of the LED on GP16.
+// The Pico's ADC measures 0-3.3 V, and analogRead gives 0-1023 by default.
+// Turn the potentiometer in the inspector while it runs.
+// @run 0.5s
+// @expect serial matches /^Reading: \\d+/m
+
+const int POT = A0;  // GP26
+const int LED = 16;
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(LED, OUTPUT);
+}
+
+void loop() {
+  int reading = analogRead(POT);
+  analogWrite(LED, reading / 4);
+  Serial.print("Reading: ");
+  Serial.println(reading);
+  delay(100);
 }
 `,
   }),

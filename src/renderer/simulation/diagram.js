@@ -198,10 +198,35 @@ function mapBoardPin(pin, from, to, toPins, i2c) {
   // Duplicate headers (A4.2, 13.2, 5V.2) fall back to the base pin.
   const base = pin.replace(/\.\d+$/, '');
   if (toPins.has(base)) return base;
-  if (/^GND/.test(pin)) return [...toPins].find(n => /^GND/.test(n)) || null;
-  if (/^5V/.test(pin) && toPins.has('5V')) return '5V';
+  // Boards that name pins differently (13 ↔ GP13): the same Arduino pin,
+  // analog inputs by their A-number (A0 ↔ GP26).
+  if (from && to) {
+    const num = boardPinNumber(from, pin);
+    const entry = num !== null ? from.byPin.get(num) : null;
+    const target = entry?.analog ? to.byAnalog.get(entry.analog)?.pin ?? null : num;
+    if (target !== null && target !== undefined) {
+      const name = [...toPins].find(n => boardPinNumber(to, n) === target && !/\.\d$/.test(n));
+      if (name) return name;
+    }
+  }
+  if (/^(A?GND)/.test(pin)) return [...toPins].find(n => /^GND/.test(n)) || null;
+  for (const candidate of POWER_EQUIVALENTS[base] || []) if (toPins.has(candidate)) return candidate;
   return null;
 }
+
+/** Supply pins of one board family and their counterparts on another. */
+const POWER_EQUIVALENTS = {
+  '5V': ['5V', 'VBUS', 'VSYS'],
+  VIN: ['VIN', 'VSYS', '5V'],
+  IOREF: ['IOREF', '5V', 'VBUS'],
+  '3.3V': ['3.3V', '3V3'],
+  '3V3': ['3V3', '3.3V'],
+  ADC_VREF: ['ADC_VREF', 'AREF', '3.3V'],
+  VBUS: ['VBUS', '5V'],
+  VSYS: ['VSYS', 'VIN', '5V'],
+  RUN: ['RUN', 'RESET'],
+  RESET: ['RESET', 'RUN'],
+};
 
 export const BOARD_TAGS = Object.values(BOARDS).map(b => b.tag);
 

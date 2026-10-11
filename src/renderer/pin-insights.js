@@ -190,9 +190,11 @@ export function diagnosePins(usages, { code, wiring } = {}) {
       issues.push({ line: pwm.line, severity: 'warning',
         message: `${label} has no PWM on an ${board.label}, so analogWrite only switches it fully on or off. PWM pins are ${list}.` });
     }
-    if (usesSerial && (pin === 0 || pin === 1)) {
+    // Serial's own pins (none on the Pico, where Serial is the USB port).
+    const uart = board.serial[0];
+    if (usesSerial && uart && (pin === uart.rx || pin === uart.tx)) {
       issues.push({ line: uses[0].line, severity: 'warning',
-        message: `${label} is the Serial ${pin === 0 ? 'RX' : 'TX'} line, which Serial.begin() already uses. Pick another pin.` });
+        message: `${label} is the Serial ${pin === uart.rx ? 'RX' : 'TX'} line, which Serial.begin() already uses. Pick another pin.` });
     }
 
     if (!wiring?.hasCircuit) continue;
@@ -230,6 +232,7 @@ export function describePin(pin, wiring) {
   if (pin === board.i2c.sda) extras.push('I²C SDA');
   if (pin === board.i2c.scl) extras.push('I²C SCL');
   board.serial.forEach((s, i) => {
+    if (!s) return;
     if (pin === s.rx) extras.push(`Serial${i || ''} RX`);
     if (pin === s.tx) extras.push(`Serial${i || ''} TX`);
   });

@@ -29,6 +29,16 @@ export function circuitChecks(model, { shorts = [] } = {}) {
     const net = circuit.netOf(node);
     return !!boardPart && net >= 0 && circuit.nodesOf(net).some(n => n.startsWith(`${boardPart.id}:`));
   };
+  // The board header pin a node is ("GND.2" → "GND"), or null for other parts' pins.
+  const boardPin = (n) => (boardPart && n.startsWith(`${boardPart.id}:`) ? basePinName(n.slice(boardPart.id.length + 1)) : null);
+  // Whether a node shares a net with one of the board's I/O pins.
+  const onGpio = (node) => {
+    const net = circuit.netOf(node);
+    return net >= 0 && circuit.nodesOf(net).some(n => {
+      const name = boardPart && n.startsWith(`${boardPart.id}:`) ? n.slice(boardPart.id.length + 1) : null;
+      return name !== null && boardPinNumber(board, name) !== null;
+    });
+  };
   const i2c = new Map();
   for (const part of model.parts) {
     const def = partDef(part.type);
@@ -51,15 +61,32 @@ export function circuitChecks(model, { shorts = [] } = {}) {
     if (part.type === 'impulse-battery' && boardPart) {
       const volts = Number(part.attrs.voltage ?? 9);
       const net = circuit.netOf(`${part.id}:+`);
-      const boardPin = (n) => (n.startsWith(`${boardPart.id}:`) ? basePinName(n.slice(boardPart.id.length + 1)) : null);
-      const onBoardPin = net >= 0 && circuit.nodesOf(net).map(boardPin).find(p => p && p !== 'VIN');
-      const pinName = onBoardPin || null;
-      if (pinName && /^GND/.test(pinName)) issues.push({ level: 'error', part: part.id, text: `${part.id}'s + is wired to GND, which shorts the battery.` });
-      else if (pinName && volts > 5.5) issues.push({ level: 'error', part: part.id, text: `${part.id} puts ${volts} V straight onto ${boardPinNumber(board, pinName) !== null ? pinLabel(board, boardPinNumber(board, pinName)) : pinName}. Arduino pins take at most 5 V: power the board through VIN, or switch the battery with a transistor or relay.` });
+      // Supply inputs: VIN, and the Pico's VSYS and VBUS up to 5.5 V.
+      const fine = (p) => p === 'VIN' || ((p === 'VSYS' || p === 'VBUS') && volts <= 5.5);
+      const pinName = net >= 0 && circuit.nodesOf(net).map(boardPin).find(p => p && !fine(p)) || null;
+      const label = pinName && boardPinNumber(board, pinName) !== null ? pinLabel(board, boardPinNumber(board, pinName)) : pinName;
+      if (pinName && /^A?GND/.test(pinName)) issues.push({ level: 'error', part: part.id, text: `${part.id}'s + is wired to GND, which shorts the battery.` });
+      else if (pinName === 'VSYS' || pinName === 'VBUS') issues.push({ level: 'error', part: part.id, text: `${part.id} puts ${volts} V on ${pinName}, which takes at most 5.5 V. Use a battery of 5.5 V or less (3×AA, a Li-ion cell), or a regulator.` });
+      else if (pinName && volts > board.maxPinVolts + 0.5) {
+        const via = board.family === 'rp2040' ? 'power the Pico through VSYS (up to 5.5 V)' : 'power the board through VIN';
+        issues.push({ level: 'error', part: part.id, text: `${part.id} puts ${volts} V straight onto ${label}. ${board.short} pins take at most ${board.maxPinVolts} V: ${via}, or switch the battery with a transistor or relay.` });
+      }
+    }
+    // 3.3 V boards: 5 V on an I/O pin damages the chip.
+    if (boardPart && board.maxPinVolts < 5) {
+      const fiveVolt = (n) => ['5V', 'VBUS', 'VSYS', 'VIN'].includes(boardPin(n) || '');
+      const supply = (def.supplyPins || pins.filter(p => /^(VCC|VIN|VDD|5V|V\+)$/.test(p)))[0];
+      const supplyNet = supply ? circuit.netOf(`${part.id}:${supply}`) : -1;
+      if (supplyNet >= 0 && circuit.nodesOf(supplyNet).some(fiveVolt)) {
+        const signals = pins.filter(p => p !== supply && !/^(GND|VSS|VCC|VIN|VDD|5V|V\+|3V3|3\.3V)/.test(p) && onGpio(`${part.id}:${p}`));
+        if (signals.length) {
+          issues.push({ level: 'warn', part: part.id, text: `${part.id} (${def.label}) runs from 5 V, so ${signals.join(', ')} can reach 5 V on a ${board.short} pin that takes at most ${board.maxPinVolts} V. Power it from 3V3 if it works at 3.3 V, or put a level shifter or a 1 kΩ/2 kΩ divider on the lines into the ${board.short}.` });
+        }
+      }
     }
     if (part.type === 'impulse-ds18b20' && boardPart && linked(`${part.id}:DQ`)) {
       const net = circuit.netOf(`${part.id}:DQ`);
-      const supply = (n) => n.startsWith(`${boardPart.id}:`) && ['5V', '3.3V', 'IOREF'].includes(basePinName(n.slice(boardPart.id.length + 1)));
+      const supply = (n) => ['5V', '3.3V', '3V3', 'IOREF', 'VBUS'].includes(boardPin(n) || '');
       const pulled = circuit.resistiveNeighbors(net, 1).some(nb => circuit.nodesOf(nb.net).some(supply));
       if (!pulled) issues.push({ level: 'info', part: part.id, text: `${part.id} has no 4.7 kΩ pull-up from DQ to 5V. The simulator adds one, but a real 1-Wire bus needs it.` });
     }
@@ -67,7 +94,7 @@ export function circuitChecks(model, { shorts = [] } = {}) {
     const power = def.supplyPins || pins.filter(p => /^(VCC|VIN|VDD|5V|V\+)$/.test(p));
     const ground = pins.filter(p => /^(GND|VSS)$/.test(p));
     if (power.length && !power.some(p => linked(`${part.id}:${p}`))) {
-      const to = /^\d+V$/.test(power[0]) && power[0] !== '5V' ? 'a battery or supply' : '5V';
+      const to = /^\d+V$/.test(power[0]) && power[0] !== '5V' ? 'a battery or supply' : board.maxPinVolts < 5 ? '3V3' : '5V';
       issues.push({ level: 'warn', part: part.id, text: `${part.id} (${def.label}) has no power: wire its ${power[0]} pin to ${to}.` });
     }
     if (ground.length && !ground.some(p => linked(`${part.id}:${p}`))) {

@@ -6,6 +6,7 @@ import { Max7219MatrixElement, RelayModuleElement, DcMotorElement, SensorModuleE
 import { BatteryElement, DiodeElement, CapacitorElement, MosfetElement } from './power.js';
 import { AndGateElement, NandGateElement, OrGateElement, NorGateElement, XorGateElement, NotGateElement, FlipFlopDElement } from './logic.js';
 import { Tm1637Element, Stepper28byjElement, L298nElement } from './kits.js';
+import { PiPicoElement } from './boards.js';
 
 const ELEMENTS = {
   'impulse-breadboard': BreadboardElement,
@@ -36,6 +37,7 @@ const ELEMENTS = {
   'impulse-tm1637': Tm1637Element,
   'impulse-stepper-28byj48': Stepper28byjElement,
   'impulse-l298n': L298nElement,
+  'impulse-pi-pico': PiPicoElement,
 };
 
 if (typeof customElements !== 'undefined') {

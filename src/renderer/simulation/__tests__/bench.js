@@ -1,18 +1,19 @@
 // Headless test bench: a board plus parts with fake elements, wired like a
 // diagram, running real firmware through the circuit engine.
-import { AvrRunner, F_CPU } from '../avr-runner.js';
+import { F_CPU } from '../avr-runner.js';
+import { createRunner } from '../runners.js';
 import { CircuitEngine } from '../engine.js';
 import { partDef } from '../parts/catalog.js';
 import { BOARDS } from '../boards.js';
 import { fakeElement } from '../headless.js';
 import { plugLinks } from '../diagram.js';
 
-const BOARD_TYPE = { uno: 'wokwi-arduino-uno', nano: 'wokwi-arduino-nano', mega: 'wokwi-arduino-mega' };
+const BOARD_TYPE = { uno: 'wokwi-arduino-uno', nano: 'wokwi-arduino-nano', mega: 'wokwi-arduino-mega', pico: 'impulse-pi-pico' };
 
 export class Bench {
   constructor(board = 'uno', { addBoard = true } = {}) {
     this.boardId = board;
-    this.runner = new AvrRunner();
+    this.runner = createRunner(board);
     this.engine = new CircuitEngine(this.runner);
     this.parts = [];
     this.wires = [];

@@ -14,6 +14,7 @@ import { attachPinInsights } from './pin-insights.js';
 import { attachBreakpoints } from './breakpoints.js';
 import { detectBaud, diffSerial, captureBoardSerial, renderCompareReport } from './compare.js';
 import { runHeadless } from './simulation/headless.js';
+import { programOf } from './simulation/runners.js';
 
 // UI State — exposed on window so other modules (validation.js, etc.) can access it
 // without relying on bundler scope-hoisting accidents.
@@ -997,7 +998,7 @@ async function compareSimulatorWithBoard() {
     if (!requireSketchAndBoard()) return;
     const simBoard = boardForFqbn(state.selectedBoard);
     if (!simBoard) {
-        logToConsole('The simulator runs the Arduino Uno, Nano and Mega 2560, so only those boards can be compared.', 'warning');
+        logToConsole('The simulator runs the Arduino Uno, Nano and Mega 2560 and the Raspberry Pi Pico, so only those boards can be compared.', 'warning');
         return;
     }
     if (!state.selectedPort) {
@@ -1020,7 +1021,7 @@ async function compareSimulatorWithBoard() {
     showOutputTab('tests');
     hardwareTestsRunning = true;
     try {
-        if (!await saveFile({ quiet: true })) return;
+        if (!await saveAllFiles()) return;
         const code = state.editor.getValue();
         const baud = detectBaud(code);
         container.innerHTML = '<p class="tests-hint">Running in the simulator…</p>';
@@ -1035,7 +1036,7 @@ async function compareSimulatorWithBoard() {
         }
         const context = simulationContext();
         const circuit = context.board === simBoard.id ? context.circuit : null;
-        const sim = await runHeadless(compiled.hex, { seconds: COMPARE_SECONDS, board: simBoard.id, circuit });
+        const sim = await runHeadless(programOf(compiled), { seconds: COMPARE_SECONDS, board: simBoard.id, circuit });
 
         if (mode === 'upload') {
             container.innerHTML = '<p class="tests-hint">Uploading to the board…</p>';

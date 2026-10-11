@@ -12,7 +12,6 @@ import { boardByTag, boardPinNumber, boardPowerPin, pinLabel, BOARDS } from './b
 import { PartContext, Behavior } from './parts/behavior.js';
 import { partDef } from './parts/catalog.js';
 
-const PULLUP_OHMS = 35000; // ATmega internal pull-up (datasheet: 20-50 kΩ)
 const NEIGHBOR_HOPS = 2;
 
 // RC stepping: each step aims at CAP_DV volts of change, within these bounds;
@@ -21,7 +20,9 @@ const CAP_DV = 0.02;
 const CAP_MIN_STEP = 20e-6;
 const CAP_MAX_STEP = 20e-3;
 const CAP_SETTLED = 1e-3;
-const THRESHOLD = 2.5; // volts: an input reads HIGH from here (see _settleIsland)
+
+/** Pin states that read the circuit (rather than drive it). */
+const isInputState = (st) => st === PinState.Input || st === PinState.InputPullUp || st === PinState.InputPullDown;
 
 export class CircuitEngine {
   /** @param {import('./avr-runner.js').AvrRunner} runner */
@@ -108,7 +109,8 @@ export class CircuitEngine {
           }
           const pw = boardPowerPin(n);
           if (pw?.kind === 'gnd') rails.gnd.push(n);
-          else if (pw?.kind === 'vcc' && pw.volts === 5 && !/^VIN/.test(n)) rails.vcc5.push(n);
+          // VIN (and the Pico's VSYS, behind a diode) are supply inputs, not the 5 V rail.
+          else if (pw?.kind === 'vcc' && pw.volts === 5 && !/^(VIN|VSYS)/.test(n)) rails.vcc5.push(n);
           else if (pw?.kind === 'vcc' && pw.volts === 3.3) rails.vcc33.push(n);
         }
         for (const group of Object.values(rails)) {
@@ -175,7 +177,7 @@ export class CircuitEngine {
     for (const [partId, beh] of this.behaviors) {
       for (const [pin, ohms] of beh.pullups() || []) {
         const net = circuit.netOf(`${partId}:${pin}`);
-        if (net >= 0) this._netPullups[net].push({ volts: 5, ohms, tag: `${partId}:${pin}` });
+        if (net >= 0) this._netPullups[net].push({ volts: board.logicVolts, ohms, tag: `${partId}:${pin}` });
       }
     }
     for (const [node, src] of this.drivers) this._indexDriver(node, src);
@@ -262,9 +264,11 @@ export class CircuitEngine {
     for (const r of this._netRails[net]) out.push(r);
     for (const p of this._netMcu[net]) {
       const st = this.runner.pinState(p);
-      if (st === PinState.High) out.push({ volts: 5, tag: pinLabel(this.board, p) });
-      else if (st === PinState.Low) out.push({ volts: 0, tag: pinLabel(this.board, p) });
-      else if (st === PinState.InputPullUp) out.push({ volts: 5, ohms: PULLUP_OHMS, tag: pinLabel(this.board, p) });
+      const board = this.board;
+      if (st === PinState.High) out.push({ volts: board.logicVolts, tag: pinLabel(board, p) });
+      else if (st === PinState.Low) out.push({ volts: 0, tag: pinLabel(board, p) });
+      else if (st === PinState.InputPullUp) out.push({ volts: board.logicVolts, ohms: board.pullupOhms, tag: pinLabel(board, p) });
+      else if (st === PinState.InputPullDown) out.push({ volts: 0, ohms: board.pulldownOhms, tag: pinLabel(board, p) });
     }
     const drivers = this._netDrivers.get(net);
     if (drivers) for (const [node, src] of drivers) out.push({ volts: src.volts, ohms: src.ohms, tag: node });
@@ -316,13 +320,13 @@ export class CircuitEngine {
     let crossing = Infinity;
     for (const p of this._islandMcu[island]) {
       const st = this.runner.pinState(p);
-      if (st !== PinState.Input && st !== PinState.InputPullUp) continue;
+      if (!isInputState(st)) continue;
       const net = this._mcuNet[p];
       const v = this._volts[net];
       const prev = this._capPinVolts.get(net);
       this._capPinVolts.set(net, v);
       if (!(dt > 0) || prev === undefined || !Number.isFinite(v) || !Number.isFinite(prev) || v === prev) continue;
-      const t = (THRESHOLD - v) / ((v - prev) / dt);
+      const t = (this.board.threshold - v) / ((v - prev) / dt);
       if (t > 0) crossing = Math.min(crossing, t);
     }
     if (dt > 0) {
@@ -390,10 +394,10 @@ export class CircuitEngine {
       const entry = this.board.byPin.get(p);
       const floating = this._floating[net];
       const v = this._volts[net];
-      if (st === PinState.Input || st === PinState.InputPullUp) {
+      if (isInputState(st)) {
         if (entry.port) {
           if (floating) runner.setPinFloating(p);
-          else runner.setInputPin(p, v >= THRESHOLD);
+          else runner.setInputPin(p, v >= this.board.threshold);
         }
       }
       if (entry.adc !== undefined) runner.setAnalogVoltage(entry.adc, floating ? 0 : v);
@@ -506,10 +510,10 @@ export class CircuitEngine {
       this._edges[p]++;
     }
     const net = this._mcuNet[p];
-    if (net < 0) return;
+    if (!(net >= 0)) return; // not a pin of this board
     const island = this.circuit.islandOf[net];
     this._dirty[island] = 1;
-    if (this._islandMcu[island].length > 1 || state === PinState.Input || state === PinState.InputPullUp || this._islandWatch[island]
+    if (this._islandMcu[island].length > 1 || isInputState(state) || this._islandWatch[island]
       || this.circuit.islandCapacitors[island].length) {
       this._settleIsland(island);
     } else if (this._resetNet >= 0 && island === this.circuit.islandOf[this._resetNet]) {

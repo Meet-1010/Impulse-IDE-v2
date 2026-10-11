@@ -3,7 +3,8 @@
 // circuit is given, its parts are simulated too (with stand-in elements), so
 // hardware tests and AI checks see sensors, buttons and displays.
 
-import { AvrRunner, F_CPU } from './avr-runner.js';
+import { F_CPU } from './avr-runner.js';
+import { createRunner } from './runners.js';
 import { boardById, pinLabel as boardPinLabel } from './boards.js';
 import { CircuitEngine } from './engine.js';
 import { partDef } from './parts/catalog.js';
@@ -51,7 +52,7 @@ export function headlessCircuit(runner, model) {
 }
 
 /**
- * @param {string} hex - Intel HEX program
+ * @param {string|Uint8Array} hex - the program: Intel HEX (AVR boards) or UF2 (Raspberry Pi Pico)
  * @param {{ seconds?: number, board?: string, signal?: AbortSignal, onProgress?: (simSeconds: number) => void,
  *   setup?: (runner: AvrRunner) => void, circuit?: object }} [options]
  * @returns {Promise<{ serial: string, trace: {pin: number, high: boolean, t: number}[], finalStates: boolean[],
@@ -59,7 +60,7 @@ export function headlessCircuit(runner, model) {
  */
 export async function runHeadless(hex, options = {}) {
   const seconds = Math.min(Math.max(options.seconds ?? 3, 0.05), 60);
-  const runner = new AvrRunner();
+  const runner = createRunner(options.board || 'uno');
   let serial = '';
   const trace = [];
   const shorts = [];
@@ -89,21 +90,21 @@ export async function runHeadless(hex, options = {}) {
 
   const target = Math.round(seconds * F_CPU);
   const frame = F_CPU / 100;
-  while (runner.cpu.cycles < target) {
+  while (runner.cycles < target) {
     if (options.signal?.aborted) throw new Error('Simulation cancelled');
-    const sliceEnd = Math.min(target, runner.cpu.cycles + SLICE_CYCLES);
-    while (runner.cpu.cycles < sliceEnd) {
-      runner.step(Math.min(frame, sliceEnd - runner.cpu.cycles));
+    const sliceEnd = Math.min(target, runner.cycles + SLICE_CYCLES);
+    while (runner.cycles < sliceEnd) {
+      runner.step(Math.min(frame, sliceEnd - runner.cycles));
       engine?.frame();
     }
-    options.onProgress?.(runner.cpu.cycles / F_CPU);
+    options.onProgress?.(runner.cycles / F_CPU);
     await new Promise(resolve => setTimeout(resolve, 0));
   }
   engine?.stop();
 
   const board = runner.board;
   const finalStates = Array.from({ length: board.pinCount }, (_, pin) => runner.getPinState(pin));
-  return { serial, trace, finalStates, simSeconds: runner.cpu.cycles / F_CPU, truncated, board: board.id, shorts };
+  return { serial, trace, finalStates, simSeconds: runner.cycles / F_CPU, truncated, board: board.id, shorts };
 }
 
 /** "D13" / "A0" for an Arduino pin on a board (Uno by default). */

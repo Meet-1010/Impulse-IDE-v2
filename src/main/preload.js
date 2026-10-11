@@ -177,6 +177,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   toolchain: {
     status: () => ipcRenderer.invoke('toolchain:status'),
     setup: () => ipcRenderer.invoke('toolchain:setup'),
+    extraCore: (key) => ipcRenderer.invoke('toolchain:extra-core', key),
+    installCore: (key) => ipcRenderer.invoke('toolchain:install-core', key),
     onProgress: (callback) => {
       const handler = (event, progress) => callback(progress);
       ipcRenderer.on('toolchain:progress', handler);

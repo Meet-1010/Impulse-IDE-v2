@@ -22,7 +22,7 @@ describe('parts catalog', () => {
   it('offers a wide range of parts in every category', () => {
     const count = (cat) => Object.values(PARTS).filter(p => p.category === cat).length;
     expect(Object.keys(PARTS).length).toBeGreaterThanOrEqual(70);
-    expect(count('Boards')).toBe(3);
+    expect(count('Boards')).toBe(4);
     expect(count('Sensors')).toBeGreaterThanOrEqual(20);
     expect(count('Displays')).toBeGreaterThanOrEqual(10);
   });

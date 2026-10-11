@@ -27,6 +27,31 @@ function register(ipcMain, ctx) {
     }
   }));
 
+  ipcMain.handle('toolchain:extra-core', withDebugLog('toolchain:extra-core', async (event, key) => {
+    try {
+      return { success: true, data: await toolchain.extraCore(String(key)) };
+    } catch (error) {
+      return { success: false, error: error?.message ?? 'Could not check the core' };
+    }
+  }));
+
+  let installing = null;
+  ipcMain.handle('toolchain:install-core', withDebugLog('toolchain:install-core', async (event, key) => {
+    if (installing) return installing; // one install at a time
+    installing = (async () => {
+      try {
+        const data = await toolchain.installExtraCore(String(key));
+        arduinoService.coreIndexed = false;
+        return { success: true, data };
+      } catch (error) {
+        return { success: false, error: error?.message ?? 'Install failed' };
+      } finally {
+        installing = null;
+      }
+    })();
+    return installing;
+  }));
+
   ipcMain.handle('toolchain:setup', withDebugLog('toolchain:setup', async () => {
     if (running) return running; // one setup at a time
     running = (async () => {

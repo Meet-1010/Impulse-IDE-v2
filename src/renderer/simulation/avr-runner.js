@@ -18,7 +18,7 @@ import {
   EEPROMMemoryBackend,
   AVRClock,
   AVRWatchdog,
-  PinState,
+  PinState as AvrPinState,
 } from 'avr8js';
 import { parseHex, hexImageSize } from './hex-loader.js';
 import { MCUS } from './mcu.js';
@@ -27,7 +27,8 @@ import { boardById } from './boards.js';
 export const F_CPU = 16_000_000; // 16 MHz on every supported board
 const CYCLES_PER_MS = F_CPU / 1000;
 
-export { PinState };
+/** avr8js pin states, plus InputPullDown for boards that have pull-downs (the RP2040). */
+export const PinState = Object.freeze({ ...AvrPinState, InputPullDown: 4 });
 
 /**
  * I²C bus shared by every device on SDA/SCL. Devices answer to a 7-bit address:

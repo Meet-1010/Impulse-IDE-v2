@@ -64,6 +64,11 @@ const defs = {
     keywords: ['mega', '2560', 'atmega2560', 'arduino', 'board', 'microcontroller', 'many pins', 'serial1'],
     description: 'ATmega2560 with 54 digital pins (15 PWM), 16 analog inputs, 4 hardware serial ports, I²C on 20/21 and SPI on 50-53.',
   },
+  'impulse-pi-pico': {
+    label: 'Raspberry Pi Pico', category: 'Boards', board: 'pico', behavior: BoardBehavior,
+    keywords: ['pico', 'raspberry pi pico', 'rpi pico', 'rp2040', 'raspberry', 'board', 'microcontroller', 'arm', 'cortex-m0', '3.3v', 'arduino-pico', 'earlephilhower'],
+    description: 'RP2040 board with 3.3 V logic: 26 GPIO (all PWM), analog inputs on GP26–GP28, I²C on GP4/GP5, SPI on GP16–GP19, Serial over USB and Serial1 on GP0/GP1. Compiles with the Arduino-Pico core. Its pins take at most 3.3 V.',
+  },
 
   // ── Breadboards ────────────────────────────────────────────────────────────
   'impulse-breadboard': {

@@ -127,3 +127,40 @@ jobs:
 
       - name: Build, simulate and debug a PlatformIO project
         run: IMPULSE_PIO_TESTS=1 npx jest src/main/services/__tests__/platformio.test.js
+
+  # The simulated Raspberry Pi Pico: Arduino-Pico firmware on rp2040js
+  # (src/renderer/simulation/__tests__/pico.test.js and the Pico examples).
+  pico:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup arduino-cli
+        uses: arduino/setup-arduino-cli@v2
+
+      - name: Cache board core downloads
+        uses: actions/cache@v6
+        with:
+          path: ~/.arduino15/staging
+          key: arduino-cores-avr-1.8.8-rp2040-6.3.0
+
+      - name: Install the AVR and Arduino-Pico cores
+        run: |
+          URL=https://github.com/earlephilhower/arduino-pico/releases/download/global/package_rp2040_index.json
+          arduino-cli core update-index --additional-urls "$URL"
+          arduino-cli core install arduino:avr@1.8.8 rp2040:rp2040@6.3.0 --additional-urls "$URL"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Pico tests and examples
+        run: |
+          npx jest src/renderer/simulation/__tests__/pico.test.js
+          npx jest src/renderer/simulation/__tests__/examples.test.js -t "pico-"

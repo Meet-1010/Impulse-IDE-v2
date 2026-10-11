@@ -5,7 +5,8 @@
 // The circuit belongs to the open sketch and is saved next to it as
 // diagram.json (Wokwi format). Without a saved sketch it lives in local storage.
 
-import { AvrRunner, F_CPU } from './avr-runner.js';
+import { F_CPU } from './avr-runner.js';
+import { createRunner, runnerFamily, programOf } from './runners.js';
 import { CircuitEngine, staticTopology } from './engine.js';
 import { CircuitCanvas } from './canvas.js';
 import { PARTS, partDef } from './parts/catalog.js';
@@ -46,7 +47,8 @@ const joinPath = (folder, name) => `${folder}${folder.includes('\\') && !folder.
 
 export class SimulationManager {
   constructor() {
-    this.runner = new AvrRunner();
+    this.runner = createRunner('uno');
+    this._runnerFamily = 'avr';
     this.engine = new CircuitEngine(this.runner);
     this.canvas = null;
     this.running = false;
@@ -316,14 +318,21 @@ export class SimulationManager {
       wires = remap.wires;
       report = remap;
       const idx = model.parts.findIndex(p => p.id === old.id);
-      model.parts[idx] = { ...model.parts[idx], type: target.tag, attrs: {}, ...this._boardSpot(model.parts[idx], old.type, target.tag, model.parts) };
+      // A board still named after its type ("uno") takes the new one's name ("pico").
+      const id = BOARDS[old.id] && !model.parts.some(p => p.id === target.id) ? target.id : old.id;
+      if (id !== old.id) {
+        const rename = (end) => (end.partId === old.id ? { ...end, partId: id } : end);
+        wires = wires.map(w => ({ ...w, from: rename(w.from), to: rename(w.to) }));
+      }
+      model.parts[idx] = { ...model.parts[idx], id, type: target.tag, attrs: {}, ...this._boardSpot(model.parts[idx], old.type, target.tag, model.parts) };
     } else {
       model.parts.unshift({ id: target.id, type: target.tag, x: 0, y: 160, rotate: 0, attrs: {} });
     }
     this._applyModel({ parts: model.parts, wires }, { record: true });
     if (!quiet) {
       const bits = [`Switched to ${target.label}.`];
-      if (report?.moved.length) bits.push(`Moved I²C wires (${[...new Set(report.moved)].join(', ')}).`);
+      const moved = [...new Set(report?.moved || [])];
+      if (moved.length) bits.push(`Moved wires to the matching pins (${moved.slice(0, 4).join(', ')}${moved.length > 4 ? ` and ${moved.length - 4} more` : ''}).`);
       if (report?.dropped.length) bits.push(`Removed ${report.dropped.length} wire${report.dropped.length === 1 ? '' : 's'} on pins the ${target.short} doesn't have.`);
       this.toast(bits.join(' '), report?.dropped.length ? 'warn' : 'info');
     }
@@ -369,7 +378,7 @@ export class SimulationManager {
     const dismiss = h('button', { type: 'button', class: 'sim-icon-btn', 'aria-label': 'Dismiss' }, icon('close', 13));
     dismiss.addEventListener('click', () => { this._noticeDismissed = fqbn; this.notice.hidden = true; });
     if (!target) {
-      this.notice.append(icon('info', 15), h('span', {}, `${name} can't be simulated yet, so the simulator runs your sketch on the ${this.board.label}. Uno, Nano and Mega 2560 are supported.`), dismiss);
+      this.notice.append(icon('info', 15), h('span', {}, `${name} can't be simulated yet, so the simulator runs your sketch on the ${this.board.label}. The Uno, Nano, Mega 2560 and Raspberry Pi Pico are supported.`), dismiss);
       this.notice.hidden = false;
       return;
     }
@@ -1066,7 +1075,7 @@ export class SimulationManager {
       this._compileFailed(result);
       return;
     }
-    if (!this._load(result.hex, board)) return;
+    if (!this._load(programOf(result), board)) return;
     this._systemLine(`Running on ${board.label}.`, 'success');
     this.runner.start();
     this._started();
@@ -1101,12 +1110,24 @@ export class SimulationManager {
     if (consoleEl) consoleEl.appendChild(h('div', { class: 'console-error' }, result.error || 'Compilation failed'));
   }
 
-  /** Load a program and the circuit; false when the program doesn't fit the board. */
-  _load(hex, board) {
+  /** The board's runner (avr8js or rp2040js), swapped in when the chip family changes. */
+  _runnerFor(board) {
+    const family = runnerFamily(board.id);
+    if (family === this._runnerFamily) return;
+    this.runner.stop();
+    this.runner = createRunner(board.id);
+    this._runnerFamily = family;
+    this.engine.runner = this.runner;
+    this._bindRunner();
+  }
+
+  /** Load a program (HEX, or UF2 for the Pico) and the circuit; false when it can't run on the board. */
+  _load(program, board) {
+    this._runnerFor(board);
     this._clearSerial();
     this._shorts = [];
     this.canvas.wires.forEach(w => w.groupEl.classList.remove('short'));
-    if (!this.runner.load(hex, board.id)) {
+    if (!this.runner.load(program, board.id)) {
       this._setState('idle');
       return false;
     }
@@ -1136,6 +1157,10 @@ export class SimulationManager {
       return;
     }
     if (this.running) this.stop();
+    if (runnerFamily(this.board.id) !== 'avr') {
+      this.toast(`The debugger runs the Uno, Nano and Mega 2560 for now. Press ▶ to simulate the ${this.board.label}.`, 'info');
+      return;
+    }
     const sketchPath = await this._prepareRun();
     if (!sketchPath) return;
     const board = this.board;
@@ -1162,7 +1187,7 @@ export class SimulationManager {
       this.debugPane.idle(this._breakpointList());
       return;
     }
-    if (!this._load(result.hex, board)) return;
+    if (!this._load(programOf(result), board)) return;
     const dbg = new Debugger(this.runner, info, {
       sketchDirs: result.sketchDirs,
       remap: (result.buildSketchDirs || []).map(b => [b, result.sketchDirs[0]]),
@@ -1338,6 +1363,13 @@ export class SimulationManager {
     } catch (err) {
       return { success: false, error: err.message };
     }
+    if (!result.success && result.missingCore) {
+      if (!await this._installCore(result.missingCore, board)) {
+        return { success: false, error: `The ${board.label} core isn't installed, so the sketch can't be compiled for it yet.` };
+      }
+      this._systemLine('Compiling again…', 'info');
+      result = await window.electronAPI.arduino.compileHex(sketchPath, board.fqbn);
+    }
     if (!result.success) {
       const lib = this._detectMissingLibrary(result.error || '');
       if (lib) {
@@ -1357,6 +1389,33 @@ export class SimulationManager {
       }
     }
     return result;
+  }
+
+  /** Ask to install a board core the simulator needs (the Pico's), with progress in the notice bar. */
+  async _installCore(key, board) {
+    const info = await window.electronAPI.toolchain?.extraCore?.(key).catch(() => null);
+    if (!info?.success) return false;
+    if (info.data.installed) return true;
+    const { label, size } = info.data;
+    const ok = await confirmDialog(`Install ${label}?`,
+      `Compiling for the ${board.label} needs ${label}: a one-time download of ${size}. Impulse installs it with arduino-cli, as Arduino IDE's Boards Manager does.`,
+      { confirmLabel: 'Install' });
+    if (!ok) return false;
+    const text = h('span', { role: 'status' }, `Installing ${label}…`);
+    this.notice.replaceChildren(icon('download', 15), text);
+    this.notice.hidden = false;
+    const stop = window.electronAPI.toolchain.onProgress((p) => {
+      text.textContent = p.percent === null ? p.message : `${p.message} ${p.percent}%`;
+    });
+    const res = await window.electronAPI.toolchain.installCore(key).catch(e => ({ success: false, error: e.message }));
+    stop?.();
+    this.notice.hidden = true;
+    if (!res?.success) {
+      this._systemLine(`Could not install ${label}: ${res?.error || 'unknown error'}`, 'error');
+      return false;
+    }
+    this._systemLine(`${label} installed.`, 'success');
+    return true;
   }
 
   restart() {
@@ -1621,7 +1680,7 @@ export class SimulationManager {
           return;
         }
         this._agentLog('Compiled. Running the simulation to observe behavior…');
-        const obs = await this._captureRun(comp.hex, 3);
+        const obs = await this._captureRun(programOf(comp), 3);
         this._agentLog(`Pins: ${obs.pins}`);
         const firstLine = (obs.serial.split('\n').find(l => l.trim()) || '(no serial output)').slice(0, 80);
         this._agentLog(`Serial: ${firstLine}${obs.serial.length > 80 ? ' …' : ''}`);
@@ -1650,11 +1709,12 @@ export class SimulationManager {
     }
   }
 
-  async _captureRun(hex, seconds) {
+  async _captureRun(program, seconds) {
     this._captureBuf = '';
     this._pinActivity = {};
     this._capturing = true;
-    if (!this.runner.load(hex, this.board.id)) return { serial: '', pins: 'failed to load' };
+    this._runnerFor(this.board);
+    if (!this.runner.load(program, this.board.id)) return { serial: '', pins: 'failed to load' };
     this.engine.setModel(this._engineModel());
     this.engine.start();
     this.running = true;
@@ -1679,7 +1739,7 @@ export class SimulationManager {
     try {
       const res = await window.electronAPI.ai.verifyExecution({
         ...obs,
-        board: `${this.board.label} (${this.board.mcu === 'atmega2560' ? 'ATmega2560' : 'ATmega328P'})`,
+        board: `${this.board.label} (${{ atmega2560: 'ATmega2560', rp2040: 'RP2040, 3.3 V logic' }[this.board.mcu] || 'ATmega328P'})`,
         circuit: this._wiringSummary(),
       });
       if (!res || !res.success) {

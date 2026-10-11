@@ -44,9 +44,32 @@ const runtime = [
     note: 'Not bundled. When no arduino-cli is installed, Impulse downloads the official release into its data folder on request and runs it as a separate program; its LICENSE.txt is kept next to it. Board cores and libraries it installs carry their own licenses.',
   },
   {
+    name: 'Arduino-Pico core (rp2040:rp2040)', version: 'latest', license: 'LGPL-2.1',
+    homepage: 'https://github.com/earlephilhower/arduino-pico',
+    note: 'Not bundled. Installed through arduino-cli when you simulate a Raspberry Pi Pico for the first time and agree to the download; it brings its own toolchains and licenses.',
+  },
+  {
     name: 'Electron', version: self.devDependencies.electron.replace(/^[^\d]*/, ''), license: 'MIT',
     homepage: 'https://www.electronjs.org',
     note: 'The app runtime. The licenses of Chromium and its components ship inside the app as LICENSES.chromium.html.',
+  },
+];
+
+// Files in the app that don't come from npm.
+const bundled = [
+  {
+    name: 'RP2040 boot ROM (B1)', license: 'BSD-3-Clause',
+    homepage: 'https://github.com/raspberrypi/pico-bootrom',
+    file: 'src/renderer/simulation/rp2040/bootrom.js',
+    text: `Copyright (c) 2020 Raspberry Pi (Trading) Ltd.
+
+Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer.
+2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the documentation and/or other materials provided with the distribution.
+3. Neither the name of the copyright holder nor the names of its contributors may be used to endorse or promote products derived from this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.`,
   },
 ];
 
@@ -58,6 +81,9 @@ const lines = [
   '## Downloaded or provided at runtime',
   '',
   ...runtime.flatMap(r => [`### ${r.name} ${r.version} (${r.license})`, '', r.homepage, '', r.note, '']),
+  '## Files included in the app',
+  '',
+  ...bundled.flatMap(b => [`### ${b.name} (${b.license})`, '', `${b.homepage} · \`${b.file}\``, '', '```', b.text, '```', '']),
   '## Packages included in the app',
   '',
   '| Package | Version | License |',

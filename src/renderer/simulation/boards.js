@@ -1,10 +1,15 @@
 // Simulated boards. Pin tables follow the Arduino AVR core's pins_arduino.h
-// (variants/standard, eightanaloginputs and mega).
+// (variants/standard, eightanaloginputs and mega) and, for the Raspberry Pi
+// Pico, the Arduino-Pico core (variants/rpipico).
 //
 // Every board numbers its pins like the Arduino core does: digital pins first,
 // then A0.. as digital pins (Uno A0 = 14, Mega A0 = 54). Pins that exist only
 // as analog inputs (Nano A6/A7) get numbers after the last digital pin and no
-// port.
+// port. On the Pico a pin number is its GPIO number (A0 = GP26).
+//
+// Electrical levels per board: logicVolts (an output HIGH), threshold (an
+// input reads HIGH from here), pull-up/down resistance, ADC reference, and the
+// most a pin may see (maxPinVolts).
 
 const range = (from, to) => Array.from({ length: to - from + 1 }, (_, i) => from + i);
 
@@ -37,6 +42,15 @@ const MEGA_PORTS = [
 const PINS_2560 = MEGA_PORTS.map((pb, n) => pin(n, pb[0], Number(pb[1]),
   n >= 54 ? { adc: n - 54, analog: `A${n - 54}` } : {}));
 
+// ── RP2040 (Raspberry Pi Pico) ──────────────────────────────────────────────
+
+// GP0–GP22 and GP26–GP28 reach the header; GP25 is the LED.
+const PICO_GPIO = [...range(0, 22), 25, 26, 27, 28];
+const PINS_PICO = PICO_GPIO.map(n => pin(n, 'GPIO', n, n >= 26 ? { adc: n - 26, analog: `A${n - 26}` } : {}));
+const PICO_ALIASES = Object.fromEntries(PICO_GPIO.map(n => [`GP${n}`, n >= 26 ? `A${n - 26}` : String(n)]));
+
+const AVR_LEVELS = { logicVolts: 5, threshold: 2.5, pullupOhms: 35000, pulldownOhms: null, adcRef: 5, maxPinVolts: 5 };
+
 /**
  * @typedef {object} BoardProfile
  * @property {string} id
@@ -66,6 +80,7 @@ export const BOARDS = {
     interrupts: [2, 3],
     aliases: { 'A4.2': 'A4', 'A5.2': 'A5' },
     description: 'ATmega328P · 14 digital pins · 6 analog inputs',
+    ...AVR_LEVELS,
   },
   nano: {
     id: 'nano',
@@ -83,6 +98,7 @@ export const BOARDS = {
     interrupts: [2, 3],
     aliases: { '11.2': '11', '12.2': '12', '13.2': '13' },
     description: 'ATmega328P · 14 digital pins · 8 analog inputs · breadboard friendly',
+    ...AVR_LEVELS,
   },
   mega: {
     id: 'mega',
@@ -100,17 +116,44 @@ export const BOARDS = {
     interrupts: [2, 3, 18, 19, 20, 21],
     aliases: { SDA: '20', SCL: '21' },
     description: 'ATmega2560 · 54 digital pins · 16 analog inputs · 4 serial ports',
+    ...AVR_LEVELS,
+  },
+  pico: {
+    id: 'pico',
+    label: 'Raspberry Pi Pico',
+    short: 'Pico',
+    tag: 'impulse-pi-pico',
+    fqbn: 'rp2040:rp2040:rpipico',
+    mcu: 'rp2040',
+    family: 'rp2040',
+    pins: PINS_PICO,
+    pwm: PICO_GPIO,
+    ledBuiltin: 25,
+    i2c: { sda: 4, scl: 5 },
+    spi: { miso: 16, ss: 17, sck: 18, mosi: 19 },
+    // Serial is the USB port; Serial1 and Serial2 are UART0 and UART1.
+    serial: [null, { tx: 0, rx: 1 }, { tx: 8, rx: 9 }],
+    interrupts: PICO_GPIO,
+    aliases: PICO_ALIASES,
+    pinPrefix: 'GP',
+    description: 'RP2040 · dual Cortex-M0+ at up to 200 MHz · 26 GPIO · 3 analog inputs · 3.3 V logic',
+    logicVolts: 3.3,
+    threshold: 1.65,
+    pullupOhms: 50000,
+    pulldownOhms: 50000,
+    adcRef: 3.3,
+    maxPinVolts: 3.3,
   },
 };
 
-export const BOARD_ORDER = ['uno', 'nano', 'mega'];
+export const BOARD_ORDER = ['uno', 'nano', 'mega', 'pico'];
 export const DEFAULT_BOARD = 'uno';
 
 for (const board of Object.values(BOARDS)) {
   board.byPin = new Map(board.pins.map(p => [p.pin, p]));
   board.byAnalog = new Map(board.pins.filter(p => p.analog).map(p => [p.analog, p]));
   board.pinCount = Math.max(...board.pins.map(p => p.pin)) + 1;
-  board.digitalCount = board.pins.filter(p => p.port && !p.analog).length;
+  board.digitalCount = board.pins.filter(p => p.port && (board.pinPrefix || !p.analog)).length;
   board.pwmSet = new Set(board.pwm);
 }
 
@@ -134,6 +177,7 @@ export function boardForFqbn(fqbn) {
     return /cpu=atmega168|cpu=atmega8\b/.test(fqbn) ? null : BOARDS.nano;
   }
   if (/^arduino:avr:(uno|unomini|ethernet|duemilanove|diecimila)(:|$)/.test(fqbn)) return BOARDS.uno;
+  if (/^rp2040:rp2040:rpipico(:|$)/.test(fqbn)) return BOARDS.pico;
   return null;
 }
 
@@ -148,7 +192,7 @@ export function boardPinNumber(board, name) {
   if (/^\d+$/.test(key)) {
     const n = Number(key);
     const entry = board.byPin.get(n);
-    return entry && entry.port && !entry.analog ? n : null;
+    return entry && entry.port && (board.pinPrefix || !entry.analog) ? n : null;
   }
   const analog = board.byAnalog.get(key);
   return analog ? analog.pin : null;
@@ -162,6 +206,13 @@ const POWER_PINS = {
   VIN: { kind: 'vcc', volts: 5 },
   '3.3V': { kind: 'vcc', volts: 3.3 },
   RESET: { kind: 'reset' },
+  // Raspberry Pi Pico
+  '3V3': { kind: 'vcc', volts: 3.3 },
+  ADC_VREF: { kind: 'vcc', volts: 3.3 },
+  VBUS: { kind: 'vcc', volts: 5 },
+  VSYS: { kind: 'vcc', volts: 5 },
+  AGND: { kind: 'gnd', volts: 0 },
+  RUN: { kind: 'reset' },
 };
 
 /** Header pin name without its duplicate suffix: "GND.2" → "GND". */
@@ -174,6 +225,7 @@ export function boardPowerPin(name) {
 
 /** "D13" / "A0" for an Arduino pin number. */
 export function pinLabel(board, n) {
+  if (board?.pinPrefix) return `${board.pinPrefix}${n}`;
   const entry = board?.byPin.get(n);
   if (entry?.analog) return entry.analog;
   return `D${n}`;
@@ -192,7 +244,12 @@ export function parseBoardPin(board, ref) {
   if (s === 'MISO') return board.spi.miso;
   if (s === 'SCK') return board.spi.sck;
   if (s === 'SS') return board.spi.ss;
-  let m = /^D?(\d{1,2})$/.exec(s);
+  let m = board.pinPrefix ? /^GP(\d{1,2})$/.exec(s) : null;
+  if (m) {
+    const n = Number(m[1]);
+    return board.byPin.has(n) ? n : null;
+  }
+  m = /^D?(\d{1,2})$/.exec(s);
   if (m) {
     const n = Number(m[1]);
     return board.byPin.has(n) ? n : null;

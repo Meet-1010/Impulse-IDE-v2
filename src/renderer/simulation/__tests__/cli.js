@@ -19,6 +19,23 @@ function findCliWithAvrCore() {
 
 export const CLI = findCliWithAvrCore();
 
+// Raspberry Pi Pico tests need the Arduino-Pico core. IMPULSE_PICO_CLI_CONFIG
+// points arduino-cli at a configuration that has it (so it needn't be installed
+// globally); otherwise arduino-cli's own configuration is used.
+const PICO_CONFIG = process.env.IMPULSE_PICO_CLI_CONFIG ? ['--config-file', process.env.IMPULSE_PICO_CLI_CONFIG] : [];
+const isPico = (fqbn) => fqbn.startsWith('rp2040:');
+
+function hasPicoCore() {
+  if (!CLI) return false;
+  try {
+    return execFileSync(CLI, [...PICO_CONFIG, 'core', 'list'], { stdio: 'pipe' }).toString().includes('rp2040:rp2040');
+  } catch {
+    return false;
+  }
+}
+
+export const PICO = hasPicoCore();
+
 const cache = new Map();
 
 // Extra library folders (path-separated) for libraries that aren't installed
@@ -27,16 +44,19 @@ const EXTRA_LIBS = (process.env.IMPULSE_TEST_LIBRARIES || '').split(path.delimit
 
 const CACHE_DIR = path.join(os.tmpdir(), 'impulse-test-hex-cache');
 
-/** Compile `code` for `fqbn` and return the application HEX (cached on disk by content). */
+/**
+ * Compile `code` for `fqbn` (cached on disk by content): the application HEX
+ * text for AVR boards, the UF2 bytes for the Raspberry Pi Pico.
+ */
 export function compileSketch(code, fqbn = 'arduino:avr:uno', name = 'sketch') {
   const key = `${fqbn}\n${EXTRA_LIBS.join(path.delimiter)}\n${code}`;
   if (cache.has(key)) return cache.get(key);
   const digest = crypto.createHash('sha1').update(key).digest('hex');
-  const cached = path.join(CACHE_DIR, `${digest}.hex`);
+  const cached = path.join(CACHE_DIR, `${digest}.${isPico(fqbn) ? 'uf2' : 'hex'}`);
   if (fs.existsSync(cached)) {
-    const hex = fs.readFileSync(cached, 'utf8');
-    cache.set(key, hex);
-    return hex;
+    const program = isPico(fqbn) ? new Uint8Array(fs.readFileSync(cached)) : fs.readFileSync(cached, 'utf8');
+    cache.set(key, program);
+    return program;
   }
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'impulse-compile-'));
   const sketchDir = path.join(dir, name);
@@ -46,8 +66,10 @@ export function compileSketch(code, fqbn = 'arduino:avr:uno', name = 'sketch') {
   let hex;
   try {
     const libs = EXTRA_LIBS.flatMap(lib => ['--libraries', lib]);
-    execFileSync(CLI, ['compile', '--fqbn', fqbn, ...libs, '--output-dir', outDir, sketchDir], { stdio: 'pipe' });
-    hex = fs.readFileSync(path.join(outDir, `${name}.ino.hex`), 'utf8');
+    execFileSync(CLI, [...(isPico(fqbn) ? PICO_CONFIG : []), 'compile', '--fqbn', fqbn, ...libs, '--output-dir', outDir, sketchDir], { stdio: 'pipe' });
+    hex = isPico(fqbn)
+      ? new Uint8Array(fs.readFileSync(path.join(outDir, `${name}.ino.uf2`)))
+      : fs.readFileSync(path.join(outDir, `${name}.ino.hex`), 'utf8');
   } catch (err) {
     throw new Error(`Compile failed for ${fqbn}:\n${err.stderr?.toString() || err.message}`);
   } finally {
@@ -80,3 +102,4 @@ export function installedLibraries() {
 }
 
 export const describeWithCli = CLI ? describe : describe.skip;
+export const describeWithPico = PICO ? describe : describe.skip;

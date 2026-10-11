@@ -625,7 +625,8 @@ class ArduinoService {
         sketchPath,
       ];
 
-      const proc = spawn(this.cliPath, args, { cwd: path.dirname(sketchPath), timeout: 120000 });
+      // The first build for a Pico compiles its whole core.
+      const proc = spawn(this.cliPath, args, { cwd: path.dirname(sketchPath), timeout: /^rp2040:/.test(boardFQBN) ? 600000 : 120000 });
       let stderr = '';
 
       proc.stderr.on('data', d => { stderr += d.toString(); });
@@ -633,11 +634,21 @@ class ArduinoService {
       proc.on('close', (code) => {
         if (code !== 0) {
           fs.rmSync(outputDir, { recursive: true, force: true });
-          resolve({ success: false, error: ArduinoService.explainToolchainError(stderr) || stderr });
+          // A simulated board whose core isn't installed yet: the simulator offers to install it.
+          const missingCore = /^rp2040:/.test(boardFQBN) && /platform not installed|Platform '.+' not found/i.test(stderr) ? 'pico' : undefined;
+          resolve({ success: false, error: ArduinoService.explainToolchainError(stderr) || stderr, missingCore });
+          return;
+        }
+        const files = fs.readdirSync(outputDir);
+        // RP2040 boards: the UF2 flash image.
+        if (/^rp2040:/.test(boardFQBN)) {
+          const uf2File = files.find(f => f.endsWith('.uf2'));
+          const uf2 = uf2File ? new Uint8Array(fs.readFileSync(path.join(outputDir, uf2File))) : null;
+          fs.rmSync(outputDir, { recursive: true, force: true });
+          resolve(uf2 ? { success: true, uf2 } : { success: false, error: 'No .uf2 output found' });
           return;
         }
         // The application image, not the copy merged with the bootloader.
-        const files = fs.readdirSync(outputDir);
         const hexFile = files.find(f => f.endsWith('.hex') && !f.endsWith('.with_bootloader.hex'));
         if (!hexFile) {
           fs.rmSync(outputDir, { recursive: true, force: true });

@@ -32,11 +32,12 @@ diagram.json, and checks the "// @expect" lines in its source.
 A <sketch> is a sketch folder, its .ino file, or a folder of sketches.
 
 Options:
-  --board <uno|nano|mega>  Board to simulate (default: the board in diagram.json, else uno)
+  --board <uno|nano|mega|pico>  Board to simulate (default: the board in diagram.json, else uno)
   --fqbn <fqbn>            Compile for this FQBN (must be a board the simulator runs)
   --seconds <n>            Simulated time per sketch, overriding "// @run" (max ${MAX_SECONDS})
   --expect <line>          Extra expectation for every sketch, e.g. --expect 'pin 13 toggles'
-  --hex <file>             Test a prebuilt HEX instead of compiling (one sketch, or none with --expect)
+  --hex <file>             Test a prebuilt program instead of compiling: a .hex (AVR) or a .uf2/.bin
+                           (Pico); one sketch, or none with --expect
   --diagram <file>         Circuit to use instead of the sketch's diagram.json
   --strict                 Also fail on wiring errors found by the circuit check
   --format <human|json|junit>  What to print (default: human)
@@ -239,13 +240,17 @@ export async function compile(cli, sketch, fqbn, libraries = []) {
     if (!res.ok) {
       const text = `${res.stderr}\n${res.stdout}`;
       if (/platform not installed|Platform '[^']+' not found|unknown package/i.test(text)) {
-        throw new SetupError(`arduino-cli has no core for ${fqbn}. Install it with: arduino-cli core install ${fqbn.split(':').slice(0, 2).join(':')}`);
+        const core = fqbn.split(':').slice(0, 2).join(':');
+        const url = core === 'rp2040:rp2040' ? ' --additional-urls https://github.com/earlephilhower/arduino-pico/releases/download/global/package_rp2040_index.json' : '';
+        throw new SetupError(`arduino-cli has no core for ${fqbn}. Install it with: arduino-cli core install ${core}${url}`);
       }
       throw new Error(res.killed ? 'Compiling took longer than 15 minutes' : compilerError(text, sketch.dir));
     }
-    const hex = path.join(out, `${sketch.name}.ino.hex`);
-    if (!isFile(hex)) throw new Error(`arduino-cli did not produce ${sketch.name}.ino.hex`);
-    return fs.readFileSync(hex, 'utf8');
+    // AVR boards: the HEX text; the Raspberry Pi Pico: the UF2 image.
+    const pico = /^rp2040:/.test(fqbn);
+    const file = path.join(out, `${sketch.name}.ino.${pico ? 'uf2' : 'hex'}`);
+    if (!isFile(file)) throw new Error(`arduino-cli did not produce ${path.basename(file)}`);
+    return pico ? new Uint8Array(fs.readFileSync(file)) : fs.readFileSync(file, 'utf8');
   } finally {
     fs.rmSync(out, { recursive: true, force: true });
   }
@@ -296,7 +301,8 @@ export async function testSketch(sketch, opts, { cli, onStage = () => {} } = {})
     const circuitBoard = diagramBoard(model);
     const asked = opts.board || (opts.fqbn && boardForFqbn(opts.fqbn).id) || null;
     if (asked && circuitBoard && asked !== circuitBoard) {
-      return finish('error', `diagram.json is built around an ${BOARDS[circuitBoard].label}, but the test asks for an ${BOARDS[asked].label}`);
+      const a = (label) => `${/^[AEIOU]/i.test(label) ? 'an' : 'a'} ${label}`;
+      return finish('error', `diagram.json is built around ${a(BOARDS[circuitBoard].label)}, but the test asks for ${a(BOARDS[asked].label)}`);
     }
     const board = BOARDS[asked || circuitBoard || 'uno'];
     entry.board = board.id;
@@ -327,7 +333,7 @@ export async function testSketch(sketch, opts, { cli, onStage = () => {} } = {})
     let hex;
     if (opts.hex) {
       if (!isFile(opts.hex)) throw new UsageError(`${opts.hex} does not exist`);
-      hex = fs.readFileSync(opts.hex, 'utf8');
+      hex = /\.(uf2|bin)$/i.test(opts.hex) ? new Uint8Array(fs.readFileSync(opts.hex)) : fs.readFileSync(opts.hex, 'utf8');
     } else {
       onStage('compile', entry);
       try {

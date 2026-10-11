@@ -7,7 +7,7 @@ import { parseExpectations, evaluateExpectations } from '../expectations.js';
 import { BOARDS } from '../boards.js';
 import { partDef } from '../parts/catalog.js';
 import { Bench } from './bench.js';
-import { compileSketch, describeWithCli, installedLibraries } from './cli.js';
+import { compileSketch, describeWithCli, installedLibraries, PICO } from './cli.js';
 
 const LIBS = installedLibraries();
 const lcdText = (b, id) => String.fromCharCode(...(b.part(id).el.characters || []));
@@ -100,6 +100,22 @@ const CHECKS = {
   },
   'dc-motor': { run: 1.0, check: (b) => expect(b.behavior('motor1').rpm).toBeGreaterThan(20) },
   'shift-register': { run: 0.2, check: (b) => expect(b.part('seg1').el.values.slice(0, 7)).toEqual([1, 1, 1, 1, 1, 1, 0]) },
+  'pico-blink': {
+    run: 1.2,
+    check: (b) => {
+      expect(b.trace(25).length).toBeGreaterThanOrEqual(4);
+      expect(b.trace(15).length).toBeGreaterThanOrEqual(4);
+      expect(b.serial).toContain('Blink 2');
+    },
+  },
+  'pico-dimmer': {
+    run: 0.5,
+    check: (b) => {
+      const reading = Number(b.lines().slice(-1)[0].replace('Reading: ', ''));
+      expect(Math.abs(reading - 512)).toBeLessThan(12);
+      expect(Math.abs(b.part('led1').el.brightness - reading / 1023)).toBeLessThan(0.1);
+    },
+  },
   'mega-wave': { run: 0.4, check: (b) => expect([1, 2, 3, 4, 5, 6, 7, 8].filter(i => b.part(`led${i}`).el.value)).toHaveLength(1) },
   'nano-breadboard': {
     run: 0.3, actions: [[0.1, press('btn1')]],
@@ -209,7 +225,8 @@ describe('examples catalog', () => {
 describeWithCli('every example runs on its circuit (needs arduino-cli)', () => {
   for (const ex of EXAMPLES) {
     const missing = (ex.libraries || []).filter(l => !LIBS.has(l.toLowerCase()));
-    (missing.length ? it.skip : it)(`${ex.id}: ${ex.title}`, () => {
+    // Pico examples need the Arduino-Pico core (see cli.js).
+    (missing.length || (ex.board === 'pico' && !PICO) ? it.skip : it)(`${ex.id}: ${ex.title}`, () => {
       const hex = compileSketch(ex.code, BOARDS[ex.board].fqbn, ex.id.replace(/-/g, '_'));
       const b = new Bench(ex.board, { addBoard: false });
       b.addModel(ex.circuit());
@@ -229,16 +246,17 @@ describeWithCli('every example runs on its circuit (needs arduino-cli)', () => {
 
 describeWithCli('example hardware tests pass in the headless runner', () => {
   for (const ex of EXAMPLES) {
-    const { items, errors } = parseExpectations(ex.code);
+    const { items, errors } = parseExpectations(ex.code, ex.board);
     if (!items.length) continue;
     const missing = (ex.libraries || []).filter(l => !LIBS.has(l.toLowerCase()));
-    (missing.length ? it.skip : it)(`${ex.id} @expect lines`, async () => {
+    // Pico examples need the Arduino-Pico core (see cli.js).
+    (missing.length || (ex.board === 'pico' && !PICO) ? it.skip : it)(`${ex.id} @expect lines`, async () => {
       const { runHeadless } = await import('../headless.js');
       expect(errors).toEqual([]);
       const hex = compileSketch(ex.code, BOARDS[ex.board].fqbn, ex.id.replace(/-/g, '_'));
-      const { seconds } = parseExpectations(ex.code);
+      const { seconds } = parseExpectations(ex.code, ex.board);
       const run = await runHeadless(hex, { seconds, board: ex.board, circuit: ex.circuit() });
-      const results = evaluateExpectations(items, run);
+      const results = evaluateExpectations(items, run, ex.board);
       for (const r of results) expect({ check: r.raw, pass: r.pass, detail: r.detail }).toMatchObject({ pass: true });
     }, 120000);
   }
