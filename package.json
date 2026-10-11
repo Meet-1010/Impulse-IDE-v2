@@ -106,6 +106,7 @@
       "!**/*.map",
       "!node_modules/@wokwi/**",
       "!node_modules/avr8js/**",
+      "!node_modules/rp2040js/**",
       "!node_modules/codemirror/**",
       "!node_modules/@fontsource-variable/**",
       "!node_modules/lit/**",
