@@ -1,7 +1,7 @@
 // Registers the parts Impulse draws itself (everything not in @wokwi/elements).
 
 import { BreadboardElement } from './breadboard.js';
-import { HC595Element, L293DElement, Lm35Element, NpnElement, A4988Element, LdrElement, ReedSwitchElement, Dht11Element, Ds18b20Element } from './chips.js';
+import { HC595Element, L293DElement, Attiny85Element, Lm35Element, NpnElement, A4988Element, LdrElement, ReedSwitchElement, Dht11Element, Ds18b20Element } from './chips.js';
 import { Max7219MatrixElement, RelayModuleElement, DcMotorElement, SensorModuleElement } from './modules.js';
 import { BatteryElement, DiodeElement, CapacitorElement, MosfetElement } from './power.js';
 import { AndGateElement, NandGateElement, OrGateElement, NorGateElement, XorGateElement, NotGateElement, FlipFlopDElement } from './logic.js';
@@ -38,6 +38,7 @@ const ELEMENTS = {
   'impulse-stepper-28byj48': Stepper28byjElement,
   'impulse-l298n': L298nElement,
   'impulse-pi-pico': PiPicoElement,
+  'impulse-attiny85': Attiny85Element,
 };
 
 if (typeof customElements !== 'undefined') {

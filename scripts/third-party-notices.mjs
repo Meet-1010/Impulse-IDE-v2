@@ -49,6 +49,11 @@ const runtime = [
     note: 'Not bundled. Installed through arduino-cli when you simulate a Raspberry Pi Pico for the first time and agree to the download; it brings its own toolchains and licenses.',
   },
   {
+    name: 'ATTinyCore (ATTinyCore:avr)', version: 'latest', license: 'LGPL-2.1',
+    homepage: 'https://github.com/SpenceKonde/ATTinyCore',
+    note: 'Not bundled. Installed through arduino-cli when you simulate an ATtiny85 for the first time and agree to the download; it uses the AVR compiler of the Arduino AVR core.',
+  },
+  {
     name: 'Electron', version: self.devDependencies.electron.replace(/^[^\d]*/, ''), license: 'MIT',
     homepage: 'https://www.electronjs.org',
     note: 'The app runtime. The licenses of Chromium and its components ship inside the app as LICENSES.chromium.html.',

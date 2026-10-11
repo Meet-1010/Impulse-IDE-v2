@@ -1,4 +1,4 @@
-// AVR runner: one simulated board (Uno, Nano or Mega 2560) built on avr8js.
+// AVR runner: one simulated board (Uno, Nano, Mega 2560 or ATtiny85) built on avr8js.
 //
 // The runner owns the CPU and its peripherals and exposes a small surface to
 // the rest of the simulator: pin states and edges, external drive of input
@@ -20,6 +20,8 @@ import {
   AVRWatchdog,
   PinState as AvrPinState,
 } from 'avr8js';
+import { SoftUartTx, SoftUartRx } from './soft-uart.js';
+import { TinyTimer1 } from './tiny-timer1.js';
 import { parseHex, hexImageSize } from './hex-loader.js';
 import { MCUS } from './mcu.js';
 import { boardById } from './boards.js';
@@ -105,6 +107,9 @@ export class AvrRunner {
     this.onPinChange = null;   // (pin, high, cycles) — output level edges
     this.onPinState = null;    // (pin, state: PinState, cycles) — any mode/level change
     this.onSerial = null;      // (char, port) — port 0 is Serial, 1-3 are Serial1-3 (Mega)
+    // Baud rate for typing into a software Serial (ATtiny85) before the
+    // sketch has sent anything to measure; set from the sketch's Serial.begin().
+    this.softSerialBaud = 9600;
     this.onError = null;       // (msg) => void
     this.onReset = null;       // () => void, after a reset (watchdog, RESET pin, restart)
     // Debugging: checked after every instruction while set; returning true
@@ -171,6 +176,7 @@ export class AvrRunner {
     }
 
     for (const t of mcu.timers) new AVRTimer(cpu, t);
+    if (mcu.tinyTimer1) new TinyTimer1(cpu, mcu.tinyTimer1);
 
     this.clock = new AVRClock(cpu, F_CPU);
     this.usarts = mcu.usarts.map((cfg, index) => {
@@ -186,41 +192,19 @@ export class AvrRunner {
     this.usart = this.usarts[0];
 
     this.adc = new AVRADC(cpu, mcu.adc);
+    if (mcu.adcReferenceOf) {
+      Object.defineProperty(this.adc, 'referenceVoltageType', { get: () => mcu.adcReferenceOf(cpu.data[mcu.adc.ADMUX]) });
+    }
     this._pushAnalog();
 
-    // I²C master → addressed devices.
-    this.twi = new AVRTWI(cpu, mcu.twi, F_CPU);
-    const twi = this.twi;
-    let current = null;
-    this.twi.eventHandler = {
-      start: () => twi.completeStart(),
-      stop: () => {
-        current?.i2cStop?.();
-        current = null;
-        twi.completeStop();
-      },
-      connectToSlave: (addr, write) => {
-        current = this.i2c.devices.get(addr) || null;
-        const ack = !!current && current.i2cConnect?.(!write) !== false;
-        if (!ack) current = null;
-        twi.completeConnect(ack);
-      },
-      writeByte: (value) => {
-        const ack = !!current && current.i2cWrite?.(value) !== false;
-        twi.completeWrite(ack);
-      },
-      readByte: (ack) => {
-        const value = current?.i2cRead ? current.i2cRead(ack) : 0xff;
-        twi.completeRead(value & 0xff);
-      },
-    };
-
-    // SPI master → chip-selected devices.
-    this.spi = new AVRSPI(cpu, mcu.spi, F_CPU);
-    this.spi.onByte = (value) => {
-      const response = this.spiBus.transfer(value);
-      cpu.addClockEvent(() => this.spi.completeTransfer(response), this.spi.transferCycles);
-    };
+    this.twi = null;
+    this.spi = null;
+    if (mcu.twi) this._buildTwi(cpu, mcu);
+    if (mcu.spi) this._buildSpi(cpu, mcu);
+    this._comparator = mcu.analogComparator ? this._buildComparator(cpu, mcu.analogComparator) : null;
+    this._softTx = null;
+    this._softRx = null;
+    if (this.board.softSerial && this._comparator) this._buildSoftSerial(cpu);
 
     let backend = this._eepromBackends.get(this.board.id);
     if (!backend || backend.memory.length !== mcu.eepromBytes) {
@@ -249,15 +233,120 @@ export class AvrRunner {
     }
   }
 
+  /** I²C master → addressed devices. */
+  _buildTwi(cpu, mcu) {
+    this.twi = new AVRTWI(cpu, mcu.twi, F_CPU);
+    const twi = this.twi;
+    let current = null;
+    this.twi.eventHandler = {
+      start: () => twi.completeStart(),
+      stop: () => {
+        current?.i2cStop?.();
+        current = null;
+        twi.completeStop();
+      },
+      connectToSlave: (addr, write) => {
+        current = this.i2c.devices.get(addr) || null;
+        const ack = !!current && current.i2cConnect?.(!write) !== false;
+        if (!ack) current = null;
+        twi.completeConnect(ack);
+      },
+      writeByte: (value) => {
+        const ack = !!current && current.i2cWrite?.(value) !== false;
+        twi.completeWrite(ack);
+      },
+      readByte: (ack) => {
+        const value = current?.i2cRead ? current.i2cRead(ack) : 0xff;
+        twi.completeRead(value & 0xff);
+      },
+    };
+  }
+
+  /** SPI master → chip-selected devices. */
+  _buildSpi(cpu, mcu) {
+    this.spi = new AVRSPI(cpu, mcu.spi, F_CPU);
+    this.spi.onByte = (value) => {
+      const response = this.spiBus.transfer(value);
+      cpu.addClockEvent(() => this.spi.completeTransfer(response), this.spi.transferCycles);
+    };
+  }
+
+  /**
+   * The analog comparator (ACSR): AIN0 or the bandgap against AIN1, with its
+   * interrupt on toggle, falling or rising output. Pin voltages are the
+   * digital levels the circuit gives them.
+   */
+  _buildComparator(cpu, cfg) {
+    const ACD = 0x80, ACBG = 0x40, ACO = 0x20, ACI = 0x10, ACIE = 0x08;
+    const irq = { address: cfg.interrupt, flagRegister: cfg.ACSR, flagMask: ACI, enableRegister: cfg.ACSR, enableMask: ACIE };
+    const update = () => {
+      const acsr = cpu.data[cfg.ACSR];
+      if (acsr & ACD) return;
+      const plus = acsr & ACBG ? cfg.bandgap : this._pinVolts(cfg.ain0);
+      const out = plus > this._pinVolts(cfg.ain1);
+      const was = !!(acsr & ACO);
+      if (out === was) return;
+      cpu.data[cfg.ACSR] = out ? acsr | ACO : acsr & ~ACO;
+      const mode = acsr & 0x03; // ACIS1:0 = 00 toggle, 10 falling, 11 rising
+      if (mode === 0 || (mode === 2 && !out) || (mode === 3 && out)) cpu.setInterruptFlag(irq);
+    };
+    cpu.writeHooks[cfg.ACSR] = (value) => {
+      const old = cpu.data[cfg.ACSR];
+      cpu.data[cfg.ACSR] = (value & ~(ACO | ACI)) | (old & (ACO | ACI));
+      cpu.clearInterruptByFlag(irq, value); // writing 1 to ACI clears it
+      cpu.updateInterruptEnable(irq, value);
+      update();
+      return true;
+    };
+    return { update, pins: new Set([cfg.ain0, cfg.ain1]), enabledWithBandgap: () => (cpu.data[cfg.ACSR] & (ACD | ACBG)) === ACBG };
+  }
+
+  /** Serial on a chip without a UART: decode its TX pin, drive its RX pin. */
+  _buildSoftSerial(cpu) {
+    const { tx, rx } = this.board.softSerial;
+    const txPort = this._portOf(tx);
+    const schedule = (cycles, fn) => cpu.addClockEvent(fn, Math.max(1, Math.round(cycles)));
+    this._softTx = new SoftUartTx({
+      schedule,
+      level: () => this.pinState(tx) !== PinState.Low,
+      // TinySoftwareSerial.begin() turns on the comparator with the bandgap.
+      enabled: () => this._comparator.enabledWithBandgap(),
+      onByte: (byte) => this.onSerial?.(String.fromCharCode(byte), 0),
+    });
+    const PORT = txPort.port.portConfig.PORT;
+    const portWrite = cpu.writeHooks[PORT];
+    cpu.writeHooks[PORT] = (value, oldValue, addr, mask) => {
+      this._softTx.write(cpu.cycles);
+      return portWrite(value, oldValue, addr, mask);
+    };
+    this._softRx = new SoftUartRx({
+      schedule,
+      drive: (high) => this.setInputPin(rx, high),
+      bitCycles: () => this._softTx.bitCycles || F_CPU / Math.max(300, this.softSerialBaud || 9600),
+    });
+  }
+
+  /** A pin's voltage as the circuit and the pin's own driver make it. */
+  _pinVolts(pin) {
+    const st = this._state[pin];
+    if (st === PinState.High) return this.board.logicVolts;
+    if (st === PinState.Low) return 0;
+    const ext = this._external[pin];
+    if (ext !== null && ext !== undefined) return ext ? this.board.logicVolts : 0;
+    return st === PinState.InputPullUp ? this.board.logicVolts : 0;
+  }
+
   _resetIoRegisters() {
     const { cpu, mcu } = this;
     const zero = (addr) => { if (addr) cpu.writeData(addr, 0); };
     for (const cfg of Object.values(mcu.ports)) { zero(cfg.DDR); zero(cfg.PORT); }
     for (const t of mcu.timers) { zero(t.TIMSK); zero(t.TCCRA); zero(t.TCCRB); }
+    if (mcu.tinyTimer1) { zero(mcu.tinyTimer1.TCCR1); zero(mcu.tinyTimer1.GTCCR); }
     for (const u of mcu.usarts) zero(u.UCSRB);
     zero(mcu.adc.ADCSRA);
-    zero(mcu.twi.TWCR);
-    zero(mcu.spi.SPCR);
+    if (mcu.twi) zero(mcu.twi.TWCR);
+    if (mcu.spi) zero(mcu.spi.SPCR);
+    if (mcu.analogComparator) zero(mcu.analogComparator.ACSR);
   }
 
   _refreshPin(p, port) {
@@ -271,6 +360,8 @@ export class AvrRunner {
       if (this.onPinChange) this.onPinChange(p.pin, high, this.cpu.cycles);
     }
     if (this.onPinState) this.onPinState(p.pin, st, this.cpu.cycles);
+    if (this._comparator?.pins.has(p.pin)) this._comparator.update();
+    if (this._softTx && p.pin === this.board.softSerial.tx) this._softTx.edge(st !== PinState.Low, this.cpu.cycles);
   }
 
   // ── Run control ──────────────────────────────────────────────────────────
@@ -385,6 +476,7 @@ export class AvrRunner {
     const ext = this._external[pin];
     const value = ext !== null ? ext : loc.port.pinState(loc.bit) === PinState.InputPullUp;
     loc.port.setPin(loc.bit, value);
+    if (this._comparator?.pins.has(pin)) this._comparator.update();
   }
 
   /** Set an ADC channel to a voltage (0-5 V). */
@@ -416,6 +508,10 @@ export class AvrRunner {
 
   /** Queue text for a UART; bytes are fed at line rate. */
   serialWrite(text, port = 0) {
+    if (port === 0 && this._softRx) {
+      this._softRx.write([...text].map(ch => ch.charCodeAt(0) & 0xff));
+      return;
+    }
     const usart = this.usarts[port];
     if (!usart) return;
     for (const ch of text) usart._rxQueue.push(ch.charCodeAt(0) & 0xff);

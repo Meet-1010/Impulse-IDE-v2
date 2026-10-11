@@ -10,8 +10,9 @@ import {
   portGConfig, portHConfig, portJConfig, portKConfig, portLConfig,
   timer0Config, timer1Config, timer2Config,
   usart0Config, adcConfig, atmega328Channels, twiConfig, spiConfig,
-  eepromConfig, watchdogConfig, ADCMuxInputType,
+  eepromConfig, watchdogConfig, ADCMuxInputType, ADCReference,
 } from 'avr8js';
+import { tinyTimer1Config } from './tiny-timer1.js';
 
 const vec = (n) => n * 2;
 
@@ -156,7 +157,75 @@ ATMEGA328P.ports.B = { ...portBConfig, pinChange: PCINT0, externalInterrupts: []
 ATMEGA328P.ports.C = { ...portCConfig, pinChange: PCINT1, externalInterrupts: [] };
 ATMEGA328P.ports.D = { ...portDConfig, pinChange: PCINT2, externalInterrupts: [null, null, INT0, INT1] };
 
+// ── ATtiny85 ────────────────────────────────────────────────────────────────
+//
+// From the ATtiny25/45/85 datasheet (register summary and table 9-1). Flash is
+// 8 KB, so each interrupt vector is a single word: vector n sits at word n.
+// One port (B), Timer0, the ATtiny Timer/Counter1, a 4-channel ADC, EEPROM
+// and the watchdog; no UART, TWI or SPI (the USI does those in software).
+
+const TINY = { PINB: 0x36, DDRB: 0x37, PORTB: 0x38, GIMSK: 0x5b, GIFR: 0x5a, MCUCR: 0x55, PCMSK: 0x35, TIFR: 0x58, TIMSK: 0x59 };
+
+export const ATTINY85 = {
+  id: 'attiny85',
+  name: 'ATtiny85',
+  flashBytes: 8 * 1024,
+  sramBytes: 512,
+  eepromBytes: 512,
+  ports: {
+    B: {
+      PIN: TINY.PINB, DDR: TINY.DDRB, PORT: TINY.PORTB,
+      pinChange: { PCIE: 5, PCICR: TINY.GIMSK, PCIFR: TINY.GIFR, PCMSK: TINY.PCMSK, pinChangeInterrupt: 2, mask: 0x3f, offset: 0 },
+      // INT0 is PB2.
+      externalInterrupts: [null, null, { EICR: TINY.MCUCR, EIMSK: TINY.GIMSK, EIFR: TINY.GIFR, index: 6, iscOffset: 0, interrupt: 1 }],
+    },
+  },
+  timers: [{
+    bits: 8,
+    captureInterrupt: 0, compAInterrupt: 10, compBInterrupt: 11, compCInterrupt: 0, ovfInterrupt: 5,
+    TIFR: TINY.TIFR, OCRA: 0x49, OCRB: 0x48, OCRC: 0, ICR: 0, TCNT: 0x52, TCCRA: 0x4a, TCCRB: 0x53, TCCRC: 0, TIMSK: TINY.TIMSK,
+    dividers: timer0Config.dividers,
+    compPortA: TINY.PORTB, compPinA: 0, compPortB: TINY.PORTB, compPinB: 1, compPortC: 0, compPinC: 0,
+    externalClockPort: TINY.PORTB, externalClockPin: 2,
+    TOV: 1 << 1, OCFA: 1 << 4, OCFB: 1 << 3, OCFC: 0, TOIE: 1 << 1, OCIEA: 1 << 4, OCIEB: 1 << 3, OCIEC: 0,
+  }],
+  tinyTimer1: tinyTimer1Config,
+  usarts: [],
+  adc: {
+    ADMUX: 0x27, ADCSRA: 0x26, ADCSRB: 0x23, ADCL: 0x24, ADCH: 0x25, DIDR0: 0x34,
+    adcInterrupt: 8,
+    numChannels: 4,
+    muxInputMask: 0x0f,
+    muxChannels: {
+      0: { type: ADCMuxInputType.SingleEnded, channel: 0 }, // PB5
+      1: { type: ADCMuxInputType.SingleEnded, channel: 1 }, // PB2
+      2: { type: ADCMuxInputType.SingleEnded, channel: 2 }, // PB4
+      3: { type: ADCMuxInputType.SingleEnded, channel: 3 }, // PB3
+      12: { type: ADCMuxInputType.Constant, voltage: 1.1 },
+      13: { type: ADCMuxInputType.Constant, voltage: 0 },
+      15: { type: ADCMuxInputType.Temperature },
+    },
+    adcReferences: [ADCReference.AVCC, ADCReference.AREF, ADCReference.Internal1V1, ADCReference.Internal2V56],
+  },
+  // REFS2 is ADMUX bit 4 here (avr8js looks for it at bit 3, where this chip
+  // has MUX3), so the runner reads the reference with this instead.
+  // REFS2:0 = x00 VCC, x01 AREF (PB0), 010 1.1 V, 11x 2.56 V, 011 reserved.
+  adcReferenceOf(admux) {
+    const refs = ((admux >> 6) & 3) | (admux & 0x10 ? 4 : 0);
+    return [ADCReference.AVCC, ADCReference.AREF, ADCReference.Internal1V1, ADCReference.Reserved,
+      ADCReference.AVCC, ADCReference.AREF, ADCReference.Internal2V56, ADCReference.Internal2V56][refs];
+  },
+  // TinySoftwareSerial's RX start-bit interrupt (ANA_COMP).
+  analogComparator: { ACSR: 0x28, interrupt: 7, ain0: 0, ain1: 1, bandgap: 1.1 },
+  adcChannels: 4,
+  twi: null,
+  spi: null,
+  eeprom: { ...eepromConfig, EECR: 0x3c, EEDR: 0x3d, EEARL: 0x3e, EEARH: 0x3f, eepromReadyInterrupt: 6 },
+  watchdog: { ...watchdogConfig, MCUSR: 0x54, WDTCSR: 0x41, watchdogInterrupt: 12 },
+};
+
 export const MCUS = {
   [ATMEGA328P.id]: ATMEGA328P,
   [ATMEGA2560.id]: ATMEGA2560,
+  [ATTINY85.id]: ATTINY85,
 };

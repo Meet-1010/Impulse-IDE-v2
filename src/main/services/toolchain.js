@@ -80,6 +80,7 @@ const PACKAGE_NAMES = {
   rp2040: 'the Raspberry Pi Pico core', 'pqt-gcc': 'the ARM compiler', 'pqt-gcc-riscv': 'the RISC-V compiler',
   'pqt-python3': 'Python for the build', 'pqt-picotool': 'picotool', 'pqt-openocd': 'OpenOCD', 'pqt-pioasm': 'the PIO assembler',
   'pqt-mklittlefs': 'mklittlefs',
+  ATTinyCore: 'ATTinyCore', micronucleus: 'the Digispark uploader (micronucleus)',
 };
 
 /**
@@ -93,8 +94,21 @@ const EXTRA_CORES = {
     url: 'https://github.com/earlephilhower/arduino-pico/releases/download/global/package_rp2040_index.json',
     label: 'Raspberry Pi Pico boards (Arduino-Pico core)',
     size: 'about 450 MB',
+    fqbn: /^rp2040:/,
+  },
+  attiny: {
+    id: 'ATTinyCore:avr',
+    url: 'https://drazzy.com/package_drazzy.com_index.json',
+    label: 'ATtiny chips (ATTinyCore)',
+    size: 'about 10 MB',
+    fqbn: /^ATTinyCore:/,
   },
 };
+
+/** The EXTRA_CORES key that provides a board, or null. */
+function extraCoreFor(fqbn) {
+  return Object.keys(EXTRA_CORES).find(key => EXTRA_CORES[key].fqbn.test(String(fqbn || ''))) || null;
+}
 
 /**
  * A progress update from a chunk of `arduino-cli core install` output, e.g.
@@ -307,4 +321,4 @@ class Toolchain extends EventEmitter {
   }
 }
 
-module.exports = { Toolchain, cliAsset, cliCandidates, progressPercent, coreProgress, CLI_VERSION, EXTRA_CORES };
+module.exports = { Toolchain, cliAsset, cliCandidates, progressPercent, coreProgress, CLI_VERSION, EXTRA_CORES, extraCoreFor };

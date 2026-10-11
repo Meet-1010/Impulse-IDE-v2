@@ -10,7 +10,7 @@ import { createRunner, runnerFamily, programOf } from './runners.js';
 import { CircuitEngine, staticTopology } from './engine.js';
 import { CircuitCanvas } from './canvas.js';
 import { PARTS, partDef } from './parts/catalog.js';
-import { BOARDS, BOARD_ORDER, boardByTag, boardForFqbn, boardPinNumber, boardPowerPin, pinLabel } from './boards.js';
+import { BOARDS, BOARD_ORDER, boardByTag, boardForFqbn, boardPinNumber, boardPowerPin, pinLabel, simulatedBoardsText } from './boards.js';
 import { circuitChecks } from './checks.js';
 import { toDiagram, fromDiagram, hintsToPoints, remapBoardWires } from './diagram.js';
 import { validateCircuit, layoutCircuit, catalogText } from './circuit-ai.js';
@@ -22,6 +22,7 @@ import { exampleDiagram, EXAMPLES } from './examples.js';
 import { h, icon, iconSvg, mod } from './ui/dom.js';
 import { isMuted, setMuted, onMuteChange } from './audio.js';
 import { confirmDialog } from '../dialog.js';
+import { detectBaud } from '../compare.js';
 import { readDebugInfo } from './dwarf.js';
 import { Debugger, inDirs } from './debugger.js';
 import { DebugPane } from './ui/debug-pane.js';
@@ -378,7 +379,7 @@ export class SimulationManager {
     const dismiss = h('button', { type: 'button', class: 'sim-icon-btn', 'aria-label': 'Dismiss' }, icon('close', 13));
     dismiss.addEventListener('click', () => { this._noticeDismissed = fqbn; this.notice.hidden = true; });
     if (!target) {
-      this.notice.append(icon('info', 15), h('span', {}, `${name} can't be simulated yet, so the simulator runs your sketch on the ${this.board.label}. The Uno, Nano, Mega 2560 and Raspberry Pi Pico are supported.`), dismiss);
+      this.notice.append(icon('info', 15), h('span', {}, `${name} can't be simulated yet, so the simulator runs your sketch on the ${this.board.label}. It simulates ${simulatedBoardsText()}.`), dismiss);
       this.notice.hidden = false;
       return;
     }
@@ -1131,6 +1132,8 @@ export class SimulationManager {
       this._setState('idle');
       return false;
     }
+    // A software Serial (ATtiny85) takes typed input at the sketch's baud rate.
+    this.runner.softSerialBaud = detectBaud(window.state?.editor?.getValue?.() || '');
     this.engine.setModel(this._engineModel());
     this.engine.start();
     this.analyzer?.reset();
@@ -1158,7 +1161,7 @@ export class SimulationManager {
     }
     if (this.running) this.stop();
     if (runnerFamily(this.board.id) !== 'avr') {
-      this.toast(`The debugger runs the Uno, Nano and Mega 2560 for now. Press ▶ to simulate the ${this.board.label}.`, 'info');
+      this.toast(`The debugger runs the AVR boards (Uno, Nano, Mega 2560, ATtiny85) for now. Press ▶ to simulate the ${this.board.label}.`, 'info');
       return;
     }
     const sketchPath = await this._prepareRun();
@@ -1167,11 +1170,11 @@ export class SimulationManager {
     this._showPane('debug');
     this.debugPane.running(`Compiling a debug build for ${board.label}…`, this._breakpointList());
     this._systemLine(`Compiling a debug build for ${board.label}…`, 'info');
-    let result;
-    try {
-      result = await window.electronAPI.arduino.compileDebug(sketchPath, board.fqbn);
-    } catch (err) {
-      result = { success: false, error: err.message };
+    const compileDebug = () => window.electronAPI.arduino.compileDebug(sketchPath, board.fqbn).catch(err => ({ success: false, error: err.message }));
+    let result = await compileDebug();
+    if (!result.success && result.missingCore && await this._installCore(result.missingCore, board)) {
+      this._systemLine('Compiling again…', 'info');
+      result = await compileDebug();
     }
     if (!result.success) {
       this._compileFailed(result);
@@ -1391,7 +1394,7 @@ export class SimulationManager {
     return result;
   }
 
-  /** Ask to install a board core the simulator needs (the Pico's), with progress in the notice bar. */
+  /** Ask to install a board core the simulator needs (the Pico's, ATTinyCore), with progress in the notice bar. */
   async _installCore(key, board) {
     const info = await window.electronAPI.toolchain?.extraCore?.(key).catch(() => null);
     if (!info?.success) return false;

@@ -19,22 +19,26 @@ function findCliWithAvrCore() {
 
 export const CLI = findCliWithAvrCore();
 
-// Raspberry Pi Pico tests need the Arduino-Pico core. IMPULSE_PICO_CLI_CONFIG
-// points arduino-cli at a configuration that has it (so it needn't be installed
-// globally); otherwise arduino-cli's own configuration is used.
-const PICO_CONFIG = process.env.IMPULSE_PICO_CLI_CONFIG ? ['--config-file', process.env.IMPULSE_PICO_CLI_CONFIG] : [];
+// Raspberry Pi Pico and ATtiny85 tests need the Arduino-Pico core and
+// ATTinyCore. IMPULSE_EXTRA_CORES_CONFIG (or the older IMPULSE_PICO_CLI_CONFIG)
+// points arduino-cli at a configuration that has them, so they needn't be
+// installed globally; otherwise arduino-cli's own configuration is used.
+export const EXTRA_CONFIG_FILE = process.env.IMPULSE_EXTRA_CORES_CONFIG || process.env.IMPULSE_PICO_CLI_CONFIG || null;
+const EXTRA_CONFIG = EXTRA_CONFIG_FILE ? ['--config-file', EXTRA_CONFIG_FILE] : [];
+const isExtraCore = (fqbn) => /^(rp2040|ATTinyCore):/.test(fqbn);
 const isPico = (fqbn) => fqbn.startsWith('rp2040:');
 
-function hasPicoCore() {
-  if (!CLI) return false;
+const extraCores = (() => {
+  if (!CLI) return '';
   try {
-    return execFileSync(CLI, [...PICO_CONFIG, 'core', 'list'], { stdio: 'pipe' }).toString().includes('rp2040:rp2040');
+    return execFileSync(CLI, [...EXTRA_CONFIG, 'core', 'list'], { stdio: 'pipe' }).toString();
   } catch {
-    return false;
+    return '';
   }
-}
+})();
 
-export const PICO = hasPicoCore();
+export const PICO = extraCores.includes('rp2040:rp2040');
+export const ATTINY = extraCores.includes('ATTinyCore:avr');
 
 const cache = new Map();
 
@@ -46,7 +50,7 @@ const CACHE_DIR = path.join(os.tmpdir(), 'impulse-test-hex-cache');
 
 /**
  * Compile `code` for `fqbn` (cached on disk by content): the application HEX
- * text for AVR boards, the UF2 bytes for the Raspberry Pi Pico.
+ * text for AVR chips, the UF2 bytes for the Raspberry Pi Pico.
  */
 export function compileSketch(code, fqbn = 'arduino:avr:uno', name = 'sketch') {
   const key = `${fqbn}\n${EXTRA_LIBS.join(path.delimiter)}\n${code}`;
@@ -66,7 +70,7 @@ export function compileSketch(code, fqbn = 'arduino:avr:uno', name = 'sketch') {
   let hex;
   try {
     const libs = EXTRA_LIBS.flatMap(lib => ['--libraries', lib]);
-    execFileSync(CLI, [...(isPico(fqbn) ? PICO_CONFIG : []), 'compile', '--fqbn', fqbn, ...libs, '--output-dir', outDir, sketchDir], { stdio: 'pipe' });
+    execFileSync(CLI, [...(isExtraCore(fqbn) ? EXTRA_CONFIG : []), 'compile', '--fqbn', fqbn, ...libs, '--output-dir', outDir, sketchDir], { stdio: 'pipe' });
     hex = isPico(fqbn)
       ? new Uint8Array(fs.readFileSync(path.join(outDir, `${name}.ino.uf2`)))
       : fs.readFileSync(path.join(outDir, `${name}.ino.hex`), 'utf8');
@@ -103,3 +107,4 @@ export function installedLibraries() {
 
 export const describeWithCli = CLI ? describe : describe.skip;
 export const describeWithPico = PICO ? describe : describe.skip;
+export const describeWithAttiny = ATTINY ? describe : describe.skip;

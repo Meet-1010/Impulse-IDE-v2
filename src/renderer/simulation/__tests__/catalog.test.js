@@ -1,7 +1,8 @@
 import { PARTS, CATEGORY_ORDER, partDef, resolvePartType, savedType, parseResistance } from '../parts/catalog.js';
-import { searchParts, suggestParts } from '../search.js';
+import { searchParts, suggestParts, adviceFor } from '../search.js';
 import { toDiagram, fromDiagram, routeHints, hintsToPoints, remapBoardWires } from '../diagram.js';
 import { breadboardPins } from '../parts/modules.js';
+import { BOARDS } from '../boards.js';
 
 const top = (q, n = 3) => searchParts(q).slice(0, n).map(r => r.part.type);
 
@@ -22,7 +23,8 @@ describe('parts catalog', () => {
   it('offers a wide range of parts in every category', () => {
     const count = (cat) => Object.values(PARTS).filter(p => p.category === cat).length;
     expect(Object.keys(PARTS).length).toBeGreaterThanOrEqual(70);
-    expect(count('Boards')).toBe(4);
+    // One part per simulated board.
+    expect(count('Boards')).toBe(Object.keys(BOARDS).length);
     expect(count('Sensors')).toBeGreaterThanOrEqual(20);
     expect(count('Displays')).toBeGreaterThanOrEqual(10);
   });
@@ -68,6 +70,14 @@ describe('part search', () => {
     expect(top('pot')[0]).toBe('wokwi-potentiometer');
     expect(top('74hc595')[0]).toBe('impulse-74hc595');
     expect(top('soil')[0]).toBe('impulse-soil-moisture');
+    expect(top('attiny85')[0]).toBe('impulse-attiny85');
+    expect(top('attiny')[0]).toBe('impulse-attiny85');
+  });
+
+  it('points unsimulated boards at the ones it runs', () => {
+    expect(adviceFor('attiny85')).toBeNull();
+    expect(adviceFor('attiny84')?.parts.map(p => p.type)).toContain('impulse-attiny85');
+    expect(adviceFor('esp32')?.text).toMatch(/Raspberry Pi Pico and the ATtiny85/);
   });
 
   it('tolerates typos', () => {

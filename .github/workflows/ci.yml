@@ -130,7 +130,8 @@ jobs:
 
   # The simulated Raspberry Pi Pico: Arduino-Pico firmware on rp2040js
   # (src/renderer/simulation/__tests__/pico.test.js and the Pico examples).
-  pico:
+  extra-cores:
+    name: Pico and ATtiny85
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -149,18 +150,19 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ~/.arduino15/staging
-          key: arduino-cores-avr-1.8.8-rp2040-6.3.0
+          key: arduino-cores-avr-1.8.8-rp2040-6.3.0-attinycore-1.5.2
 
-      - name: Install the AVR and Arduino-Pico cores
+      - name: Install the AVR, Arduino-Pico and ATTinyCore cores
         run: |
-          URL=https://github.com/earlephilhower/arduino-pico/releases/download/global/package_rp2040_index.json
-          arduino-cli core update-index --additional-urls "$URL"
-          arduino-cli core install arduino:avr@1.8.8 rp2040:rp2040@6.3.0 --additional-urls "$URL"
+          URLS=https://github.com/earlephilhower/arduino-pico/releases/download/global/package_rp2040_index.json,https://drazzy.com/package_drazzy.com_index.json
+          arduino-cli core update-index --additional-urls "$URLS"
+          arduino-cli core install arduino:avr@1.8.8 rp2040:rp2040@6.3.0 ATTinyCore:avr@1.5.2 --additional-urls "$URLS"
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Pico tests and examples
+      - name: Pico and ATtiny85 tests and examples
         run: |
-          npx jest src/renderer/simulation/__tests__/pico.test.js
-          npx jest src/renderer/simulation/__tests__/examples.test.js -t "pico-"
+          npx jest src/renderer/simulation/__tests__/pico.test.js src/renderer/simulation/__tests__/attiny.test.js
+          npx jest src/renderer/simulation/__tests__/examples.test.js -t "pico-|attiny-"
+          npx jest src/cli -t ATtiny

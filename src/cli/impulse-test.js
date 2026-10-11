@@ -32,12 +32,12 @@ diagram.json, and checks the "// @expect" lines in its source.
 A <sketch> is a sketch folder, its .ino file, or a folder of sketches.
 
 Options:
-  --board <uno|nano|mega|pico>  Board to simulate (default: the board in diagram.json, else uno)
+  --board <uno|nano|mega|pico|attiny85>  Board to simulate (default: the board in diagram.json, else uno)
   --fqbn <fqbn>            Compile for this FQBN (must be a board the simulator runs)
   --seconds <n>            Simulated time per sketch, overriding "// @run" (max ${MAX_SECONDS})
   --expect <line>          Extra expectation for every sketch, e.g. --expect 'pin 13 toggles'
-  --hex <file>             Test a prebuilt program instead of compiling: a .hex (AVR) or a .uf2/.bin
-                           (Pico); one sketch, or none with --expect
+  --hex <file>             Test a prebuilt program instead of compiling: a .hex (AVR boards and the
+                           ATtiny85) or a .uf2/.bin (Pico); one sketch, or none with --expect
   --diagram <file>         Circuit to use instead of the sketch's diagram.json
   --strict                 Also fail on wiring errors found by the circuit check
   --format <human|json|junit>  What to print (default: human)
@@ -231,6 +231,12 @@ function compilerError(out, dir) {
 
 export class SetupError extends Error {}
 
+/** Board-manager URLs of the simulated boards' cores that arduino-cli doesn't know by default. */
+const CORE_URLS = {
+  'rp2040:rp2040': 'https://github.com/earlephilhower/arduino-pico/releases/download/global/package_rp2040_index.json',
+  'ATTinyCore:avr': 'https://drazzy.com/package_drazzy.com_index.json',
+};
+
 /** Compile a sketch folder; resolves to the HEX text. Throws SetupError when the toolchain is missing. */
 export async function compile(cli, sketch, fqbn, libraries = []) {
   const out = fs.mkdtempSync(path.join(os.tmpdir(), 'impulse-test-'));
@@ -241,12 +247,12 @@ export async function compile(cli, sketch, fqbn, libraries = []) {
       const text = `${res.stderr}\n${res.stdout}`;
       if (/platform not installed|Platform '[^']+' not found|unknown package/i.test(text)) {
         const core = fqbn.split(':').slice(0, 2).join(':');
-        const url = core === 'rp2040:rp2040' ? ' --additional-urls https://github.com/earlephilhower/arduino-pico/releases/download/global/package_rp2040_index.json' : '';
+        const url = CORE_URLS[core] ? ` --additional-urls ${CORE_URLS[core]}` : '';
         throw new SetupError(`arduino-cli has no core for ${fqbn}. Install it with: arduino-cli core install ${core}${url}`);
       }
       throw new Error(res.killed ? 'Compiling took longer than 15 minutes' : compilerError(text, sketch.dir));
     }
-    // AVR boards: the HEX text; the Raspberry Pi Pico: the UF2 image.
+    // AVR chips: the HEX text; the Raspberry Pi Pico: the UF2 image.
     const pico = /^rp2040:/.test(fqbn);
     const file = path.join(out, `${sketch.name}.ino.${pico ? 'uf2' : 'hex'}`);
     if (!isFile(file)) throw new Error(`arduino-cli did not produce ${path.basename(file)}`);

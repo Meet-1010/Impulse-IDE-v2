@@ -9,7 +9,7 @@ import { askDialog, confirmDialog, preferencesDialog, reportProblemDialog, board
 import { baseFqbn, composeFqbn, effectiveChoices, suggestedChoices, loadChoices, saveChoices, describePort, sortPorts } from './board-options.js';
 import { ensureToolchain } from './setup.js';
 import { runSimulatorCheck, renderTestReport, renderVerifyCard, isSimulatableBoard, simulationContext } from './verify.js';
-import { boardForFqbn } from './simulation/boards.js';
+import { boardForFqbn, simulatedBoardsText } from './simulation/boards.js';
 import { attachPinInsights } from './pin-insights.js';
 import { attachBreakpoints } from './breakpoints.js';
 import { setupSourceControl } from './source-control.js';
@@ -1015,7 +1015,7 @@ async function compareSimulatorWithBoard() {
     if (!requireSketchAndBoard()) return;
     const simBoard = boardForFqbn(state.selectedBoard);
     if (!simBoard) {
-        logToConsole('The simulator runs the Arduino Uno, Nano and Mega 2560 and the Raspberry Pi Pico, so only those boards can be compared.', 'warning');
+        logToConsole(`The simulator runs ${simulatedBoardsText()}, so only those boards can be compared.`, 'warning');
         return;
     }
     if (!state.selectedPort) {

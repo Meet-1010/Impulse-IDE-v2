@@ -1,5 +1,5 @@
-// ICs and small components: DIP-16 chips (74HC595, L293D), TO-92 parts
-// (LM35, NPN transistor), A4988 driver carrier, LDR, reed switch.
+// ICs and small components: DIP chips (74HC595, L293D, ATtiny85), TO-92
+// parts (LM35, NPN transistor), A4988 driver carrier, LDR, reed switch.
 
 import { ImpulseElement, P, lead, headerPin, escape } from './base.js';
 
@@ -7,8 +7,11 @@ const DIP_PIN_X = (i) => 1.27 + i * P;
 const DIP_TOP_Y = 1.0;
 const DIP_BOTTOM_Y = DIP_TOP_Y + 3 * P;
 
-/** DIP-16 drawn notch-left; `top` lists pins 16→9 left to right, `bottom` pins 1→8. */
-class Dip16Element extends ImpulseElement {
+/**
+ * DIP chip drawn notch-left; `top` lists the upper row left to right (pins
+ * 16→9 on a DIP-16), `bottom` the lower row from pin 1.
+ */
+class DipElement extends ImpulseElement {
   get chipName() { return ''; }
   get topPins() { return []; }
   get bottomPins() { return []; }
@@ -20,11 +23,14 @@ class Dip16Element extends ImpulseElement {
     ]);
   }
 
+  get nameSize() { return 1.55; }
+
   draw() {
-    const width = 8 * P;
+    const n = this.bottomPins.length;
+    const width = n * P;
     const height = DIP_BOTTOM_Y + 1.0;
     let leads = '';
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < n; i++) {
       leads += lead(DIP_PIN_X(i), DIP_TOP_Y - 0.4, 2.7, 0.55);
       leads += lead(DIP_PIN_X(i), DIP_BOTTOM_Y + 0.4, DIP_BOTTOM_Y - 1.7, 0.55);
     }
@@ -38,21 +44,29 @@ class Dip16Element extends ImpulseElement {
       <path d="M 0.25 ${(DIP_TOP_Y + DIP_BOTTOM_Y) / 2 - 0.9} a 0.9 0.9 0 0 1 0 1.8" fill="#151517"/>
       <circle cx="1.4" cy="${DIP_BOTTOM_Y - 2.55}" r="0.35" fill="#151517"/>
       ${labels}
-      <text x="${width / 2}" y="${(DIP_TOP_Y + DIP_BOTTOM_Y) / 2 + 0.55}" font-size="1.55" fill="#e7e9ec" text-anchor="middle" font-weight="600" letter-spacing="0.05">${escape(this.chipName)}</text>`;
+      <text x="${width / 2}" y="${(DIP_TOP_Y + DIP_BOTTOM_Y) / 2 + 0.55}" font-size="${this.nameSize}" fill="#e7e9ec" text-anchor="middle" font-weight="600" letter-spacing="0.05">${escape(this.chipName)}</text>`;
     return { width, height, body };
   }
 }
 
-export class HC595Element extends Dip16Element {
+export class HC595Element extends DipElement {
   get chipName() { return '74HC595'; }
   get topPins() { return ['VCC', 'Q0', 'DS', 'OE', 'STCP', 'SHCP', 'MR', 'Q7S']; }
   get bottomPins() { return ['Q1', 'Q2', 'Q3', 'Q4', 'Q5', 'Q6', 'Q7', 'GND']; }
 }
 
-export class L293DElement extends Dip16Element {
+export class L293DElement extends DipElement {
   get chipName() { return 'L293D'; }
   get topPins() { return ['VSS', 'IN4', 'OUT4', 'GND.4', 'GND.3', 'OUT3', 'IN3', 'EN2']; }
   get bottomPins() { return ['EN1', 'IN1', 'OUT1', 'GND.1', 'GND.2', 'OUT2', 'IN2', 'VS']; }
+}
+
+/** ATtiny85 in DIP-8: pin 1 is PB5 (RESET), pin 4 GND, pin 8 VCC. */
+export class Attiny85Element extends DipElement {
+  get chipName() { return 'ATtiny85'; }
+  get nameSize() { return 1.3; }
+  get topPins() { return ['VCC', 'PB2', 'PB1', 'PB0']; }
+  get bottomPins() { return ['PB5', 'PB3', 'PB4', 'GND']; }
 }
 
 /** TO-92 package seen from the flat face, legs down. */

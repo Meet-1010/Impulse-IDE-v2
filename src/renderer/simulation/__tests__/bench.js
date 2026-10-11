@@ -8,8 +8,6 @@ import { BOARDS } from '../boards.js';
 import { fakeElement } from '../headless.js';
 import { plugLinks } from '../diagram.js';
 
-const BOARD_TYPE = { uno: 'wokwi-arduino-uno', nano: 'wokwi-arduino-nano', mega: 'wokwi-arduino-mega', pico: 'impulse-pi-pico' };
-
 export class Bench {
   constructor(board = 'uno', { addBoard = true } = {}) {
     this.boardId = board;
@@ -21,7 +19,7 @@ export class Bench {
     this.logs = [];
     this.shorts = [];
     this.links = [];
-    if (addBoard) this.add(BOARD_TYPE[board], board);
+    if (addBoard) this.add(BOARDS[board].tag, board);
   }
 
   /** Load a whole diagram model (parts with positions, wires). */

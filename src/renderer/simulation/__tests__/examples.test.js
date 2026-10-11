@@ -7,9 +7,11 @@ import { parseExpectations, evaluateExpectations } from '../expectations.js';
 import { BOARDS } from '../boards.js';
 import { partDef } from '../parts/catalog.js';
 import { Bench } from './bench.js';
-import { compileSketch, describeWithCli, installedLibraries, PICO } from './cli.js';
+import { compileSketch, describeWithCli, installedLibraries, PICO, ATTINY } from './cli.js';
 
 const LIBS = installedLibraries();
+// Examples for boards whose core isn't installed here are skipped.
+const needsCore = (ex) => (ex.board === 'pico' && !PICO) || (ex.board === 'attiny85' && !ATTINY);
 const lcdText = (b, id) => String.fromCharCode(...(b.part(id).el.characters || []));
 const press = (id) => (b) => b.behavior(id).set(true);
 const release = (id) => (b) => b.behavior(id).set(false);
@@ -110,6 +112,23 @@ const CHECKS = {
   },
   'pico-dimmer': {
     run: 0.5,
+    check: (b) => {
+      const reading = Number(b.lines().slice(-1)[0].replace('Reading: ', ''));
+      expect(Math.abs(reading - 512)).toBeLessThan(12);
+      expect(Math.abs(b.part('led1').el.brightness - reading / 1023)).toBeLessThan(0.1);
+    },
+  },
+  'attiny-blink': {
+    run: 2.2,
+    check: (b) => {
+      expect(b.links.length).toBeGreaterThan(10);
+      expect(b.trace(1).length).toBeGreaterThanOrEqual(4);
+      expect(b.part('led1').el.brightness).toBeGreaterThanOrEqual(0);
+      expect(b.shorts).toEqual([]);
+    },
+  },
+  'attiny-dimmer': {
+    run: 0.6,
     check: (b) => {
       const reading = Number(b.lines().slice(-1)[0].replace('Reading: ', ''));
       expect(Math.abs(reading - 512)).toBeLessThan(12);
@@ -225,8 +244,8 @@ describe('examples catalog', () => {
 describeWithCli('every example runs on its circuit (needs arduino-cli)', () => {
   for (const ex of EXAMPLES) {
     const missing = (ex.libraries || []).filter(l => !LIBS.has(l.toLowerCase()));
-    // Pico examples need the Arduino-Pico core (see cli.js).
-    (missing.length || (ex.board === 'pico' && !PICO) ? it.skip : it)(`${ex.id}: ${ex.title}`, () => {
+    // Pico and ATtiny85 examples need the Arduino-Pico core and ATTinyCore (see cli.js).
+    (missing.length || needsCore(ex) ? it.skip : it)(`${ex.id}: ${ex.title}`, () => {
       const hex = compileSketch(ex.code, BOARDS[ex.board].fqbn, ex.id.replace(/-/g, '_'));
       const b = new Bench(ex.board, { addBoard: false });
       b.addModel(ex.circuit());
@@ -249,8 +268,8 @@ describeWithCli('example hardware tests pass in the headless runner', () => {
     const { items, errors } = parseExpectations(ex.code, ex.board);
     if (!items.length) continue;
     const missing = (ex.libraries || []).filter(l => !LIBS.has(l.toLowerCase()));
-    // Pico examples need the Arduino-Pico core (see cli.js).
-    (missing.length || (ex.board === 'pico' && !PICO) ? it.skip : it)(`${ex.id} @expect lines`, async () => {
+    // Pico and ATtiny85 examples need the Arduino-Pico core and ATTinyCore (see cli.js).
+    (missing.length || needsCore(ex) ? it.skip : it)(`${ex.id} @expect lines`, async () => {
       const { runHeadless } = await import('../headless.js');
       expect(errors).toEqual([]);
       const hex = compileSketch(ex.code, BOARDS[ex.board].fqbn, ex.id.replace(/-/g, '_'));

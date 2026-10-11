@@ -52,11 +52,11 @@ node impulse-test.mjs sketch --junit report.xml --json report.json
 
 | Option | |
 | --- | --- |
-| `--board uno\|nano\|mega\|pico` | board to simulate; by default the one in `diagram.json`, else the Uno. The Pico needs the Arduino-Pico core (`arduino-cli core install rp2040:rp2040 --additional-urls https://github.com/earlephilhower/arduino-pico/releases/download/global/package_rp2040_index.json`) |
+| `--board uno\|nano\|mega\|pico\|attiny85` | board to simulate; by default the one in `diagram.json`, else the Uno. The Pico needs the Arduino-Pico core (`arduino-cli core install rp2040:rp2040 --additional-urls https://github.com/earlephilhower/arduino-pico/releases/download/global/package_rp2040_index.json`), the ATtiny85 ATTinyCore (`arduino-cli core install ATTinyCore:avr --additional-urls https://drazzy.com/package_drazzy.com_index.json`) |
 | `--fqbn <fqbn>` | compile for this FQBN; it has to be a board the simulator runs |
 | `--seconds <n>` | simulated time, overriding `// @run` (at most 60) |
 | `--expect "<line>"` | an extra expectation for every sketch; repeatable |
-| `--hex <file>` | test a prebuilt program instead of compiling: a `.hex` for the AVR boards (from PlatformIO, for example), a `.uf2` or `.bin` for the Pico |
+| `--hex <file>` | test a prebuilt program instead of compiling: a `.hex` for the AVR boards and the ATtiny85 (from PlatformIO, for example; an ATtiny85 build must be for 16 MHz), a `.uf2` or `.bin` for the Pico |
 | `--diagram <file>` | use this circuit instead of the sketch's `diagram.json` |
 | `--strict` | also fail on wiring errors from the circuit check |
 | `--format human\|json\|junit` | what to print; human-readable by default |

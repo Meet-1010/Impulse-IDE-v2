@@ -69,6 +69,12 @@ const defs = {
     keywords: ['pico', 'raspberry pi pico', 'rpi pico', 'rp2040', 'raspberry', 'board', 'microcontroller', 'arm', 'cortex-m0', '3.3v', 'arduino-pico', 'earlephilhower'],
     description: 'RP2040 board with 3.3 V logic: 26 GPIO (all PWM), analog inputs on GP26–GP28, I²C on GP4/GP5, SPI on GP16–GP19, Serial over USB and Serial1 on GP0/GP1. Compiles with the Arduino-Pico core. Its pins take at most 3.3 V.',
   },
+  'impulse-attiny85': {
+    label: 'ATtiny85', category: 'Boards', board: 'attiny85', behavior: BoardBehavior,
+    keywords: ['attiny85', 'attiny', 'tiny85', 'attiny 85', 'attinycore', 'avr', 'dip-8', 'dip8', 'chip', 'microcontroller', 'digispark', 'small', 'low power'],
+    description: 'An 8-pin AVR chip at 16 MHz: PB0–PB5 as pins 0–5, PWM on 0, 1 and 4, analog inputs A1 (PB2), A2 (PB4), A3 (PB3) and A0 (PB5, the RESET pin). Serial is software: TX on PB0, RX on PB1. Plug it across a breadboard\'s center gap and power VCC and GND. Compiles with ATTinyCore.',
+    pins: { PB0: 'Pin 0 · PWM · Serial TX · SDA', PB1: 'Pin 1 · PWM · LED_BUILTIN · Serial RX', PB2: 'Pin 2 · A1 · SCL · INT0', PB3: 'Pin 3 · A3', PB4: 'Pin 4 · A2 · PWM', PB5: 'Pin 5 · A0 · RESET', VCC: 'Supply (5 V)', GND: 'Ground' },
+  },
 
   // ── Breadboards ────────────────────────────────────────────────────────────
   'impulse-breadboard': {

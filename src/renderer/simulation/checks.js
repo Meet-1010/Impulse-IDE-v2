@@ -61,12 +61,13 @@ export function circuitChecks(model, { shorts = [] } = {}) {
     if (part.type === 'impulse-battery' && boardPart) {
       const volts = Number(part.attrs.voltage ?? 9);
       const net = circuit.netOf(`${part.id}:+`);
-      // Supply inputs: VIN, and the Pico's VSYS and VBUS up to 5.5 V.
-      const fine = (p) => p === 'VIN' || ((p === 'VSYS' || p === 'VBUS') && volts <= 5.5);
+      // Supply inputs: VIN, the Pico's VSYS and VBUS up to 5.5 V, and a bare chip's VCC.
+      const fine = (p) => p === 'VIN' || ((p === 'VSYS' || p === 'VBUS') && volts <= 5.5) || (p === 'VCC' && volts <= 5.5);
       const pinName = net >= 0 && circuit.nodesOf(net).map(boardPin).find(p => p && !fine(p)) || null;
       const label = pinName && boardPinNumber(board, pinName) !== null ? pinLabel(board, boardPinNumber(board, pinName)) : pinName;
       if (pinName && /^A?GND/.test(pinName)) issues.push({ level: 'error', part: part.id, text: `${part.id}'s + is wired to GND, which shorts the battery.` });
       else if (pinName === 'VSYS' || pinName === 'VBUS') issues.push({ level: 'error', part: part.id, text: `${part.id} puts ${volts} V on ${pinName}, which takes at most 5.5 V. Use a battery of 5.5 V or less (3×AA, a Li-ion cell), or a regulator.` });
+      else if (pinName === 'VCC') issues.push({ level: 'error', part: part.id, text: `${part.id} puts ${volts} V on the ${board.short}'s VCC, which takes at most 5.5 V. Use 3×AA (4.5 V), a Li-ion cell, or a 5 V regulator.` });
       else if (pinName && volts > board.maxPinVolts + 0.5) {
         const via = board.family === 'rp2040' ? 'power the Pico through VSYS (up to 5.5 V)' : 'power the board through VIN';
         issues.push({ level: 'error', part: part.id, text: `${part.id} puts ${volts} V straight onto ${label}. ${board.short} pins take at most ${board.maxPinVolts} V: ${via}, or switch the battery with a transistor or relay.` });
@@ -108,6 +109,37 @@ export function circuitChecks(model, { shorts = [] } = {}) {
       else i2c.set(key, part.id);
     }
   }
+  if (boardPart && board.resetPin !== undefined) issues.push(...bareChipChecks(model, boardPart, board, circuit));
   for (const s of shorts) issues.push({ level: 'error', text: `Short circuit: ${s.tags.join(' and ')} are wired together while driving different levels. On real hardware this can damage the board.` });
+  return issues;
+}
+
+/** A bare chip (the ATtiny85): its supply, and its RESET pin used as I/O. */
+function bareChipChecks(model, boardPart, board, circuit) {
+  const issues = [];
+  const node = (pin) => `${boardPart.id}:${pin}`;
+  const breadboards = new Set(model.parts.filter(p => partDef(p.type)?.category === 'Breadboards').map(p => p.id));
+  const partOf = (n) => n.slice(0, n.indexOf(':'));
+  // Another part's pin on the same net (breadboard holes and the chip's own pins don't count).
+  const touchesPart = (n) => {
+    const net = circuit.netOf(n);
+    return net >= 0 && circuit.nodesOf(net).some(x => partOf(x) !== boardPart.id && !breadboards.has(partOf(x)));
+  };
+  const batteries = model.parts.filter(p => p.type === 'impulse-battery');
+  const supply = circuit.netOf(node('VCC'));
+  const ground = circuit.netOf(node('GND'));
+  const feeding = batteries.filter(b => supply >= 0 && circuit.netOf(`${b.id}:+`) === supply && circuit.netOf(`${b.id}:-`) === ground);
+  const others = model.parts.some(p => p !== boardPart && !breadboards.has(p.id));
+  if (others && !feeding.length) {
+    issues.push({ level: 'info', part: boardPart.id, text: `Nothing powers the ${board.short} yet. On a real breadboard wire VCC and GND to a 2.7–5.5 V supply (3×AA, a Li-ion cell or USB 5 V); the simulator runs it at 5 V either way.` });
+  }
+  for (const bat of feeding) {
+    const volts = Number(bat.attrs.voltage ?? 9);
+    if (volts < 2.7) issues.push({ level: 'warn', part: bat.id, text: `${bat.id} gives the ${board.short} ${volts} V, below the 2.7 V it needs to run.` });
+  }
+  const resetName = pinLabel(board, board.resetPin);
+  if (touchesPart(node(resetName))) {
+    issues.push({ level: 'info', part: boardPart.id, text: `${resetName} is the ${board.short}'s RESET pin: pulling it LOW resets the chip. As an I/O pin it needs the RSTDISBL fuse, after which only a high-voltage programmer can reprogram the chip. The simulator treats it as an ordinary pin.` });
+  }
   return issues;
 }

@@ -1,11 +1,13 @@
 // Simulated boards. Pin tables follow the Arduino AVR core's pins_arduino.h
-// (variants/standard, eightanaloginputs and mega) and, for the Raspberry Pi
-// Pico, the Arduino-Pico core (variants/rpipico).
+// (variants/standard, eightanaloginputs and mega), for the Raspberry Pi Pico
+// the Arduino-Pico core (variants/rpipico), and for the ATtiny85 ATTinyCore
+// (variants/tinyX5).
 //
 // Every board numbers its pins like the Arduino core does: digital pins first,
 // then A0.. as digital pins (Uno A0 = 14, Mega A0 = 54). Pins that exist only
 // as analog inputs (Nano A6/A7) get numbers after the last digital pin and no
-// port. On the Pico a pin number is its GPIO number (A0 = GP26).
+// port. On the Pico a pin number is its GPIO number (A0 = GP26), and on the
+// ATtiny85 its PORTB bit (A1 = PB2).
 //
 // Electrical levels per board: logicVolts (an output HIGH), threshold (an
 // input reads HIGH from here), pull-up/down resistance, ADC reference, and the
@@ -48,6 +50,14 @@ const PINS_2560 = MEGA_PORTS.map((pb, n) => pin(n, pb[0], Number(pb[1]),
 const PICO_GPIO = [...range(0, 22), 25, 26, 27, 28];
 const PINS_PICO = PICO_GPIO.map(n => pin(n, 'GPIO', n, n >= 26 ? { adc: n - 26, analog: `A${n - 26}` } : {}));
 const PICO_ALIASES = Object.fromEntries(PICO_GPIO.map(n => [`GP${n}`, n >= 26 ? `A${n - 26}` : String(n)]));
+
+// ── ATtiny85 ────────────────────────────────────────────────────────────────
+
+// PB0–PB5 are pins 0–5. Analog inputs follow the ADC channels, not the pins:
+// A0 = PB5, A1 = PB2, A2 = PB4, A3 = PB3 (ATTinyCore's analogInputToDigitalPin).
+const TINY85_ADC = { 5: 0, 2: 1, 4: 2, 3: 3 };
+const PINS_TINY85 = range(0, 5).map(n => pin(n, 'B', n, n in TINY85_ADC ? { adc: TINY85_ADC[n], analog: `A${TINY85_ADC[n]}` } : {}));
+const TINY85_ALIASES = Object.fromEntries(range(0, 5).map(n => [`PB${n}`, String(n)]));
 
 const AVR_LEVELS = { logicVolts: 5, threshold: 2.5, pullupOhms: 35000, pulldownOhms: null, adcRef: 5, maxPinVolts: 5 };
 
@@ -144,10 +154,41 @@ export const BOARDS = {
     adcRef: 3.3,
     maxPinVolts: 3.3,
   },
+  attiny85: {
+    id: 'attiny85',
+    label: 'ATtiny85',
+    short: 'ATtiny85',
+    tag: 'impulse-attiny85',
+    // ATTinyCore at 16 MHz from the internal PLL: the simulator's clock.
+    fqbn: 'ATTinyCore:avr:attinyx5:chip=85,clock=16pll',
+    mcu: 'attiny85',
+    core: 'attiny',
+    pins: PINS_TINY85,
+    pwm: [0, 1, 4],
+    ledBuiltin: 1,
+    // USI: SDA/DI on PB0, SCL/USCK on PB2, DO on PB1 (pins_arduino.h).
+    i2c: { sda: 0, scl: 2 },
+    spi: { ss: 3, mosi: 1, miso: 0, sck: 2 },
+    // Serial is TinySoftwareSerial: TX on AIN0 (PB0), RX on AIN1 (PB1).
+    serial: [{ tx: 0, rx: 1 }],
+    softSerial: { tx: 0, rx: 1 },
+    interrupts: [2],
+    aliases: TINY85_ALIASES,
+    pinPrefix: 'PB',
+    resetPin: 5,
+    description: 'ATtiny85 · 8 KB flash · 6 I/O pins · 4 analog inputs · ATTinyCore',
+    ...AVR_LEVELS,
+  },
 };
 
-export const BOARD_ORDER = ['uno', 'nano', 'mega', 'pico'];
+export const BOARD_ORDER = ['uno', 'nano', 'mega', 'pico', 'attiny85'];
 export const DEFAULT_BOARD = 'uno';
+
+/** "the Arduino Uno, Arduino Nano, … and ATtiny85", for messages. */
+export function simulatedBoardsText() {
+  const labels = BOARD_ORDER.map(id => BOARDS[id].label);
+  return `the ${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`;
+}
 
 for (const board of Object.values(BOARDS)) {
   board.byPin = new Map(board.pins.map(p => [p.pin, p]));
@@ -178,6 +219,8 @@ export function boardForFqbn(fqbn) {
   }
   if (/^arduino:avr:(uno|unomini|ethernet|duemilanove|diecimila)(:|$)/.test(fqbn)) return BOARDS.uno;
   if (/^rp2040:rp2040:rpipico(:|$)/.test(fqbn)) return BOARDS.pico;
+  // ATTinyCore's ATtiny85 (the 25 and 45 are smaller and not simulated).
+  if (/^ATTinyCore:avr:attinyx5(micr)?(:|$)/.test(fqbn)) return /chip=(25|45)\b/.test(fqbn) ? null : BOARDS.attiny85;
   return null;
 }
 
@@ -213,6 +256,8 @@ const POWER_PINS = {
   VSYS: { kind: 'vcc', volts: 5 },
   AGND: { kind: 'gnd', volts: 0 },
   RUN: { kind: 'reset' },
+  // Bare chips (ATtiny85)
+  VCC: { kind: 'vcc', volts: 5 },
 };
 
 /** Header pin name without its duplicate suffix: "GND.2" → "GND". */
@@ -244,7 +289,7 @@ export function parseBoardPin(board, ref) {
   if (s === 'MISO') return board.spi.miso;
   if (s === 'SCK') return board.spi.sck;
   if (s === 'SS') return board.spi.ss;
-  let m = board.pinPrefix ? /^GP(\d{1,2})$/.exec(s) : null;
+  let m = board.pinPrefix ? new RegExp(`^${board.pinPrefix}(\\d{1,2})$`).exec(s) : null;
   if (m) {
     const n = Number(m[1]);
     return board.byPin.has(n) ? n : null;

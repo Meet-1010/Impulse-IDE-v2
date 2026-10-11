@@ -20,7 +20,7 @@ npm run build:renderer && npm run test:smoke && npm run test:e2e
 ```
 
 - Tests that compile sketches need arduino-cli and the AVR core, and skip otherwise. Point `IMPULSE_TEST_LIBRARIES` at a folder of extra libraries to run the ones that need libraries you haven't installed globally (see README).
-- Raspberry Pi Pico: the Pico tests need the Arduino-Pico core. To keep it out of your own Arduino setup, point `IMPULSE_PICO_CLI_CONFIG` at an arduino-cli config file whose data folder has it.
+- Raspberry Pi Pico and ATtiny85: their tests need the Arduino-Pico core and ATTinyCore, and skip otherwise. To keep them out of your own Arduino setup, point `IMPULSE_EXTRA_CORES_CONFIG` at an arduino-cli config file whose data folder has them (`IMPULSE_PICO_CLI_CONFIG` still works).
 - PlatformIO: `IMPULSE_PIO_TESTS=1 npx jest src/main/services/__tests__/platformio.test.js` builds, simulates and debugs a real PlatformIO project (needs `pio`; the first run downloads the AVR toolchain).
 - UI changes: check them in the running app, in both the dark and light themes.
 - Keep to the existing style: match the surrounding code, its naming and its comment density.

@@ -16,6 +16,12 @@ https://github.com/earlephilhower/arduino-pico
 
 Not bundled. Installed through arduino-cli when you simulate a Raspberry Pi Pico for the first time and agree to the download; it brings its own toolchains and licenses.
 
+### ATTinyCore (ATTinyCore:avr) latest (LGPL-2.1)
+
+https://github.com/SpenceKonde/ATTinyCore
+
+Not bundled. Installed through arduino-cli when you simulate an ATtiny85 for the first time and agree to the download; it uses the AVR compiler of the Arduino AVR core.
+
 ### Electron 44.5.1 (MIT)
 
 https://www.electronjs.org

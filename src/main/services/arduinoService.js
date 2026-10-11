@@ -4,6 +4,7 @@ const fs = require('fs').promises;
 const ErrorHandler = require('../utils/errorHandler');
 const notifications = require('../utils/notifications');
 const { PlatformIO, projectRoot } = require('./platformio');
+const { extraCoreFor } = require('./toolchain');
 
 /**
  * Arduino CLI Service
@@ -635,7 +636,7 @@ class ArduinoService {
         if (code !== 0) {
           fs.rmSync(outputDir, { recursive: true, force: true });
           // A simulated board whose core isn't installed yet: the simulator offers to install it.
-          const missingCore = /^rp2040:/.test(boardFQBN) && /platform not installed|Platform '.+' not found/i.test(stderr) ? 'pico' : undefined;
+          const missingCore = /platform not installed|Platform '.+' not found/i.test(stderr) ? extraCoreFor(boardFQBN) || undefined : undefined;
           resolve({ success: false, error: ArduinoService.explainToolchainError(stderr) || stderr, missingCore });
           return;
         }
@@ -688,7 +689,7 @@ class ArduinoService {
       return { success: true, hex: res.hex, elf: res.elf, sketchDirs: both(pioRoot), buildSketchDirs: [] };
     }
     if (!this.validateFQBN(boardFQBN)) return { success: false, error: `Invalid board: "${boardFQBN}"` };
-    if (!/^arduino:avr:/.test(boardFQBN)) return { success: false, error: 'The debugger runs the simulated AVR boards (Uno, Nano, Mega).' };
+    if (!/^(arduino|ATTinyCore):avr:/.test(boardFQBN)) return { success: false, error: 'The debugger runs the simulated AVR boards (Uno, Nano, Mega, ATtiny85).' };
     const dir = this.sketchDir(sketchPath);
     const key = crypto.createHash('sha1').update(`${dir}\n${boardFQBN}`).digest('hex').slice(0, 16);
     const buildPath = path.join(os.tmpdir(), 'impulse-debug-builds', key);
@@ -706,7 +707,8 @@ class ArduinoService {
         '--output-dir', outputDir, dir,
       ], { cwd: dir, timeout: 180000 });
       if (!result.success) {
-        return { success: false, error: ArduinoService.explainToolchainError(result.stderr) || result.stderr.trim() || 'Compile failed' };
+        const missingCore = /platform not installed|Platform '.+' not found/i.test(result.stderr) ? extraCoreFor(boardFQBN) || undefined : undefined;
+        return { success: false, error: ArduinoService.explainToolchainError(result.stderr) || result.stderr.trim() || 'Compile failed', missingCore };
       }
       const files = fsSync.readdirSync(outputDir);
       const hexFile = files.find(f => f.endsWith('.hex') && !f.endsWith('.with_bootloader.hex'));

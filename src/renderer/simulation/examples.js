@@ -13,7 +13,7 @@ class Layout {
   constructor(boardType, x = 0, y = 0) {
     this.parts = [];
     this.wires = [];
-    this.boardId = { 'wokwi-arduino-uno': 'uno', 'wokwi-arduino-nano': 'nano', 'wokwi-arduino-mega': 'mega', 'impulse-pi-pico': 'pico' }[boardType];
+    this.boardId = { 'wokwi-arduino-uno': 'uno', 'wokwi-arduino-nano': 'nano', 'wokwi-arduino-mega': 'mega', 'impulse-pi-pico': 'pico', 'impulse-attiny85': 'attiny85' }[boardType];
     this.part(boardType, this.boardId, { x, y });
   }
 
@@ -503,6 +503,42 @@ const circuits = {
     L.wire('pot1:GND', 'pico:AGND', 'black');
     ledOnPin(L, 'pico', 'GP16', 'led1', 'green', 140, 240);
     L.wire('led1:C', 'pico:GND.6', 'black');
+    return L.done();
+  },
+
+  // ATtiny85 across the center channel (VCC in column 8), 3×AA on the rails.
+  tiny(L) {
+    L.parts = [];
+    L.part('impulse-breadboard-half', 'bb', { x: 0, y: 0, attrs: { size: 'half' } });
+    L.at('impulse-attiny85', 'attiny85', 'VCC', 'bb:8t.e');
+    L.at('impulse-battery', 'bat', '+', { x: -60, y: 20 }, { attrs: { voltage: '4.5' } });
+    L.wire('bat:+', 'bb:tp.1', 'red');
+    L.wire('bat:-', 'bb:tn.1', 'black');
+    L.wire('bb:8t.a', 'bb:tp.6', 'red');
+    L.wire('bb:11b.j', 'bb:bn.9', 'black');
+    L.wire('bb:tn.25', 'bb:bn.25', 'black');
+    return L;
+  },
+
+  tinyBlink() {
+    const L = circuits.tiny(new Layout('impulse-attiny85'));
+    // PB1 (column 10) → 220 Ω → LED → GND rail.
+    L.at('wokwi-resistor', 'r1', '1', 'bb:10t.c');
+    L.at('wokwi-led', 'led1', 'A', 'bb:16t.a', { attrs: { color: 'red' } });
+    L.wire('bb:15t.b', 'bb:tn.13', 'black');
+    return L.done();
+  },
+
+  tinyDimmer() {
+    const L = circuits.tiny(new Layout('impulse-attiny85'));
+    L.at('wokwi-potentiometer', 'pot1', 'SIG', { x: L.pin('bb:21t.a').x, y: -40 }, { attrs: { value: '512' } });
+    L.wire('pot1:SIG', 'bb:9t.a', 'green');
+    L.wire('pot1:VCC', 'bb:tp.19', 'red');
+    L.wire('pot1:GND', 'bb:tn.17', 'black');
+    // PB4 (column 10, lower half) → 220 Ω → LED → GND rail.
+    L.at('wokwi-resistor', 'r1', '1', 'bb:10b.h');
+    L.at('wokwi-led', 'led1', 'A', 'bb:16b.j', { rotate: 180, attrs: { color: 'yellow' } });
+    L.wire('bb:17b.i', 'bb:bn.15', 'black');
     return L.done();
   },
 
@@ -1908,6 +1944,61 @@ const int LED = 16;
 
 void setup() {
   Serial.begin(115200);
+  pinMode(LED, OUTPUT);
+}
+
+void loop() {
+  int reading = analogRead(POT);
+  analogWrite(LED, reading / 4);
+  Serial.print("Reading: ");
+  Serial.println(reading);
+  delay(100);
+}
+`,
+  }),
+  ex({
+    id: 'attiny-blink', title: 'ATtiny85: blink', category: 'Boards', board: 'attiny85', level: 'Beginner',
+    summary: 'An ATtiny85 on a breadboard, powered by 3×AA, blinks an LED on PB1.',
+    tags: ['ATtiny85', 'ATTinyCore', 'breadboard', 'battery'],
+    circuit: circuits.tinyBlink,
+    code: `// ATtiny85: blink
+// An ATtiny85 on a breadboard, running from 3×AA (4.5 V). The LED on PB1 —
+// the chip's pin 6, and LED_BUILTIN in ATTinyCore — blinks once a second.
+// On the ATtiny85, pin numbers are PORTB bits: pin 1 is PB1.
+// @run 2.2s
+// @expect pin LED_BUILTIN frequency 1Hz ±1%
+
+void setup() {
+  pinMode(LED_BUILTIN, OUTPUT);
+}
+
+void loop() {
+  digitalWrite(LED_BUILTIN, HIGH);
+  delay(500);
+  digitalWrite(LED_BUILTIN, LOW);
+  delay(500);
+}
+`,
+  }),
+  ex({
+    id: 'attiny-dimmer', title: 'ATtiny85: dimmer', category: 'Boards', board: 'attiny85', level: 'Beginner',
+    summary: 'A potentiometer on PB2 sets the brightness of an LED on PB4; readings go out on the software Serial.',
+    tags: ['ATtiny85', 'ATTinyCore', 'analogRead', 'PWM', 'potentiometer', 'Serial'],
+    circuit: circuits.tinyDimmer,
+    code: `// ATtiny85: dimmer
+// The potentiometer on PB2 (A1) sets the brightness of the LED on PB4, which
+// gets its PWM from Timer1. The ATtiny85 has no UART: ATTinyCore's Serial
+// sends in software on PB0 (TX) at 9600 baud. The simulator shows it here; on
+// a real chip read it with a USB-serial adapter on PB0.
+// Turn the potentiometer in the inspector while it runs.
+// @run 0.6s
+// @expect serial matches /^Reading: \\d+/m
+
+const int POT = A1;  // PB2
+const int LED = 4;   // PB4
+
+void setup() {
+  Serial.begin(9600);
   pinMode(LED, OUTPUT);
 }
 

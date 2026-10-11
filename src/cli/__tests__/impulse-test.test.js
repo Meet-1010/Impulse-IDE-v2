@@ -6,7 +6,7 @@ import {
 } from '../impulse-test.js';
 import { exampleById, exampleDiagram } from '../../renderer/simulation/examples.js';
 import { wordsToHex, TOGGLE_D13 } from '../../renderer/simulation/__tests__/helpers.js';
-import { CLI, describeWithCli } from '../../renderer/simulation/__tests__/cli.js';
+import { CLI, describeWithCli, describeWithAttiny, EXTRA_CONFIG_FILE } from '../../renderer/simulation/__tests__/cli.js';
 
 let temp;
 beforeEach(() => { temp = fs.mkdtempSync(path.join(os.tmpdir(), 'impulse-cli-test-')); });
@@ -168,4 +168,22 @@ describeWithCli('impulse-test with arduino-cli', () => {
     expect(r.code).toBe(EXIT.FAIL);
     expect(fs.readFileSync(junit, 'utf8')).toMatch(/tests="3" failures="0" errors="1" skipped="1"/);
   }, 180000);
+});
+
+describeWithAttiny('impulse-test on an ATtiny85 (needs ATTinyCore)', () => {
+  test('takes the chip from diagram.json and checks the sketch', async () => {
+    const ex = exampleById('attiny-dimmer');
+    sketch('dimmer', ex.code, exampleDiagram(ex), path.join(temp, 'sketches'));
+    // The configuration that has ATTinyCore, through a wrapper (child processes
+    // don't see a test's process.env).
+    let cli = CLI;
+    if (EXTRA_CONFIG_FILE && process.platform !== 'win32') {
+      cli = path.join(temp, 'arduino-cli');
+      fs.writeFileSync(cli, `#!/bin/sh\nexec '${CLI}' --config-file '${EXTRA_CONFIG_FILE}' "$@"\n`, { mode: 0o755 });
+    }
+    const r = await capture([path.join(temp, 'sketches'), '--cli', cli]);
+    expect(r.err).toMatch(/^Compiling dimmer for ATTinyCore:avr:attinyx5:chip=85,clock=16pll…$/m);
+    expect(r.out).toMatch(/PASS dimmer \(ATtiny85, 0\.6 s simulated\)/);
+    expect(r.code).toBe(EXIT.PASS);
+  }, 300000);
 });
