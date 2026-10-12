@@ -1171,6 +1171,48 @@ li.CodeMirror-hint-active {
     color: var(--ds-text);
 }
 
+/* Full-height targets: the menus were 18 px tall and easy to miss. */
+:root .ai-mode-select,
+:root .ai-model-select {
+    min-height: 28px;
+    padding-top: 4px;
+    padding-bottom: 4px;
+    border-radius: var(--radius-sm);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 12 12'%3E%3Cpath fill='none' stroke='%23868b93' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round' d='M3 4.5L6 7.5L9 4.5'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 4px center;
+    transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+:root .ai-mode-select {
+    padding-left: 4px;
+    padding-right: 16px;
+}
+
+:root .ai-model-select {
+    max-width: 168px;
+    padding-left: 6px;
+    padding-right: 18px;
+}
+
+.ai-mode-select:hover,
+.ai-model-select:hover,
+.ai-mode-select:focus-visible,
+.ai-model-select:focus-visible {
+    background-color: var(--ds-hover);
+}
+
+.ai-mode-select:focus-visible,
+.ai-model-select:focus-visible {
+    outline: 2px solid var(--ds-link);
+    outline-offset: 1px;
+}
+
+.ai-ico {
+    min-width: 28px;
+    min-height: 28px;
+}
+
 .ai-ico {
     border-radius: var(--radius-sm);
     color: var(--ds-text-4);

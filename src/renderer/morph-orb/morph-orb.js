@@ -980,6 +980,12 @@ export function createChatOrb({ host, list, slot, input, send, speed = 1, minThi
     timers.typing = window.setTimeout(() => actor.removeAttribute('data-typing'), 300);
   }, { signal: life.signal });
   input.setAttribute('placeholder', COPY.placeholder);
+  // The field is one line in a 60 px pill: a click anywhere on the pill types into it.
+  form.addEventListener('pointerdown', (e) => {
+    if (busy || e.button !== 0 || e.target === input || send.contains(e.target)) return;
+    e.preventDefault();
+    input.focus({ preventScroll: true });
+  }, { signal: life.signal });
 
   resetChannels();
   ready();

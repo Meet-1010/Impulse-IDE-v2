@@ -300,6 +300,34 @@ try {
     }
   });
 
+  // Real clicks, where a person would click: the pill's glow layers once
+  // swallowed them, so the field didn't focus and the menus below didn't open.
+  await step('the chat pill and the model menu take real clicks', async () => {
+    if (!await evaluate(`window.state.aiPanelOpen`)) await evaluate(`document.getElementById('aiAgentTab').click()`);
+    await waitFor(`window.impulse.chatPhase === 'idle' && document.querySelector('#aiPanel .ai-panel-inner').getBoundingClientRect().width > 200`, 5000, 'the AI panel');
+    const rect = (sel) => evaluate(`(() => { const b = document.querySelector(${JSON.stringify(sel)}).getBoundingClientRect(); return [b.left, b.top, b.width, b.height] })()`);
+    const click = async (x, y) => {
+      for (const type of ['mousePressed', 'mouseReleased']) await send('Input.dispatchMouseEvent', { type, x, y, button: 'left', clickCount: 1 });
+      await sleep(120);
+    };
+    const focused = () => evaluate(`document.activeElement?.id || ''`);
+    const [px, py, pw, ph] = await rect('.mo-actor');
+    await evaluate(`document.activeElement?.blur(); 1`);
+    // Inside the pill but off the one-line field.
+    await click(px + pw * 0.62, py + ph - 8);
+    if (await focused() !== 'aiInput') throw new Error(`a click on the pill focused "${await focused()}", not the field`);
+    for (const id of ['aiModelSelect', 'aiModeSelect']) {
+      const [x, y, w] = await rect(`#${id}`);
+      await evaluate(`document.activeElement?.blur(); 1`);
+      await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: x + w / 2, y: y + 3, button: 'left', clickCount: 1 });
+      await sleep(150);
+      const got = await focused();
+      await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+      await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: x + w / 2, y: y + 3, button: 'left', clickCount: 1 });
+      if (got !== id) throw new Error(`a click on the top edge of #${id} reached "${got}"`);
+    }
+  });
+
   // A stand-in agent, so no API key is needed: the pill becomes the orb, the
   // label follows the steps, and the answer unfolds into a card in the chat.
   await step('the AI chat orb works through a question and leaves the answer card', async () => {

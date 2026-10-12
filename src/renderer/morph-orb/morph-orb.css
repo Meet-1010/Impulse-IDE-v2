@@ -265,8 +265,20 @@
     transform: translate(-50%, -50%);
 }
 
-.mo-root[data-phase="idle"] .mo-actor {
+/* Only the field takes the pointer. The glows, halo and pulse reach past the
+   pill (the green halo is 240 px tall) and, though invisible at rest, would
+   swallow clicks meant for the field and for the model and mode menus below. */
+.mo-actor > * {
+    pointer-events: none;
+}
+
+.mo-root[data-phase="idle"] .mo-input {
     pointer-events: auto;
+    cursor: text;
+}
+
+.mo-root[data-phase="idle"] .mo-send {
+    cursor: pointer;
 }
 
 .mo-actor[data-shake] {
