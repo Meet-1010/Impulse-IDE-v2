@@ -7,18 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-
-- The AI chat's composer is a glowing pill. On send it folds into a ball, flies up into the conversation and becomes a dotted orb whose label follows what the agent is doing (reading the sketch, writing code, compiling, uploading…), then turns green, condenses and unfolds into the answer card, which stays in the chat. Errors resolve red with "Couldn't finish". It follows the light and dark themes and, with reduced motion, cross-fades instead of moving. The agent now reports each step to the chat as it happens.
-
-### Fixed
-
-- Code blocks in chat answers drew a second frame inside their own, and left a blank line after them.
-
 ## [2.0.0-beta.1] - 2026-10-12
 
 ### Added
 
+- The AI chat's composer is a glowing pill. On send it folds into a ball, flies up into the conversation and becomes a dotted orb whose label follows what the agent is doing (reading the sketch, writing code, compiling, uploading…), then turns green, condenses and unfolds into the answer card, which stays in the chat. Errors resolve red with "Couldn't finish". It follows the light and dark themes and, with reduced motion, cross-fades instead of moving. The agent now reports each step to the chat as it happens.
 - ATtiny85 in the simulator: ATTinyCore firmware runs on an emulated ATtiny85 at 16 MHz, drawn as a DIP-8 chip that plugs across a breadboard. Digital pins PB0–PB5, PWM on PB0 (Timer0) and PB1/PB4 (Timer/Counter1, modelled from the datasheet's fast PWM), the 4-channel ADC with its 1.1 V and 2.56 V references, INT0 and pin-change interrupts, EEPROM and the watchdog. ATTinyCore's software Serial is decoded from PB0 at whatever baud the sketch uses, and typed text goes in on PB1 through the analog comparator interrupt, half duplex like the real chip. The USI is modelled from the datasheet, so Wire (I²C: LCDs, RTCs, sensors) and SPI work on PB0–PB2, and the editor warns when a sketch uses Serial and I²C, which share PB0. The debugger works on it. The circuit check asks for a 2.7–5.5 V supply and warns about PB5 being the RESET pin. The first ATtiny85 build offers to install ATTinyCore (about 10 MB). Three examples (blink, a dimmer, an I²C LCD), and impulse-test runs ATtiny85 sketches too.
 - Source Control panel (View › Source Control, ⌘/Ctrl+Shift+G): start a Git repository with a .gitignore for build output, see changed files and their diffs, commit everything, pull (fast-forward only) and push, and browse recent commits. It asks for a name and email once per repository instead of letting git invent one from the computer's name.
 - Raspberry Pi Pico in the simulator: Arduino-Pico firmware runs on an emulated RP2040 (rp2040js) with GPIO, PWM, the ADC, I²C, SPI, Serial over USB and Serial1/2, at 3.3 V logic with pull-ups and pull-downs. Every simulated part works with it; the circuit check flags 5 V signals into its pins. The first Pico build offers to install the Arduino-Pico core (about 450 MB). Switching between an Uno and a Pico keeps wires on the matching pins. Two Pico examples, and impulse-test runs Pico sketches too. The debugger stays AVR-only for now.
@@ -66,9 +59,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - File access is denied by default; folder approvals persist in the main process.
 - Keyboard shortcuts come only from the application menu (⌘ on macOS, no double firing).
 - Removed the unused terminal, plugin and collaboration services and their dependencies.
+- User data (memory, plugins, error memory, AI DB) now uses Electron `app.getPath('userData')` when available for correct paths on clean/portable installs.
+- CI: tests + lint on Ubuntu and Windows; separate job builds Windows installer and uploads artifact.
 
 ### Fixed
 
+- Code blocks in chat answers drew a second frame inside their own, and left a blank line after them.
 - The end-to-end test audits the first-run welcome toast once it has fully appeared, then skips the tour; on a slow runner a later audit could catch it half faded and report its contrast. The toast's × button is labelled "Dismiss".
 - The sidebar Debug panel was a placeholder whose start button only printed a hint about launch.json. It now starts the simulator's debugger and lists the breakpoints.
 - Saving (⌘S, autosave, or the save before Verify, Upload and simulating) while a second tab of a sketch was open wrote that tab's text over the sketch's .ino. Each tab is now saved to its own file, and every edited tab is saved before a build, so builds never use stale headers. The AI agent no longer writes the sketch into whichever tab is showing.
@@ -87,17 +83,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Go to Line, Find and Add Tab were broken (`prompt()` is unavailable in Electron).
 - Fresh `npm install` failed under npm 11 (native rebuild step); dependency audit findings.
 - Production prep: SimpleMemory/recordExecution fix, portable paths, code signing docs, CI build exe, changelog.
-
-### Fixed
-
 - **SimpleMemory.recordExecution** now uses the same signature as AIMemory (`toolCall`, `result`) so default memory behavior is correct when tools run.
 - Sidebar collapse now works after resizing (inline width cleared when toggling collapse); drag-to-collapse via resizer.
 - CodeMirror load: shared ref and init-order fix so the editor loads reliably in the packaged app.
-
-### Changed
-
-- User data (memory, plugins, error memory, AI DB) now uses Electron `app.getPath('userData')` when available for correct paths on clean/portable installs.
-- CI: tests + lint on Ubuntu and Windows; separate job builds Windows installer and uploads artifact.
 
 ## [1.0.0] - (prior to changelog)
 
