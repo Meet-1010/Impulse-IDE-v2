@@ -75,7 +75,16 @@ jobs:
       # Signing and notarization happen only when the secrets exist; without
       # them the installers are built unsigned (see docs/BUILD_AND_SIGN.md).
       - name: Build installers and upload them to the draft release
-        run: npx electron-builder ${{ matrix.platform }} --publish always
+        shell: bash
+        run: |
+          # A secret that isn't configured arrives as an empty string, and
+          # electron-builder reads an empty CSC_LINK as a path (the checkout).
+          for name in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID WIN_CSC_LINK WIN_CSC_KEY_PASSWORD; do
+            [ -n "${!name}" ] || unset "$name"
+          done
+          # No certificate: build unsigned instead of signing with whatever identity the runner has.
+          [ -n "${CSC_LINK:-}" ] || export CSC_IDENTITY_AUTO_DISCOVERY=false
+          npx electron-builder ${{ matrix.platform }} --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
