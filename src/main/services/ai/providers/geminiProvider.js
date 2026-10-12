@@ -2,7 +2,7 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 const BaseProvider = require('./baseProvider');
 
 class GeminiProvider extends BaseProvider {
-  static DEFAULT_MODEL = 'gemini-2.5-flash';
+  static DEFAULT_MODEL = 'gemini-3.8-flash';
 
   constructor(apiKey, model = null) {
     // Ensure model is never null/undefined - use default if not provided
@@ -16,17 +16,18 @@ class GeminiProvider extends BaseProvider {
   }
 
   getAvailableModels() {
+    // Newest first (index 0 is what a new key starts with). From
+    // ai.google.dev/gemini-api/docs/models: 2.0 and 1.5 are shut down, and
+    // 2.5 is served only to keys that already used it.
     return [
-      // Gemini 2.5 family (2025)
+      'gemini-3.8-flash',
+      'gemini-3.1-pro-preview',
+      'gemini-3.6-flash',
+      'gemini-3.5-flash-lite',
+      'gemini-3-flash-preview',
+      'gemini-3.1-flash-lite',
       'gemini-2.5-pro',
       'gemini-2.5-flash',
-      'gemini-2.5-flash-lite',
-      // Gemini 2.0 family
-      'gemini-2.0-flash',
-      'gemini-2.0-flash-lite',
-      // Gemini 1.5 family (legacy)
-      'gemini-1.5-pro',
-      'gemini-1.5-flash',
     ];
   }
 
@@ -48,13 +49,11 @@ class GeminiProvider extends BaseProvider {
     
     try {
       // Build model config
-      const modelConfig = { 
-        model: modelName,
-        generationConfig: {
-          temperature: options.temperature ?? 0.7,
-          maxOutputTokens: options.max_tokens ?? 8192,
-        }
-      };
+      const generationConfig = { maxOutputTokens: options.max_tokens ?? 8192 };
+      // Gemini 3 is tuned for its default temperature (1.0); lower values can
+      // make it loop. Older models keep the configured one.
+      if (!GeminiProvider.isGemini3(modelName)) generationConfig.temperature = options.temperature ?? 0.7;
+      const modelConfig = { model: modelName, generationConfig };
 
       // Wire up tools if provided
       if (options.tools && Array.isArray(options.tools) && options.tools.length > 0) {
@@ -88,6 +87,9 @@ class GeminiProvider extends BaseProvider {
       return {
         content: text || '',
         toolCalls: this.parseToolCalls(response),
+        // The model's own parts, replayed as they came: Gemini 3 rejects a
+        // function call sent back without its thoughtSignature.
+        rawContent: { geminiParts: response.candidates?.[0]?.content?.parts || [] },
         usage: {
           promptTokens: response.usageMetadata?.promptTokenCount || 0,
           completionTokens: response.usageMetadata?.candidatesTokenCount || 0
@@ -103,7 +105,7 @@ class GeminiProvider extends BaseProvider {
       }
       
       if (error.message?.includes('not found') || error.message?.includes('404')) {
-        throw new Error(`Model "${modelName}" not available. Try updating @google/generative-ai package or use a different model.`);
+        throw new Error(`${modelName} isn't available to this API key (Google retires older Gemini models and limits some to earlier users). Choose another Gemini model in the model menu.`);
       }
 
       if (error.message?.includes('quota') || error.message?.includes('rate')) {
@@ -140,6 +142,11 @@ class GeminiProvider extends BaseProvider {
       }
 
       if (msg.role === 'assistant') {
+        const own = msg.rawContent?.geminiParts;
+        if (Array.isArray(own) && own.length > 0) {
+          contents.push({ role: 'model', parts: own });
+          continue;
+        }
         const parts = [];
         // Add text content if present
         if (msg.content) {
@@ -207,6 +214,10 @@ class GeminiProvider extends BaseProvider {
     }
 
     return toolCalls;
+  }
+
+  static isGemini3(model) {
+    return /^gemini-3/.test(String(model || ''));
   }
 
   validateApiKey(apiKey) {

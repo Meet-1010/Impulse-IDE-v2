@@ -61,7 +61,7 @@ describe('AIAgent', () => {
     });
 
     it('should detect Gemini models', () => {
-      expect(AIAgent.getProviderFromModel('gemini-1.5-flash')).toBe('gemini');
+      expect(AIAgent.getProviderFromModel('gemini-3.8-flash')).toBe('gemini');
     });
 
     it('should return null for unknown models', () => {

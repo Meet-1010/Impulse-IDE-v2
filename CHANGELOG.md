@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Saving an API key now makes the AI chat use it straight away (that provider's newest model) instead of waiting for a model to be chosen or a restart. Sending with a key but no model picks one; with no key the chat says where to add one and opens the key settings. The model menu groups models by provider and marks the ones without a key, and the line under the chat names the model in use.
+- Gemini: the model list is current (Gemini 3.8 Flash first, 3.1 Pro preview and the other Gemini 3 models; the shut-down 1.5 and 2.0 models are gone). Agent tool calls replay Gemini 3's thought signatures, Gemini 3 keeps its default temperature, and a model a key can't use says to pick another.
+
 ## [2.0.0-beta.1] - 2026-10-12
 
 ### Added

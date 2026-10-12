@@ -112,6 +112,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         await loadAIUnifiedModels();
         await restoreAIPreferences();
         await applyModelAutoUpgrade();
+        await ensureAIModel({ quiet: true });
         await restoreSession();
 
         setupNativeMenuListener();
@@ -1486,17 +1487,8 @@ function setupUserApiKeys() {
                 inputEl.value = '';
                 showStatus(`${providerId} key saved.`, 'success');
                 renderKeys(); // refresh badges
-
-                // Auto-initialize the AI provider if a matching model is selected
-                if (state.aiModelId) {
-                    try {
-                        const setResult = await window.electronAPI.ai.setModel(state.aiModelId);
-                        if (setResult.success) {
-                            state.aiProviderConfigured = true;
-                            updateAIStatus('Ready');
-                        }
-                    } catch (_) { /* silent */ }
-                }
+                // The chat can use it straight away.
+                await useKeyFor(providerId);
             } else {
                 showStatus(result.error || 'Failed to save key.', 'error');
             }
@@ -1513,6 +1505,9 @@ function setupUserApiKeys() {
             if (result.success) {
                 showStatus(`${providerId} key removed.`, 'success');
                 renderKeys();
+                if (state.aiModelId && providerOfModel(state.aiModelId) === providerId) state.aiProviderConfigured = false;
+                await loadAIUnifiedModels();
+                refreshAIStatus();
             } else {
                 showStatus(result.error || 'Failed to remove key.', 'error');
             }
@@ -3797,6 +3792,69 @@ function modelOptionLabel(m, suggestion) {
     return badges.length ? `${label}  ${badges.join(' ')}` : label;
 }
 
+const PROVIDER_LABELS = { gemini: 'Google Gemini', openai: 'OpenAI', claude: 'Anthropic Claude' };
+
+/** Providers with an API key saved, e.g. ['gemini']. */
+async function providersWithKeys() {
+    try {
+        const res = await window.electronAPI.apiKeys.list();
+        if (res?.success) return Object.entries(res.data || {}).filter(([, v]) => v?.hasKey).map(([p]) => p);
+    } catch (_) { /* none */ }
+    return [];
+}
+
+const modelName = (id) => (state.aiUnifiedModels.find(m => m.id === id) || {}).displayName || id;
+
+/** The line under the composer: which model answers, or what to do first. */
+function refreshAIStatus() {
+    if (state.aiProviderConfigured && state.aiModelId) updateAIStatus(`Ready · ${modelName(state.aiModelId)}`);
+    else if (!state.aiKeyedProviders?.length) updateAIStatus('Add an API key to start: the person icon, bottom left');
+    else updateAIStatus('Choose a model to start');
+}
+
+/**
+ * A key was just saved: if the chat has no working model, start with that
+ * provider's newest one. A working model of another provider stays.
+ */
+async function useKeyFor(provider) {
+    await loadAIUnifiedModels();
+    const current = state.aiModelId;
+    if (current && providerOfModel(current) === provider) {
+        const res = await window.electronAPI.ai.setModel(current).catch(() => null);
+        if (res?.success) state.aiProviderConfigured = true;
+    } else if (!state.aiProviderConfigured) {
+        const latest = state.aiModelSuggestion?.latestByProvider?.[provider]
+            || state.aiUnifiedModels.find(m => m.provider === provider)?.id;
+        if (latest && await selectModelProgrammatically(latest)) {
+            window.notifications?.info?.(`The AI chat now uses ${modelName(latest)}. Pick another in the model menu under the chat.`);
+        }
+    }
+    refreshAIStatus();
+}
+
+/**
+ * Before sending: make sure a model with a key is active. Uses the saved
+ * model if its key is there, else the newest model of a provider that has
+ * one; with no keys at all it opens the key settings.
+ * @param {{ quiet?: boolean }} [opts] quiet: don't prompt (at startup)
+ */
+async function ensureAIModel({ quiet = false } = {}) {
+    if (state.aiProviderConfigured) return true;
+    const keyed = await providersWithKeys();
+    state.aiKeyedProviders = keyed;
+    const saved = providerOfModel(state.aiModelId);
+    const preferred = state.aiModelSuggestion?.preferredProvider;
+    const provider = keyed.includes(saved) ? saved : keyed.includes(preferred) ? preferred : keyed[0];
+    if (provider) await useKeyFor(provider);
+    if (state.aiProviderConfigured) return true;
+    refreshAIStatus();
+    if (!quiet) {
+        addAIMessage('assistant', 'Add an API key first: click the person icon at the bottom left, paste a Google Gemini, OpenAI or Anthropic key, then ask again.');
+        document.getElementById('userBtn')?.click();
+    }
+    return false;
+}
+
 async function loadAIUnifiedModels() {
     try {
         const result = await window.electronAPI.ai.getUnifiedModels();
@@ -3811,16 +3869,31 @@ async function loadAIUnifiedModels() {
 
             const select = document.getElementById('aiModelSelect');
             if (!select) return;
+            const keyed = await providersWithKeys();
+            state.aiKeyedProviders = keyed;
             const firstOption = select.querySelector('option[value=""]');
             select.innerHTML = firstOption ? firstOption.outerHTML : '<option value="">Select model...</option>';
+            // One group per provider; providers with a key come first.
+            const groups = new Map();
             for (const m of result.data) {
-                const opt = document.createElement('option');
-                opt.value = m.id;
-                opt.textContent = modelOptionLabel(m, state.aiModelSuggestion);
-                select.appendChild(opt);
+                if (!groups.has(m.provider)) groups.set(m.provider, []);
+                groups.get(m.provider).push(m);
             }
+            const order = [...groups.keys()].sort((a, b) => Number(keyed.includes(b)) - Number(keyed.includes(a)));
+            for (const provider of order) {
+                const group = document.createElement('optgroup');
+                group.label = `${PROVIDER_LABELS[provider] || provider}${keyed.includes(provider) ? '' : ' · no API key'}`;
+                for (const m of groups.get(provider)) {
+                    const opt = document.createElement('option');
+                    opt.value = m.id;
+                    opt.textContent = modelOptionLabel(m, state.aiModelSuggestion);
+                    group.appendChild(opt);
+                }
+                select.appendChild(group);
+            }
+            if (state.aiModelId) select.value = state.aiModelId;
             syncPinButton();
-            updateAIStatus('Select a model to get started');
+            refreshAIStatus();
         } else {
             updateAIStatus('No models available');
         }
@@ -3840,7 +3913,7 @@ async function selectModelProgrammatically(modelId, { announce = false, previous
         state.aiProviderConfigured = true;
         const select = document.getElementById('aiModelSelect');
         if (select) select.value = modelId;
-        updateAIStatus('Ready');
+        refreshAIStatus();
         saveAIPreferences();
         syncPinButton();
         if (announce) {
@@ -3934,7 +4007,7 @@ async function onAIModelChange(e) {
         const result = await window.electronAPI.ai.setModel(modelId, true);
         if (result.success) {
             state.aiProviderConfigured = true;
-            updateAIStatus('Ready');
+            refreshAIStatus();
             syncPinButton();
             addAIMessage('assistant', 'Model set. How can I help you with your Arduino project?');
         } else if (result.needsKey && result.provider) {
@@ -4006,7 +4079,8 @@ async function saveAPIKeyFromModal() {
         closeAPIKeyModal();
         if (result.success) {
             state.aiProviderConfigured = true;
-            updateAIStatus('API key saved');
+            await loadAIUnifiedModels();
+            refreshAIStatus();
             addAIMessage('assistant', 'API key saved. You can start chatting.');
         } else {
             updateAIStatus(`Error: ${result.error}`);
@@ -4221,10 +4295,7 @@ async function sendAIMessage() {
         return;
     }
 
-    if (!state.aiProviderConfigured) {
-        addAIMessage('assistant', 'Please select a model and enter your API key first.');
-        return;
-    }
+    if (!state.aiProviderConfigured && !await ensureAIModel()) return;
 
     const hasFileOpen = state.currentFile || state.currentSketch;
 
