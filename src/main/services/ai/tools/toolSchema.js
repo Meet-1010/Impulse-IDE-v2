@@ -357,6 +357,55 @@ const TOOL_SCHEMA = {
     }
   },
 
+  // Board and hardware knowledge
+  GET_BOARD_INFO: {
+    name: 'get_board_info',
+    description: 'Real facts about the selected board (or the board given), read from its installed Arduino core: chip, clock, flash and RAM, LED_BUILTIN and any RGB LED (with how to drive it), I2C/SPI/Serial pins, analog pins, board options (e.g. USB CDC On Boot) and notes on traps. Call it before writing code that depends on a pin.',
+    parameters: {
+      type: 'object',
+      properties: {
+        fqbn: { type: 'string', description: 'Board FQBN such as arduino:avr:uno or esp32:esp32:esp32s3. Optional: the selected board when omitted.' },
+        raw: { type: 'boolean', description: 'Also list every pin definition as written in the core (long).' }
+      }
+    }
+  },
+
+  GET_MCU_GUIDE: {
+    name: 'get_mcu_guide',
+    description: 'Rules for a microcontroller family: voltage and per-pin current limits, pins to avoid (strapping, flash, input-only), ADC/DAC/PWM/timer behaviour, interrupts, USB Serial, core API changes (e.g. ESP32 core 2.x vs 3.x) and common mistakes, plus embedded fundamentals.',
+    parameters: {
+      type: 'object',
+      properties: {
+        chip: { type: 'string', description: 'A family or chip, e.g. "esp32-s3", "esp32", "esp8266", "atmega328p", "atmega2560", "atmega32u4", "rp2040", "samd21", "renesas-ra4m1", "nrf52840", "attiny-x5", "stm32", or "general". Optional: the selected board\'s chip when omitted.' },
+        fqbn: { type: 'string', description: 'A board FQBN instead of a chip name.' }
+      }
+    }
+  },
+
+  GET_COMPONENT_GUIDE: {
+    name: 'get_component_guide',
+    description: 'How to use a sensor, display, motor, driver or module with an Arduino-compatible board: interface, supply and logic voltage, I2C address(es), the library to use, wiring and the mistakes that make it not work.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Name, part number or I2C address, e.g. "SSD1306", "DHT22", "HC-SR04", "A4988", "WS2812B", "0x27".' }
+      },
+      required: ['query']
+    }
+  },
+
+  SEARCH_BOARDS: {
+    name: 'search_boards',
+    description: 'Find boards by name across the installed cores and every core in the Boards Manager index. Returns each board\'s FQBN when its core is installed, and the core to install when it isn\'t.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Board name or part of it, e.g. "uno r4", "xiao", "esp32-c3", "pico 2".' }
+      },
+      required: ['query']
+    }
+  },
+
   // Get Current State
   GET_CURRENT_STATE: {
     name: 'get_current_state',

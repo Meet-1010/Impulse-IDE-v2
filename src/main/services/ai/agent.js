@@ -374,10 +374,18 @@ class AIAgent {
     // Trim history to sliding window to prevent unbounded token growth
     this._trimHistory();
 
+    // The selected board's real facts go with every request (not into the
+    // history), so even a model that never calls a tool writes for the right pins.
+    let boardFacts = await this.boardFacts(context.selectedBoard);
+    // Answers earlier in the conversation may be for another board.
+    if (context.selectedBoard && this.lastBoard && this.lastBoard !== context.selectedBoard && this.conversationHistory.length > 1) {
+      boardFacts = `${boardFacts || ''}\n[BOARD CHANGED] The selected board is now ${context.selectedBoard}; earlier messages in this conversation were about ${this.lastBoard}. Use the facts for the current board, not earlier answers.`.trim();
+    }
+    if (context.selectedBoard) this.lastBoard = context.selectedBoard;
     const messages = [
       {
         role: 'system',
-        content: getSystemPrompt(mode)
+        content: boardFacts ? `${getSystemPrompt(mode)}\n\n${boardFacts}` : getSystemPrompt(mode)
       },
       ...this.conversationHistory
     ];
@@ -477,6 +485,17 @@ class AIAgent {
     };
   }
 
+  /** [BOARD FACTS] for the selected board, or null (no board, no core, or arduino-cli too slow). */
+  async boardFacts(fqbn) {
+    const knowledge = this.toolExecutor?.boardKnowledge;
+    if (!fqbn || !knowledge) return null;
+    try {
+      return await Promise.race([knowledge.summary(fqbn), new Promise((resolve) => setTimeout(() => resolve(null), 8000))]);
+    } catch {
+      return null;
+    }
+  }
+
   /**
    * Analyze error with AI assistance
    */
@@ -541,6 +560,7 @@ class AIAgent {
    */
   clearHistory() {
     this.conversationHistory = [];
+    this.lastBoard = null;
   }
 
   /**

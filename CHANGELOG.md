@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The AI knows your board instead of guessing. Every request carries the selected board's real facts, read from its installed core the way the compiler sees them: the chip, clock and logic voltage, what LED_BUILTIN really is (a plain LED, an RGB NeoPixel such as the ESP32-S3's on GPIO48, or not defined at all), and the I2C, SPI and Serial pins. Four new agent tools go further:
+  - get_board_info: any installed board's pins, analog and touch pins, memory, board options (such as USB CDC On Boot) and traps, from any core.
+  - get_mcu_guide: rules for 24 chip families, from the ATmega328P, Mega and Leonardo through megaAVR, ATtiny, SAMD, Renesas (UNO R4), nRF52840, RP2040/RP2350, every ESP32 variant and the ESP8266, to STM32, Teensy and the UNO Q. It covers voltage and current limits, pins to avoid, ADC/PWM/timer behaviour, USB Serial, the ESP32 core 2.x → 3.x API changes, and common mistakes, plus embedded fundamentals.
+  - get_component_guide: 65 sensors, displays, drivers and modules with their interface, voltage, I2C addresses, library and wiring pitfalls, found by name or by I2C address.
+  - search_boards: any board's FQBN and the core it needs, installed or not.
+
+  When the board changes mid-conversation, the AI is told that earlier answers were for the other board.
+
 ### Changed
 
 - Free local models: the model menu offers the ones worth downloading for Impulse that fit the computer's memory, best first, each with what it's good at: Qwen3-Coder 30B and Devstral Small 2 (32 GB and up), Qwen3 14B (24 GB), Qwen3 8B and the code-tuned Rnj-1 8B (16 GB), Qwen3 4B (smaller computers). All of them call tools, which the agent needs.

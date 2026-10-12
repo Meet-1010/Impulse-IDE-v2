@@ -1,4 +1,6 @@
 const { validateToolCall } = require('./toolSchema');
+const BoardKnowledge = require('../knowledge/boardKnowledge');
+const { findComponents, componentText, COMPONENTS } = require('../knowledge/components');
 
 /**
  * Tool Executor
@@ -16,6 +18,11 @@ class ToolExecutor {
 
     // UI state callbacks - set by the main process
     this.uiCallbacks = null;
+
+    // What the agent knows about boards, chips and components (read from the installed cores).
+    this.boardKnowledge = arduinoService && typeof arduinoService.runCommand === 'function'
+      ? new BoardKnowledge((args, opts) => arduinoService.runCommand(args, opts))
+      : null;
 
     // Available baud rates
     this.availableBaudRates = [
@@ -125,6 +132,20 @@ class ToolExecutor {
           break;
         case 'record_fix':
           result = await this.executeRecordFix(toolCall.arguments);
+          break;
+
+        // Board and hardware knowledge
+        case 'get_board_info':
+          result = await this.executeGetBoardInfo(toolCall.arguments);
+          break;
+        case 'get_mcu_guide':
+          result = await this.executeGetMcuGuide(toolCall.arguments);
+          break;
+        case 'get_component_guide':
+          result = this.executeGetComponentGuide(toolCall.arguments);
+          break;
+        case 'search_boards':
+          result = await this.executeSearchBoards(toolCall.arguments);
           break;
 
         // State Operations
@@ -391,6 +412,52 @@ class ToolExecutor {
     }
 
     return { code: null, error: 'Unable to get editor code - UI callback not available' };
+  }
+
+  /** The selected board's FQBN, from the IDE. */
+  async selectedFqbn() {
+    if (this.uiCallbacks?.getSelectedBoard) return (await this.uiCallbacks.getSelectedBoard()) || '';
+    return '';
+  }
+
+  async executeGetBoardInfo(args = {}) {
+    if (!this.boardKnowledge) return { success: false, error: 'Board knowledge needs arduino-cli.' };
+    const fqbn = args.fqbn || await this.selectedFqbn();
+    if (!fqbn) return { success: false, error: 'No board is selected. Ask the user to select one, or pass an FQBN (search_boards finds it).' };
+    try {
+      return { success: true, ...(await this.boardKnowledge.boardInfo(fqbn, { raw: !!args.raw })) };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  }
+
+  async executeGetMcuGuide(args = {}) {
+    if (!this.boardKnowledge) return { success: false, error: 'Board knowledge needs arduino-cli.' };
+    try {
+      const fqbn = args.fqbn || (args.chip ? '' : await this.selectedFqbn());
+      if (!args.chip && !fqbn) return { success: true, guide: await this.boardKnowledge.mcuGuide({ chip: 'general' }) };
+      return { success: true, guide: await this.boardKnowledge.mcuGuide({ chip: args.chip, fqbn }) };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  }
+
+  executeGetComponentGuide(args = {}) {
+    const found = findComponents(args.query);
+    if (!found.length) {
+      return { success: true, found: 0, guide: `Nothing in the component guide matches "${args.query}". Known: ${COMPONENTS.map((c) => c.names[0]).join(', ')}.` };
+    }
+    return { success: true, found: found.length, guide: found.map(componentText).join('\n\n') };
+  }
+
+  async executeSearchBoards(args = {}) {
+    if (!this.boardKnowledge) return { success: false, error: 'Board search needs arduino-cli.' };
+    try {
+      const boards = await this.boardKnowledge.search(String(args.query || '').trim());
+      return { success: true, boards, note: boards.some((b) => !b.installed) ? 'Boards with installed: false need their core installed (Boards Manager) before they can be compiled for.' : undefined };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
   }
 
   async executeSetEditorCode(args) {

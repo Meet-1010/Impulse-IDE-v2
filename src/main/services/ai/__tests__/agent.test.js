@@ -167,6 +167,47 @@ describe('AIAgent', () => {
     });
   });
 
+  describe('board facts with every request', () => {
+    it('puts the selected board\'s facts in the system message, not in the history', async () => {
+      const agent = createAgent();
+      agent.registerProvider('mock', MockProvider);
+      agent.setProvider('mock', 'key');
+      agent.toolExecutor.boardKnowledge = { summary: async (fqbn) => `[BOARD FACTS] ${fqbn}: LED_BUILTIN = RGB LED on GPIO48.` };
+      let system = '';
+      agent.currentProvider.chat = async (msgs) => { system = msgs[0].content; return { content: 'ok', toolCalls: [] }; };
+      await agent.processQuery('blink the LED', { selectedBoard: 'esp32:esp32:esp32s3' }, 'ask');
+      expect(system).toMatch(/\[BOARD FACTS\] esp32:esp32:esp32s3: LED_BUILTIN = RGB LED on GPIO48\./);
+      expect(JSON.stringify(agent.conversationHistory)).not.toMatch(/BOARD FACTS/);
+    });
+
+    it('says when the board changed since earlier messages', async () => {
+      const agent = createAgent();
+      agent.registerProvider('mock', MockProvider);
+      agent.setProvider('mock', 'key');
+      agent.toolExecutor.boardKnowledge = { summary: async (fqbn) => `[BOARD FACTS] ${fqbn}` };
+      const systems = [];
+      agent.currentProvider.chat = async (msgs) => { systems.push(msgs[0].content); return { content: 'ok', toolCalls: [] }; };
+      await agent.processQuery('blink', { selectedBoard: 'esp32:esp32:esp32s3' }, 'ask');
+      await agent.processQuery('again', { selectedBoard: 'esp32:esp32:esp32s3' }, 'ask');
+      await agent.processQuery('and now?', { selectedBoard: 'esp32:esp32:esp32' }, 'ask');
+      expect(systems[1]).not.toMatch(/BOARD CHANGED/);
+      expect(systems[2]).toMatch(/\[BOARD CHANGED\] The selected board is now esp32:esp32:esp32; earlier messages .* esp32:esp32:esp32s3/);
+    });
+
+    it('goes on without them when there is no board or arduino-cli is slow', async () => {
+      const agent = createAgent();
+      agent.registerProvider('mock', MockProvider);
+      agent.setProvider('mock', 'key');
+      agent.toolExecutor.boardKnowledge = { summary: () => new Promise(() => {}) };
+      jest.useFakeTimers();
+      const pending = agent.processQuery('hi', { selectedBoard: 'arduino:avr:uno' }, 'ask');
+      await jest.advanceTimersByTimeAsync(8100);
+      jest.useRealTimers();
+      expect((await pending).response).toBe('Mock response');
+      expect(await agent.boardFacts('')).toBeNull();
+    });
+  });
+
   describe('stopping a turn (the chat\'s Stop)', () => {
     it('cancels the model call in flight and drops the turn from the history', async () => {
       const agent = createAgent();
