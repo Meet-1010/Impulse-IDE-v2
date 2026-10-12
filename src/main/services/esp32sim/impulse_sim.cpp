@@ -354,6 +354,8 @@ void analogSetWidth(uint8_t bits) { if (bits >= 9 && bits <= 12) simAdcBits = bi
 bool adcAttachPin(uint8_t pin) { return pin < SIM_PINS; }
 
 // ── PWM (LEDC), analogWrite, tone and the RGB LED ──
+// Core 2.x drives LEDC by channel (ledcSetup, ledcAttachPin, ledcWrite(channel)),
+// core 3.x by pin (ledcAttach, ledcWrite(pin)); both keep this table.
 
 #define SIM_CHANNELS 16
 static int8_t simChanPin[SIM_CHANNELS] = {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1};
@@ -361,11 +363,185 @@ static uint32_t simChanFreq[SIM_CHANNELS];
 static uint8_t simChanBits[SIM_CHANNELS];
 static uint32_t simChanDuty[SIM_CHANNELS];
 
-static void simPwm(uint8_t chan) {
-  if (chan >= SIM_CHANNELS || simChanPin[chan] < 0) return;
+static void simPwm(int chan) {
+  if (chan < 0 || chan >= SIM_CHANNELS || simChanPin[chan] < 0) return;
   simSendf("P%d,%lu,%u,%lu,%lu\n", simChanPin[chan], (unsigned long)simChanDuty[chan], simChanBits[chan],
     (unsigned long)simChanFreq[chan], simNow());
 }
+
+static int simChanOf(uint8_t pin) {
+  for (int c = 0; c < SIM_CHANNELS; c++) if (simChanPin[c] == pin) return c;
+  return -1;
+}
+
+static int simFreeChan() {
+  for (int c = SIM_CHANNELS - 1; c >= 0; c--) if (simChanPin[c] < 0) return c;
+  return -1;
+}
+
+static void simRelease(uint8_t pin) {
+  for (int c = 0; c < SIM_CHANNELS; c++) {
+    if (simChanPin[c] != pin) continue;
+    simChanPin[c] = -1;
+    simSendf("P%u,-1,0,0,%lu\n", pin, simNow());
+  }
+}
+
+static uint32_t simTone(int chan, uint32_t freq) {
+  if (chan < 0) return 0;
+  simChanFreq[chan] = freq;
+  simChanBits[chan] = 10;
+  simChanDuty[chan] = freq ? 0x1FF : 0;
+  simPwm(chan);
+  return freq;
+}
+
+static uint32_t simNoteFreq(note_t note, uint8_t octave) {
+  static const uint16_t base[] = {4186, 4435, 4699, 4978, 5274, 5588, 5920, 6272, 6645, 7040, 7459, 7902};
+  if (octave > 8 || note >= NOTE_MAX) return 0;
+  return base[note] / (1 << (8 - octave));
+}
+
+static uint32_t simWriteFreq = 1000;
+static uint8_t simWriteBits = 8;
+
+void __wrap_analogWrite(uint8_t pin, int value) {
+  if (pin >= SIM_PINS) return;
+  int chan = simChanOf(pin);
+  if (chan < 0) {
+    chan = simFreeChan();
+    if (chan < 0) return;
+    simChanPin[chan] = (int8_t)pin;
+    simChanFreq[chan] = simWriteFreq;
+    simChanBits[chan] = simWriteBits;
+    simMode[pin] = OUTPUT;
+  }
+  uint32_t max = (1u << simChanBits[chan]) - 1;
+  simChanDuty[chan] = value < 0 ? 0 : (uint32_t)value > max ? max : (uint32_t)value;
+  simPwm(chan);
+}
+
+#if ESP_ARDUINO_VERSION_MAJOR >= 3
+
+static bool simLedcAttach(uint8_t pin, uint32_t freq, uint8_t bits, int chan) {
+  if (pin >= SIM_PINS || bits < 1 || bits > 20 || chan < 0 || chan >= SIM_CHANNELS) return false;
+  simRelease(pin);
+  simChanPin[chan] = (int8_t)pin;
+  simChanFreq[chan] = freq;
+  simChanBits[chan] = bits;
+  simChanDuty[chan] = 0;
+  simMode[pin] = OUTPUT;
+  simPwm(chan);
+  return true;
+}
+
+bool __wrap_ledcAttach(uint8_t pin, uint32_t freq, uint8_t bits) { return simLedcAttach(pin, freq, bits, simFreeChan()); }
+bool __wrap_ledcAttachChannel(uint8_t pin, uint32_t freq, uint8_t bits, uint8_t chan) { return simLedcAttach(pin, freq, bits, chan); }
+
+bool __wrap_ledcWrite(uint8_t pin, uint32_t duty) {
+  int chan = simChanOf(pin);
+  if (chan < 0) return false;
+  simChanDuty[chan] = duty;
+  simPwm(chan);
+  return true;
+}
+
+bool __wrap_ledcWriteChannel(uint8_t chan, uint32_t duty) {
+  if (chan >= SIM_CHANNELS || simChanPin[chan] < 0) return false;
+  simChanDuty[chan] = duty;
+  simPwm(chan);
+  return true;
+}
+
+uint32_t __wrap_ledcRead(uint8_t pin) { int c = simChanOf(pin); return c < 0 ? 0 : simChanDuty[c]; }
+uint32_t __wrap_ledcReadFreq(uint8_t pin) { int c = simChanOf(pin); return c < 0 || !simChanDuty[c] ? 0 : simChanFreq[c]; }
+
+uint32_t __wrap_ledcWriteTone(uint8_t pin, uint32_t freq) {
+  int chan = simChanOf(pin);
+  if (chan < 0 && !simLedcAttach(pin, freq ? freq : 1000, 10, simFreeChan())) return 0;
+  return simTone(simChanOf(pin), freq);
+}
+
+uint32_t __wrap_ledcWriteNote(uint8_t pin, note_t note, uint8_t octave) { return __wrap_ledcWriteTone(pin, simNoteFreq(note, octave)); }
+
+bool __wrap_ledcDetach(uint8_t pin) { simRelease(pin); return true; }
+
+uint32_t __wrap_ledcChangeFrequency(uint8_t pin, uint32_t freq, uint8_t bits) {
+  int chan = simChanOf(pin);
+  if (chan < 0 || bits < 1 || bits > 20) return 0;
+  simChanFreq[chan] = freq;
+  simChanBits[chan] = bits;
+  simPwm(chan);
+  return freq;
+}
+
+bool __wrap_ledcOutputInvert(uint8_t pin, bool invert) { (void)invert; return simChanOf(pin) >= 0; }
+
+// Fades jump to their end; the "done" callback comes when the fade would have ended.
+struct SimFade { void (*fn)(void *); void *arg; bool hasArg; };
+static void simFadeDone(void *p) {
+  SimFade *f = (SimFade *)p;
+  if (f->hasArg) f->fn(f->arg);
+  else ((void (*)(void))f->fn)();
+  delete f;
+}
+
+static bool simFade(uint8_t pin, uint32_t target, int ms, void (*fn)(void *), void *arg, bool hasArg) {
+  if (!__wrap_ledcWrite(pin, target)) return false;
+  if (!fn) return true;
+  esp_timer_create_args_t args = {};
+  args.callback = simFadeDone;
+  args.arg = new SimFade{fn, arg, hasArg};
+  esp_timer_handle_t timer;
+  if (esp_timer_create(&args, &timer) != ESP_OK) return false;
+  esp_timer_start_once(timer, (uint64_t)(ms > 0 ? ms : 1) * 1000);
+  return true;
+}
+
+bool __wrap_ledcFade(uint8_t pin, uint32_t start, uint32_t target, int ms) { (void)start; return simFade(pin, target, ms, NULL, NULL, false); }
+bool __wrap_ledcFadeWithInterrupt(uint8_t pin, uint32_t start, uint32_t target, int ms, void (*fn)(void)) {
+  (void)start;
+  return simFade(pin, target, ms, (void (*)(void *))fn, NULL, false);
+}
+bool __wrap_ledcFadeWithInterruptArg(uint8_t pin, uint32_t start, uint32_t target, int ms, void (*fn)(void *), void *arg) {
+  (void)start;
+  return simFade(pin, target, ms, fn, arg, true);
+}
+bool __wrap_ledcFadeGamma(uint8_t pin, uint32_t start, uint32_t target, int ms) { return __wrap_ledcFade(pin, start, target, ms); }
+bool __wrap_ledcFadeGammaWithInterrupt(uint8_t pin, uint32_t start, uint32_t target, int ms, void (*fn)(void)) {
+  return __wrap_ledcFadeWithInterrupt(pin, start, target, ms, fn);
+}
+bool __wrap_ledcFadeGammaWithInterruptArg(uint8_t pin, uint32_t start, uint32_t target, int ms, void (*fn)(void *), void *arg) {
+  return __wrap_ledcFadeWithInterruptArg(pin, start, target, ms, fn, arg);
+}
+
+void __wrap_analogWriteFrequency(uint8_t pin, uint32_t freq) {
+  if (!freq) return;
+  int chan = simChanOf(pin);
+  if (chan < 0) { simWriteFreq = freq; return; }
+  simChanFreq[chan] = freq;
+  simPwm(chan);
+}
+
+void __wrap_analogWriteResolution(uint8_t pin, uint8_t bits) {
+  if (bits < 1 || bits > 16) return;
+  int chan = simChanOf(pin);
+  if (chan < 0) { simWriteBits = bits; return; }
+  simChanBits[chan] = bits;
+  simPwm(chan);
+}
+
+void __wrap_rgbLedWriteOrdered(uint8_t pin, rgb_led_color_order_t order, uint8_t r, uint8_t g, uint8_t b) {
+  (void)order;
+#ifdef RGB_BUILTIN
+  if (pin == RGB_BUILTIN) pin = RGB_BUILTIN - SOC_GPIO_PIN_COUNT;
+#endif
+  simSendf("N%u,%u,%u,%u,%lu\n", pin, r, g, b, simNow());
+}
+
+void __wrap_rgbLedWrite(uint8_t pin, uint8_t r, uint8_t g, uint8_t b) { __wrap_rgbLedWriteOrdered(pin, LED_COLOR_ORDER_GRB, r, g, b); }
+
+#else  // core 2.x
 
 uint32_t __wrap_ledcSetup(uint8_t chan, uint32_t freq, uint8_t bits) {
   if (chan >= SIM_CHANNELS || bits < 1 || bits > 20) return 0;
@@ -386,13 +562,7 @@ void __wrap_ledcAttachPin(uint8_t pin, uint8_t chan) {
   simPwm(chan);
 }
 
-void __wrap_ledcDetachPin(uint8_t pin) {
-  for (int c = 0; c < SIM_CHANNELS; c++) {
-    if (simChanPin[c] != pin) continue;
-    simChanPin[c] = -1;
-    simSendf("P%u,-1,0,0,%lu\n", pin, simNow());
-  }
-}
+void __wrap_ledcDetachPin(uint8_t pin) { simRelease(pin); }
 
 void __wrap_ledcWrite(uint8_t chan, uint32_t duty) {
   if (chan >= SIM_CHANNELS) return;
@@ -402,48 +572,13 @@ void __wrap_ledcWrite(uint8_t chan, uint32_t duty) {
 
 uint32_t __wrap_ledcRead(uint8_t chan) { return chan < SIM_CHANNELS ? simChanDuty[chan] : 0; }
 uint32_t __wrap_ledcReadFreq(uint8_t chan) { return chan < SIM_CHANNELS && simChanDuty[chan] ? simChanFreq[chan] : 0; }
-
-uint32_t __wrap_ledcWriteTone(uint8_t chan, uint32_t freq) {
-  if (chan >= SIM_CHANNELS) return 0;
-  if (!freq) {
-    __wrap_ledcWrite(chan, 0);
-    return 0;
-  }
-  simChanFreq[chan] = freq;
-  simChanBits[chan] = 10;
-  simChanDuty[chan] = 0x1FF;
-  simPwm(chan);
-  return freq;
-}
-
-uint32_t __wrap_ledcWriteNote(uint8_t chan, note_t note, uint8_t octave) {
-  static const uint16_t base[] = {4186, 4435, 4699, 4978, 5274, 5588, 5920, 6272, 6645, 7040, 7459, 7902};
-  if (octave > 8 || note >= NOTE_MAX) return 0;
-  return __wrap_ledcWriteTone(chan, base[note] / (1 << (8 - octave)));
-}
-
-static uint32_t simWriteFreq = 1000;
-static uint8_t simWriteBits = 8;
-
-void __wrap_analogWrite(uint8_t pin, int value) {
-  if (pin >= SIM_PINS) return;
-  int chan = -1;
-  for (int c = 0; c < SIM_CHANNELS; c++) if (simChanPin[c] == pin) chan = c;
-  if (chan < 0) {
-    for (int c = SIM_CHANNELS - 1; c >= 0; c--) if (simChanPin[c] < 0) { chan = c; break; }
-    if (chan < 0) return;
-    simChanPin[chan] = (int8_t)pin;
-    simChanFreq[chan] = simWriteFreq;
-    simChanBits[chan] = simWriteBits;
-    simMode[pin] = OUTPUT;
-  }
-  uint32_t max = (1u << simChanBits[chan]) - 1;
-  simChanDuty[chan] = value < 0 ? 0 : (uint32_t)value > max ? max : (uint32_t)value;
-  simPwm(chan);
-}
+uint32_t __wrap_ledcWriteTone(uint8_t chan, uint32_t freq) { return chan < SIM_CHANNELS ? simTone(chan, freq) : 0; }
+uint32_t __wrap_ledcWriteNote(uint8_t chan, note_t note, uint8_t octave) { return __wrap_ledcWriteTone(chan, simNoteFreq(note, octave)); }
 
 void __wrap_analogWriteFrequency(uint32_t freq) { if (freq) simWriteFreq = freq; }
 void __wrap_analogWriteResolution(uint8_t bits) { if (bits >= 1 && bits <= 16) simWriteBits = bits; }
+
+#endif
 
 void __wrap_neopixelWrite(uint8_t pin, uint8_t r, uint8_t g, uint8_t b) {
 #ifdef RGB_BUILTIN

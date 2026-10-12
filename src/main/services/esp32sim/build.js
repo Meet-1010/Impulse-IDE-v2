@@ -31,8 +31,11 @@ function bridgeSource() {
 /** Functions the bridge takes over at link time (the rest are weak in the core). */
 const WRAPPED = [
   'initArduino', '__attachInterruptFunctionalArg', 'pulseIn', 'pulseInLong',
+  // LEDC by channel (core 2.x) and by pin (core 3.x): the bridge defines the set its core has.
   'ledcSetup', 'ledcChangeFrequency', 'ledcAttachPin', 'ledcDetachPin', 'ledcWrite', 'ledcRead', 'ledcReadFreq',
-  'ledcWriteTone', 'ledcWriteNote', 'analogWrite', 'analogWriteFrequency', 'analogWriteResolution', 'neopixelWrite',
+  'ledcWriteTone', 'ledcWriteNote', 'ledcAttach', 'ledcAttachChannel', 'ledcWriteChannel', 'ledcDetach', 'ledcOutputInvert',
+  'ledcFade', 'ledcFadeWithInterrupt', 'ledcFadeWithInterruptArg', 'ledcFadeGamma', 'ledcFadeGammaWithInterrupt', 'ledcFadeGammaWithInterruptArg',
+  'analogWrite', 'analogWriteFrequency', 'analogWriteResolution', 'neopixelWrite', 'rgbLedWrite', 'rgbLedWriteOrdered',
   'i2cInit', 'i2cDeinit', 'i2cIsInit', 'i2cSetClock', 'i2cGetClock', 'i2cWrite', 'i2cRead', 'i2cWriteReadNonStop',
   'double_tap_init', 'double_tap_mark', 'double_tap_invalidate', 'double_tap_check_match',
 ];
@@ -124,7 +127,8 @@ function copySketch(from, to) {
         if (bytes > MAX_COPY_BYTES) throw new Error('The sketch folder is too large to simulate (over 64 MB). Move data files out of it.');
         wanted.add(d);
         const prev = fs.existsSync(d) ? fs.statSync(d) : null;
-        if (!prev || prev.mtimeMs !== st.mtimeMs || prev.size !== st.size) fs.cpSync(s, d, { preserveTimestamps: true });
+        // Copied timestamps keep whole milliseconds only.
+        if (!prev || Math.abs(prev.mtimeMs - st.mtimeMs) >= 1 || prev.size !== st.size) fs.cpSync(s, d, { preserveTimestamps: true });
       }
     }
   };
