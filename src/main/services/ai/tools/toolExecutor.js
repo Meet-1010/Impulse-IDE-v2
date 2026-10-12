@@ -396,6 +396,12 @@ class ToolExecutor {
   async executeSetEditorCode(args) {
     const { code } = args;
 
+    // With no sketch open the editor is hidden: the code would vanish while
+    // the tool reported success.
+    if (this.uiCallbacks?.getCurrentSketchPath && !(await this.uiCallbacks.getCurrentSketchPath())) {
+      return { success: false, error: 'No sketch open, so there is no editor to write to. Ask the user to create a sketch (File › New Sketch) or open one, and show them the code in your answer meanwhile.' };
+    }
+
     if (this.uiCallbacks && this.uiCallbacks.setEditorCode) {
       await this.uiCallbacks.setEditorCode(code);
       return { success: true };

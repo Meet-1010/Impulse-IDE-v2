@@ -130,8 +130,11 @@ function register(ipcMain, ctx) {
 
   ipcMain.handle('ai:get-unified-models', withDebugLog('ai:get-unified-models', async () => {
     try {
+      // Local models first, so Ollama's list is current when the menu is built.
+      const local = await aiAgent.refreshLocalModels();
       const list = aiAgent.getUnifiedModelList();
-      return { success: true, data: list ?? [] };
+      const OllamaProvider = require('../services/ai/providers/ollamaProvider');
+      return { success: true, data: list ?? [], local: { running: local.running, count: local.models.length, recommended: OllamaProvider.recommendedModel() } };
     } catch (error) {
       return { success: false, error: error?.message ?? 'Get models failed' };
     }
@@ -143,7 +146,7 @@ function register(ipcMain, ctx) {
     try {
       const providerName = AIAgent.getProviderFromModel(parsed.data.modelId);
       if (!providerName) return { success: false, error: 'Unknown model' };
-      const key = apiKeyManager.getAPIKey(providerName);
+      const key = AIAgent.isKeyless(providerName) ? 'local' : apiKeyManager.getAPIKey(providerName);
       if (!key || key.trim().length === 0) {
         return { success: false, error: 'API key required', needsKey: true, provider: providerName };
       }
@@ -162,6 +165,9 @@ function register(ipcMain, ctx) {
   ipcMain.handle('ai:get-model-suggestion', withDebugLog('ai:get-model-suggestion', async () => {
     try {
       const providersWithKeys = apiKeyManager.getAllProviders();
+      // Installed local models count as a provider you can use right away.
+      const local = await aiAgent.refreshLocalModels();
+      if (local.models.length) providersWithKeys.push('ollama');
       const suggestion = await aiAgent.getModelSuggestion(providersWithKeys);
       return { success: true, data: suggestion };
     } catch (error) {
@@ -215,6 +221,30 @@ function register(ipcMain, ctx) {
       return { success: true, data: stats ?? {} };
     } catch (error) {
       return { success: false, error: error?.message ?? 'Get stats failed' };
+    }
+  }));
+
+  ipcMain.handle('ai:start-local', withDebugLog('ai:start-local', async () => {
+    try {
+      const OllamaProvider = require('../services/ai/providers/ollamaProvider');
+      const started = await OllamaProvider.start();
+      if (!started.success) return started;
+      const local = await aiAgent.refreshLocalModels();
+      return { success: true, running: local.running, count: local.models.length };
+    } catch (error) {
+      return { success: false, error: error?.message ?? 'Could not start Ollama' };
+    }
+  }));
+
+  ipcMain.handle('ai:pull-local-model', withDebugLog('ai:pull-local-model', async (event, model) => {
+    const OllamaProvider = require('../services/ai/providers/ollamaProvider');
+    const name = typeof model === 'string' && /^[\w.:/-]{1,100}$/.test(model) ? model : OllamaProvider.recommendedModel().name;
+    try {
+      return await OllamaProvider.pull(name, (p) => {
+        if (!event.sender.isDestroyed()) event.sender.send('ai:local-progress', p);
+      });
+    } catch (error) {
+      return { success: false, error: error?.message ?? 'Download failed' };
     }
   }));
 

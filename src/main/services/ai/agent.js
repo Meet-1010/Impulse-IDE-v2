@@ -6,6 +6,10 @@ const { getAllTools, getDebugTools } = require('./tools/toolSchema');
 const OpenAIProvider = require('./providers/openaiProvider');
 const GeminiProvider = require('./providers/geminiProvider');
 const ClaudeProvider = require('./providers/claudeProvider');
+const OllamaProvider = require('./providers/ollamaProvider');
+
+/** Providers that run locally and need no API key. */
+const KEYLESS = new Set(['ollama']);
 
 /**
  * AI Agent
@@ -78,6 +82,20 @@ class AIAgent {
     this.providers.set('openai', OpenAIProvider);
     this.providers.set('gemini', GeminiProvider);
     this.providers.set('claude', ClaudeProvider);
+    this.providers.set('ollama', OllamaProvider);
+  }
+
+  /** Whether a provider works without an API key (models on this computer). */
+  static isKeyless(providerName) {
+    return KEYLESS.has(providerName);
+  }
+
+  /**
+   * Look for local models (Ollama). Quick, and never throws.
+   * @returns {Promise<{ running: boolean, models: Array<object>, error?: string }>}
+   */
+  async refreshLocalModels() {
+    return OllamaProvider.listModels();
   }
 
   /**
@@ -108,6 +126,7 @@ class AIAgent {
   static getProviderFromModel(modelId) {
     if (!modelId || typeof modelId !== 'string') return null;
     const id = modelId.toLowerCase();
+    if (OllamaProvider.isModelId(id)) return 'ollama';
     if (id.startsWith('claude-')) return 'claude';
     if (id.startsWith('gpt-') || /^o\d/.test(id)) return 'openai';
     if (id.startsWith('gemini-')) return 'gemini';
@@ -157,7 +176,7 @@ class AIAgent {
       models.forEach((modelId, idx) => {
         list.push({
           id: modelId,
-          displayName: displayNames[modelId] || modelId,
+          displayName: displayNames[modelId] || (providerName === 'ollama' ? OllamaProvider.displayName(modelId) : modelId),
           provider: providerName,
           latest: idx === 0
         });

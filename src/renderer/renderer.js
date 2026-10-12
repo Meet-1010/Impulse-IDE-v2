@@ -9,7 +9,7 @@ import { askDialog, confirmDialog, preferencesDialog, reportProblemDialog, board
 import { baseFqbn, composeFqbn, effectiveChoices, suggestedChoices, loadChoices, saveChoices, describePort, sortPorts } from './board-options.js';
 import { ensureToolchain } from './setup.js';
 import { runSimulatorCheck, renderTestReport, renderVerifyCard, isSimulatableBoard, simulationContext } from './verify.js';
-import { boardForFqbn, simulatedBoardsText } from './simulation/boards.js';
+import { boardForFqbn, simulationTarget, simulatedBoardsText } from './simulation/boards.js';
 import { attachPinInsights } from './pin-insights.js';
 import { attachBreakpoints } from './breakpoints.js';
 import { setupSourceControl } from './source-control.js';
@@ -17,6 +17,7 @@ import { detectBaud, diffSerial, captureBoardSerial, renderCompareReport } from 
 import { runHeadless } from './simulation/headless.js';
 import { programOf } from './simulation/runners.js';
 import { createChatOrb, COPY as ORB_COPY } from './morph-orb/morph-orb.js';
+import { pickDetectedBoard } from './board-detect.js';
 
 // UI State — exposed on window so other modules (validation.js, etc.) can access it
 // without relying on bundler scope-hoisting accidents.
@@ -1018,7 +1019,7 @@ async function compareSimulatorWithBoard() {
     if (!requireSketchAndBoard()) return;
     const simBoard = boardForFqbn(state.selectedBoard);
     if (!simBoard) {
-        logToConsole(`The simulator runs ${simulatedBoardsText()}, so only those boards can be compared.`, 'warning');
+        logToConsole(`The simulator runs ${simulatedBoardsText()}, so only those can be compared.`, 'warning');
         return;
     }
     if (!state.selectedPort) {
@@ -1056,7 +1057,7 @@ async function compareSimulatorWithBoard() {
         }
         const context = simulationContext();
         const circuit = context.board === simBoard.id ? context.circuit : null;
-        const sim = await runHeadless(programOf(compiled), { seconds: COMPARE_SECONDS, board: simBoard.id, circuit });
+        const sim = await runHeadless(programOf(compiled), { seconds: COMPARE_SECONDS, board: simBoard.id, mcu: simulationTarget(state.selectedBoard)?.mcu, circuit });
 
         if (mode === 'upload') {
             container.innerHTML = '<p class="tests-hint">Uploading to the board…</p>';
@@ -2139,6 +2140,47 @@ async function refreshPortsQuiet() {
 
     added.forEach(p => logToConsole(`Detected new port: ${p.port}${p.board ? ` (${p.board})` : ''}`, 'success'));
     removed.forEach(p => logToConsole(`Port removed: ${p.port}`, 'warning'));
+
+    const pick = pickDetectedBoard({
+        ports, added, isBaseline,
+        selectedBoard: state.selectedBoard, selectedPort: state.selectedPort,
+        installed: (fqbn) => state.boards.some(b => b.fqbn === fqbn),
+    });
+    if (pick) applyDetectedBoard(pick);
+}
+
+/** Select a connected board (and its port) as if it had been picked from the menus. */
+function applyDetectedBoard(pick) {
+    const boardSel = document.getElementById('boardSelectSidebar');
+    const portSel = document.getElementById('portSelectSidebar');
+    if (pick.fqbn && !pick.keepBoard) {
+        state.selectedBoard = pick.fqbn;
+        state.context.selectedBoard = pick.fqbn;
+        if (boardSel) boardSel.value = pick.fqbn;
+        announceBoard();
+    }
+    state.selectedPort = pick.port;
+    state.context.selectedPort = pick.port;
+    if (portSel) portSel.value = pick.port;
+    window.electronAPI.ui.updatePort(pick.port);
+    syncBoardFqbn();
+    const board = state.boards.find(b => b.fqbn === state.selectedBoard);
+    updateBoardPortDisplay(board?.name || null, pick.port);
+    updateAIContext();
+    saveSession();
+    loadSavedBoardPortOptions();
+    if (!pick.fqbn) {
+        const names = pick.choices.slice(0, 3).map(b => b.name).join(', ') + (pick.choices.length > 3 ? '…' : '');
+        logToConsole(`A board on ${pick.port} could be ${names}. Choose which in the board menu.`, 'warning');
+        window.notifications?.info?.(`Board connected on ${pick.port}. Choose which board it is in the board menu.`);
+        return;
+    }
+    const sim = boardForFqbn(pick.fqbn) ? ' The simulator follows it.' : '';
+    const msg = pick.keepBoard
+        ? `${pick.name} found on ${pick.port}: port selected.`
+        : `${pick.name} ${pick.reason === 'plugged-in' ? 'plugged in' : 'connected'} on ${pick.port}: selected for upload.${sim}`;
+    logToConsole(msg, 'success');
+    window.notifications?.info?.(msg);
 }
 
 function startPortAutoRefresh() {
@@ -3736,6 +3778,12 @@ async function restoreAIPreferences() {
             if (modelSelect) {
                 modelSelect.value = prefs.modelId;
             }
+            // A local model needs Ollama running; don't claim it's ready when it isn't.
+            if (providerOfModel(prefs.modelId) === 'ollama' && !state.aiUnifiedModels.some(m => m.id === prefs.modelId)) {
+                state.aiProviderConfigured = false;
+                updateAIStatus('Ollama isn\'t running: choose "Start Ollama…" in the model menu');
+                return;
+            }
             // Actually initialize the provider on the backend using the saved API key
             try {
                 const result = await window.electronAPI.ai.setModel(prefs.modelId);
@@ -3763,6 +3811,7 @@ async function restoreAIPreferences() {
 function providerOfModel(modelId) {
     if (!modelId || typeof modelId !== 'string') return null;
     const id = modelId.toLowerCase();
+    if (id.startsWith('ollama:')) return 'ollama';
     if (id.startsWith('claude-')) return 'claude';
     if (id.startsWith('gpt-') || /^o\d/.test(id)) return 'openai';
     if (id.startsWith('gemini-')) return 'gemini';
@@ -3792,15 +3841,69 @@ function modelOptionLabel(m, suggestion) {
     return badges.length ? `${label}  ${badges.join(' ')}` : label;
 }
 
-const PROVIDER_LABELS = { gemini: 'Google Gemini', openai: 'OpenAI', claude: 'Anthropic Claude' };
+const PROVIDER_LABELS = { gemini: 'Google Gemini', openai: 'OpenAI', claude: 'Anthropic Claude', ollama: 'Ollama · free, on this computer' };
+// Menu entries that are actions, not models (Ollama isn't running or has no models).
+const OLLAMA_START = '__ollama_start__';
+const OLLAMA_PULL = '__ollama_pull__';
 
-/** Providers with an API key saved, e.g. ['gemini']. */
+/**
+ * Providers the chat can use now: those with an API key saved, plus Ollama
+ * when it's running with at least one model (no key needed), e.g. ['gemini', 'ollama'].
+ */
 async function providersWithKeys() {
+    const out = [];
     try {
         const res = await window.electronAPI.apiKeys.list();
-        if (res?.success) return Object.entries(res.data || {}).filter(([, v]) => v?.hasKey).map(([p]) => p);
+        if (res?.success) out.push(...Object.entries(res.data || {}).filter(([, v]) => v?.hasKey).map(([p]) => p));
     } catch (_) { /* none */ }
-    return [];
+    if (state.aiLocal?.count > 0 && !out.includes('ollama')) out.push('ollama');
+    return out;
+}
+
+/** Start Ollama from the model menu, then use its newest model. */
+async function startLocalModels() {
+    updateAIStatus('Starting Ollama…');
+    const res = await window.electronAPI.ai.startLocal().catch((e) => ({ success: false, error: e?.message }));
+    if (res?.notInstalled) {
+        addAIMessage('assistant', 'Ollama runs AI models on your own computer, free and without an API key. Install it from ollama.com/download, pull a model with tool support (for example `ollama pull qwen3`), then choose it in the model menu under the chat.');
+        window.electronAPI.openExternal?.('https://ollama.com/download');
+        await loadAIUnifiedModels();
+        return;
+    }
+    if (!res?.success) {
+        updateAIStatus(res?.error || 'Could not start Ollama');
+        await loadAIUnifiedModels();
+        return;
+    }
+    await loadAIUnifiedModels();
+    if (!res.count) {
+        await pullLocalModel();
+        return;
+    }
+    await useKeyFor('ollama');
+}
+
+/** Download the recommended free model through Ollama, with progress under the chat. */
+async function pullLocalModel() {
+    const rec = state.aiLocal?.recommended;
+    if (!rec) return;
+    const ok = await confirmDialog(`Download ${rec.displayName}?`,
+        `A free AI model that runs on this computer, with no API key: a one-time download of ${rec.size} through Ollama. Answers take longer than a cloud model's, and nothing leaves your computer.`,
+        { confirmLabel: 'Download' });
+    if (!ok) return;
+    const stop = window.electronAPI.ai.onLocalProgress?.((p) => {
+        updateAIStatus(p.percent === null ? `${rec.displayName}: ${p.status}` : `Downloading ${rec.displayName}… ${p.percent}%`);
+    });
+    const res = await window.electronAPI.ai.pullLocal(rec.name).catch((e) => ({ success: false, error: e?.message }));
+    stop?.();
+    await loadAIUnifiedModels();
+    if (!res?.success) {
+        updateAIStatus(res?.error || 'The download failed');
+        return;
+    }
+    if (await selectModelProgrammatically(res.id)) {
+        addAIMessage('assistant', `${rec.displayName} is ready. It runs on your computer, free: ask away.`);
+    }
 }
 
 const modelName = (id) => (state.aiUnifiedModels.find(m => m.id === id) || {}).displayName || id;
@@ -3808,7 +3911,7 @@ const modelName = (id) => (state.aiUnifiedModels.find(m => m.id === id) || {}).d
 /** The line under the composer: which model answers, or what to do first. */
 function refreshAIStatus() {
     if (state.aiProviderConfigured && state.aiModelId) updateAIStatus(`Ready · ${modelName(state.aiModelId)}`);
-    else if (!state.aiKeyedProviders?.length) updateAIStatus('Add an API key to start: the person icon, bottom left');
+    else if (!state.aiKeyedProviders?.length) updateAIStatus('Add an API key (the person icon, bottom left), or pick Ollama in the model menu to run a free local model');
     else updateAIStatus('Choose a model to start');
 }
 
@@ -3849,7 +3952,7 @@ async function ensureAIModel({ quiet = false } = {}) {
     if (state.aiProviderConfigured) return true;
     refreshAIStatus();
     if (!quiet) {
-        addAIMessage('assistant', 'Add an API key first: click the person icon at the bottom left, paste a Google Gemini, OpenAI or Anthropic key, then ask again.');
+        addAIMessage('assistant', 'Choose how the AI runs first. Add a Google Gemini, OpenAI or Anthropic key (the person icon at the bottom left), or run a free model on this computer with Ollama: pick "Ollama" in the model menu under the chat.');
         document.getElementById('userBtn')?.click();
     }
     return false;
@@ -3858,6 +3961,7 @@ async function ensureAIModel({ quiet = false } = {}) {
 async function loadAIUnifiedModels() {
     try {
         const result = await window.electronAPI.ai.getUnifiedModels();
+        if (result.success) state.aiLocal = result.local || { running: false, count: 0 };
         if (result.success && result.data && result.data.length > 0) {
             state.aiUnifiedModels = result.data;
 
@@ -3879,14 +3983,29 @@ async function loadAIUnifiedModels() {
                 if (!groups.has(m.provider)) groups.set(m.provider, []);
                 groups.get(m.provider).push(m);
             }
+            // Ollama always gets a group: its models, or a way to start it.
+            if (!groups.has('ollama')) groups.set('ollama', []);
             const order = [...groups.keys()].sort((a, b) => Number(keyed.includes(b)) - Number(keyed.includes(a)));
             for (const provider of order) {
                 const group = document.createElement('optgroup');
-                group.label = `${PROVIDER_LABELS[provider] || provider}${keyed.includes(provider) ? '' : ' · no API key'}`;
+                const keyless = provider === 'ollama';
+                group.label = `${PROVIDER_LABELS[provider] || provider}${keyless || keyed.includes(provider) ? '' : ' · no API key'}`;
                 for (const m of groups.get(provider)) {
                     const opt = document.createElement('option');
                     opt.value = m.id;
                     opt.textContent = modelOptionLabel(m, state.aiModelSuggestion);
+                    group.appendChild(opt);
+                }
+                if (keyless && !groups.get(provider).length) {
+                    const opt = document.createElement('option');
+                    if (state.aiLocal?.running) {
+                        const rec = state.aiLocal.recommended;
+                        opt.value = OLLAMA_PULL;
+                        opt.textContent = rec ? `Download ${rec.displayName} (${rec.size})…` : 'Download a model…';
+                    } else {
+                        opt.value = OLLAMA_START;
+                        opt.textContent = 'Start Ollama…';
+                    }
                     group.appendChild(opt);
                 }
                 select.appendChild(group);
@@ -3956,8 +4075,10 @@ async function applyModelAutoUpgrade() {
         // Respect an explicit pin or a disabled auto-upgrade.
         if (s.pinned || !s.autoUpgrade) return;
 
-        // Upgrade only within the same provider family.
+        // Upgrade only within the same provider family. Local models are the
+        // ones you pulled: there's no "newer" one to move to.
         const savedProvider = providerOfModel(saved);
+        if (savedProvider === 'ollama') return;
         const latestForSaved = s.latestByProvider && s.latestByProvider[savedProvider];
         if (latestForSaved && latestForSaved !== saved) {
             await selectModelProgrammatically(latestForSaved, { announce: true, previous: saved });
@@ -3992,6 +4113,12 @@ async function togglePinCurrentModel() {
 
 async function onAIModelChange(e) {
     const modelId = e.target.value;
+    if (modelId === OLLAMA_START || modelId === OLLAMA_PULL) {
+        e.target.value = state.aiModelId || '';
+        if (modelId === OLLAMA_START) await startLocalModels();
+        else await pullLocalModel();
+        return;
+    }
     if (!modelId) {
         state.aiModelId = null;
         state.aiProviderConfigured = false;

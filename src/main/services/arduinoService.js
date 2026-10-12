@@ -440,7 +440,10 @@ class ArduinoService {
             ? item.matching_boards[0].name
             : (port.protocol_label || 'Unknown');
           const props = port.properties || {};
-          ports.push({ port: port.address, protocol: port.protocol || 'serial', board: boardName, vid: props.vid || null, pid: props.pid || null });
+          // Boards arduino-cli recognised by USB id (from the installed cores),
+          // so the IDE can select the one that was just plugged in.
+          const boards = (item.matching_boards || []).filter(b => b && b.fqbn).map(b => ({ name: b.name, fqbn: b.fqbn }));
+          ports.push({ port: port.address, protocol: port.protocol || 'serial', board: boardName, vid: props.vid || null, pid: props.pid || null, boards });
         }
       }
     }
