@@ -7,7 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Free AI on your own computer with Ollama, no API key: installed models appear in the model menu under "Ollama · free, on this computer", and with no key saved the chat uses one by itself. "Start Ollama…" opens it when it isn't running (or points to the download when it isn't installed), and with no model yet "Download Qwen3…" fetches one sized to the computer, with progress. The agent's tools work with local models that support them, including the ones that write a tool call as JSON text instead of a structured call (Qwen2.5 Coder); thinking models answer directly instead of reasoning at length; a model without tool support answers in text and says so. Ollama is reached at `127.0.0.1:11434`, or at `OLLAMA_HOST`.
+- The board you plug in is selected for upload, with its port, and the simulator follows it when it can run it. At launch, a connected board is selected when nothing usable is. A board arduino-cli can't tell apart from others (several ESP32-S3 boards share one USB id) keeps the selected one if it fits, else asks which it is; clones without a USB id change nothing.
+- The simulator runs every board built on the chips it emulates: ATmega168 boards (Diecimila, Nano, Pro and Pro Mini 168) on an emulated ATmega168, the Mega 1280 on an ATmega1280, ATtiny25 and ATtiny45 on the ATtiny85 drawing, and the RP2040 boards of the Arduino-Pico core (Seeed XIAO RP2040, Adafruit Feather RP2040, Arduino Nano RP2040 Connect and about 100 more), compiled with their own pin names and drawn as a Pico, wired by GPIO number. Slower variants compile as their 16 MHz twin so timing matches. impulse-test and Compare with Board use the same chips. RP2350 boards and the Pico W are reported as not simulated, and a program built for another chip is refused with a reason instead of misbehaving.
+
 ### Fixed
+
+- The chat box didn't focus when clicked, and the model and mode menus under it were hard to click: the pill's glow, halo and pulse, invisible at rest, reached past it and caught the clicks. Now a click anywhere on the pill types into it, and the menus are full-height targets with a visible arrow.
+- Asking the AI to write a sketch with no sketch open reported success while the code went into a hidden editor. The agent is now told there's no editor and shows the code in its answer.
+- macOS downloads from GitHub opened as "damaged": the app carried only the Electron binary's signature, which no longer matched the bundle. Builds without a Developer ID are now signed ad hoc, so macOS asks once (System Settings › Privacy & Security › Open Anyway) instead of refusing.
 
 - Saving an API key now makes the AI chat use it straight away (that provider's newest model) instead of waiting for a model to be chosen or a restart. Sending with a key but no model picks one; with no key the chat says where to add one and opens the key settings. The model menu groups models by provider and marks the ones without a key, and the line under the chat names the model in use.
 - Gemini: the model list is current (Gemini 3.8 Flash first, 3.1 Pro preview and the other Gemini 3 models; the shut-down 1.5 and 2.0 models are gone). Agent tool calls replay Gemini 3's thought signatures, Gemini 3 keeps its default temperature, and a model a key can't use says to pick another.
