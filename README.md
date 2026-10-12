@@ -1,5 +1,7 @@
 # Impulse
 
+**[impulse-ide.vercel.app](https://impulse-ide.vercel.app)** · [Releases](https://github.com/Meet-1010/Impulse-IDE-v2/releases) · [Changelog](CHANGELOG.md)
+
 An AI-assisted Arduino IDE with a built-in AVR simulator. Write a sketch, wire the circuit, run it in the simulator, check it against hardware tests, then upload it to the board.
 
 ## Features
