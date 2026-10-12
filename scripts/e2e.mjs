@@ -55,7 +55,7 @@ const args = [root, `--remote-debugging-port=${PORT}`, `--inspect=${INSPECT_PORT
 if (process.platform === 'linux') args.push('--no-sandbox', '--disable-gpu');
 // The example is written into a throwaway sketchbook, never the real one.
 // Git reads a throwaway config, so commits never use (or change) the user's own identity.
-const env = { ...process.env, ELECTRON_ENABLE_LOGGING: '1', ARDUINO_DIRECTORIES_USER: sketchbook,
+const env = { ...process.env, ELECTRON_ENABLE_LOGGING: '1', IMPULSE_HIDE_DOCK: '1', ARDUINO_DIRECTORIES_USER: sketchbook,
   GIT_CONFIG_GLOBAL: path.join(temp, 'gitconfig'), GIT_CONFIG_NOSYSTEM: '1' };
 const app = spawn(electron, args, { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env });
 let mainOutput = '';

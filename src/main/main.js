@@ -401,6 +401,9 @@ function buildMenu() {
 
 app.whenReady().then(() => {
   debug('app.whenReady', {});
+  // Test and automation copies (smoke, e2e, live checks) stay out of the macOS
+  // Dock, so the installed Impulse is the only one people see there.
+  if (process.platform === 'darwin' && process.env.IMPULSE_HIDE_DOCK === '1') app.dock?.hide();
   workspace = new WorkspaceStore();
   workspace.restore();
   workspace.on('recent-changed', () => buildMenu());

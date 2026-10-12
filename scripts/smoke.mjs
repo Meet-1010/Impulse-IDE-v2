@@ -30,7 +30,7 @@ async function assertPortFree(port) {
 }
 const args = [root, `--remote-debugging-port=${PORT}`, `--user-data-dir=${profile}`];
 if (process.platform === 'linux') args.push('--no-sandbox', '--disable-gpu');
-const app = spawn(electron, args, { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ELECTRON_ENABLE_LOGGING: '1' } });
+const app = spawn(electron, args, { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ELECTRON_ENABLE_LOGGING: '1', IMPULSE_HIDE_DOCK: '1' } });
 let mainOutput = '';
 app.stdout.on('data', d => { mainOutput += d; });
 app.stderr.on('data', d => { mainOutput += d; });
