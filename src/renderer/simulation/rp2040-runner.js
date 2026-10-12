@@ -34,6 +34,9 @@ const STATE = {
   [GPIOPinState.InputBusKeeper]: PinState.Input,
 };
 
+const UF2_FAMILY_PRESENT = 0x2000;
+const RP2040_FAMILY = 0xe48bff56;
+
 /**
  * Flash blocks of a UF2 file (or a raw .bin image, which starts at flash address 0).
  * @param {Uint8Array} bytes
@@ -48,6 +51,10 @@ export function flashImage(bytes) {
       if (view.getUint32(off, true) !== UF2_MAGIC[0] || view.getUint32(off + 4, true) !== UF2_MAGIC[1]) continue;
       const flags = view.getUint32(off + 8, true);
       if (flags & 1) continue; // "not main flash"
+      // Blocks tagged for another chip (the RP2350's families end 57–5b) can't run here.
+      if (flags & UF2_FAMILY_PRESENT && view.getUint32(off + 28, true) !== RP2040_FAMILY) {
+        throw new Error('This program was built for another chip (an RP2350?). The simulator emulates the RP2040.');
+      }
       const addr = view.getUint32(off + 12, true);
       const size = view.getUint32(off + 16, true);
       if (addr < FLASH_START || addr + size > FLASH_START + FLASH_BYTES || size > 476) throw new Error('This UF2 file is not an RP2040 flash image');

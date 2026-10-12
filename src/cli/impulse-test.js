@@ -13,7 +13,7 @@ import { runHeadless } from '../renderer/simulation/headless.js';
 import { parseExpectations, evaluateExpectations } from '../renderer/simulation/expectations.js';
 import { fromDiagram, plugLinks } from '../renderer/simulation/diagram.js';
 import { circuitChecks } from '../renderer/simulation/checks.js';
-import { BOARDS, boardForFqbn } from '../renderer/simulation/boards.js';
+import { BOARDS, boardForFqbn, simulationTarget } from '../renderer/simulation/boards.js';
 import { partDef } from '../renderer/simulation/parts/catalog.js';
 import toolchain from '../main/services/toolchain.js';
 
@@ -312,7 +312,9 @@ export async function testSketch(sketch, opts, { cli, onStage = () => {} } = {})
     }
     const board = BOARDS[asked || circuitBoard || 'uno'];
     entry.board = board.id;
-    entry.fqbn = opts.fqbn || board.fqbn;
+    // A board the simulator runs as another (a Pro Mini 168 on the Nano) compiles as its 16 MHz twin.
+    const target = opts.fqbn ? simulationTarget(opts.fqbn) : null;
+    entry.fqbn = target?.fqbn || board.fqbn;
     if (model?.unsupported.length) entry.warnings.push(`Not simulated: ${model.unsupported.join(', ')}`);
 
     // Expectations from every .ino tab; @run comes from the main file.
@@ -351,7 +353,7 @@ export async function testSketch(sketch, opts, { cli, onStage = () => {} } = {})
     }
 
     onStage('run', entry);
-    const result = await runHeadless(hex, { seconds: entry.seconds, board: board.id, circuit: model || undefined });
+    const result = await runHeadless(hex, { seconds: entry.seconds, board: board.id, mcu: target?.mcu, circuit: model || undefined });
     entry.serial = result.serial;
     const order = (sketch?.files || []).map(f => path.basename(f));
     const rank = (r) => [r.file === null ? order.length : order.indexOf(r.file), r.line ?? Number.MAX_SAFE_INTEGER];

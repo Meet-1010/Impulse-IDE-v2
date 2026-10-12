@@ -53,7 +53,7 @@ export function headlessCircuit(runner, model) {
 
 /**
  * @param {string|Uint8Array} hex - the program: Intel HEX (AVR boards) or UF2 (Raspberry Pi Pico)
- * @param {{ seconds?: number, board?: string, signal?: AbortSignal, onProgress?: (simSeconds: number) => void,
+ * @param {{ seconds?: number, board?: string, mcu?: string, signal?: AbortSignal, onProgress?: (simSeconds: number) => void,
  *   setup?: (runner: AvrRunner) => void, circuit?: object }} [options]
  * @returns {Promise<{ serial: string, trace: {pin: number, high: boolean, t: number}[], finalStates: boolean[],
  *   simSeconds: number, truncated: boolean, board: string, shorts: object[] }>}
@@ -78,7 +78,7 @@ export async function runHeadless(hex, options = {}) {
   };
   runner.onError = (msg) => { loadError = msg; };
 
-  if (!runner.load(hex, options.board || 'uno')) throw new Error(loadError || 'Could not load the compiled program');
+  if (!runner.load(hex, options.board || 'uno', options.mcu)) throw new Error(loadError || 'Could not load the compiled program');
 
   let engine = null;
   if (options.circuit?.parts?.length) {

@@ -147,11 +147,12 @@ export class AvrRunner {
    * Load a program and build the board's peripherals.
    * @param {string} hexString Intel HEX
    * @param {string} [boardId] uno | nano | mega
+   * @param {string} [mcuId] a smaller sibling of the board's chip (atmega168 on the Nano)
    */
-  load(hexString, boardId) {
+  load(hexString, boardId, mcuId) {
     try {
       if (boardId) this.board = boardById(boardId);
-      this.mcu = MCUS[this.board.mcu];
+      this.mcu = MCUS[mcuId] || MCUS[this.board.mcu];
       const size = hexImageSize(hexString);
       if (size > this.mcu.flashBytes) {
         throw new Error(`the program is ${size} bytes but the ${this.mcu.name} has ${this.mcu.flashBytes} bytes of flash. Was it compiled for a different board?`);

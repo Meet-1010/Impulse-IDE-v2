@@ -28,7 +28,7 @@ describe('ATtiny85 board', () => {
     expect(tiny.digitalCount).toBe(6);
     expect(boardForFqbn('ATTinyCore:avr:attinyx5:chip=85,clock=16pll')).toBe(tiny);
     expect(boardForFqbn('ATTinyCore:avr:attinyx5')).toBe(tiny);
-    expect(boardForFqbn('ATTinyCore:avr:attinyx5:chip=45')).toBeNull();
+    expect(boardForFqbn('ATTinyCore:avr:attinyx5:chip=45')).toBe(tiny);
     expect(boardForFqbn('ATTinyCore:avr:attinyx4')).toBeNull();
   });
 });

@@ -186,10 +186,9 @@ export const BOARDS = {
 export const BOARD_ORDER = ['uno', 'nano', 'mega', 'pico', 'attiny85'];
 export const DEFAULT_BOARD = 'uno';
 
-/** "the Arduino Uno, Arduino Nano, … and ATtiny85", for messages. */
+/** Which boards run, for messages: every board built on an emulated chip. */
 export function simulatedBoardsText() {
-  const labels = BOARD_ORDER.map(id => BOARDS[id].label);
-  return `the ${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`;
+  return 'boards built on the ATmega328P or 168 (Uno, Nano, Pro Mini…), the ATmega2560 or 1280 (Mega), the ATtiny25/45/85 and the RP2040 (Pico, XIAO, Feather…)';
 }
 
 for (const board of Object.values(BOARDS)) {
@@ -212,18 +211,76 @@ export function isBoardTag(tag) {
   return !!boardByTag(tag);
 }
 
+// Arduino-Pico 6.3 boards built on the RP2350 (Cortex-M33), which isn't
+// emulated, whose ids don't all say so. The Pico W is left out too: its LED
+// is on the Wi-Fi chip. An unknown RP2350 board is refused at load time
+// (its UF2 isn't an RP2040 image), so a new one fails loudly, not silently.
+const RP2350_BOARDS = new Set([
+  'adafruit_fruitjam', 'cytron_iriv_io_controller', 'datanoisetv_picoadk_v2', 'jumperless_v5',
+  'olimex_pico2bb48', 'olimex_pico2xl', 'olimex_pico2xxl', 'pimoroni_explorer', 'pimoroni_pico_plus_2',
+  'pimoroni_pico_plus_2w', 'rpipico2', 'rpipico2w', 'sparkfun_xrp_controller', 'wiznet_5100s_evb_pico2',
+  'wiznet_5500_evb_pico2', 'wiznet_6300_evb_pico2',
+]);
+
+/**
+ * How a board from the board menu is simulated: which drawn board it runs on,
+ * the FQBN the simulator compiles with, and the chip it emulates. Every board
+ * built on an emulated chip runs: the ATmega328P/168 family (Uno, Nano, Pro,
+ * Mini, Fio, LilyPad, Ethernet, Duemilanove…), the ATmega2560/1280 (Mega, Mega
+ * ADK), ATTinyCore's ATtiny25/45/85, and the RP2040 boards of the Arduino-Pico
+ * core (pins are GPIO numbers on all of them, so they're wired on the Pico).
+ * @returns {null | { board: object, fqbn: string, mcu: string, note?: string }}
+ */
+export function simulationTarget(fqbn) {
+  if (!fqbn) return null;
+  const opt = (name) => new RegExp(`(?:^|[:,])${name}=([^,:]+)`).exec(fqbn)?.[1] || '';
+  const as = (board, extra = {}) => ({ board, fqbn: board.fqbn, mcu: board.mcu, ...extra });
+  // Clock-for-clock: the simulator runs at 16 MHz, so slower variants compile as their 16 MHz twin.
+  const atmega168 = (board, drawn) => as(board, { fqbn: 'arduino:avr:diecimila:cpu=atmega168', mcu: 'atmega168', note: `runs on an emulated ATmega168, drawn as the ${drawn}` });
+
+  if (/^arduino:avr:(mega|megaADK)(:|$)/.test(fqbn)) {
+    return opt('cpu') === 'atmega1280'
+      ? as(BOARDS.mega, { fqbn: 'arduino:avr:mega:cpu=atmega1280', mcu: 'atmega1280', note: 'runs on an emulated ATmega1280, drawn as the Mega 2560' })
+      : as(BOARDS.mega);
+  }
+  if (/^arduino:avr:(nano|pro|mini|fio|bt|lilypad)(:|$)/.test(fqbn)) {
+    const cpu = opt('cpu');
+    if (/atmega8\b|^atmega8$/.test(cpu)) return null; // the ATmega8 has its own register map
+    return /atmega168/.test(cpu) ? atmega168(BOARDS.nano, 'Nano') : as(BOARDS.nano);
+  }
+  if (/^arduino:avr:(uno|unomini|ethernet|duemilanove|diecimila)(:|$)/.test(fqbn)) {
+    return /atmega168/.test(opt('cpu')) ? atmega168(BOARDS.uno, 'Uno') : as(BOARDS.uno);
+  }
+  // ATTinyCore's ATtiny25/45/85 share the chip; the smaller ones have less flash and RAM.
+  if (/^ATTinyCore:avr:attinyx5(micr)?(:|$)/.test(fqbn)) {
+    const chip = opt('chip') || '85';
+    if (chip === '85') return as(BOARDS.attiny85);
+    if (chip !== '45' && chip !== '25') return null;
+    return as(BOARDS.attiny85, { fqbn: `ATTinyCore:avr:attinyx5:chip=${chip},clock=16pll`, mcu: `attiny${chip}`, note: `runs on an emulated ATtiny${chip}, drawn as the ATtiny85` });
+  }
+  const rp = /^rp2040:rp2040:([^:]+)/.exec(fqbn);
+  if (rp) {
+    const id = rp[1];
+    if (id === 'rpipico') return as(BOARDS.pico);
+    if (RP2350_BOARDS.has(id) || /2350/.test(id) || id === 'rpipicow') return null;
+    return as(BOARDS.pico, { fqbn: `rp2040:rp2040:${id}`, note: 'runs on the emulated RP2040, drawn as a Raspberry Pi Pico: wire by GPIO number (GP0–GP28)' });
+  }
+  return null;
+}
+
 /** The simulated board an FQBN compiles for, or null when it can't be simulated. */
 export function boardForFqbn(fqbn) {
-  if (!fqbn) return null;
-  if (/^arduino:avr:mega(:|$)/.test(fqbn)) return /cpu=atmega1280/.test(fqbn) ? null : BOARDS.mega;
-  if (/^arduino:avr:(nano|pro|mini|fio|bt|lilypad)(:|$)/.test(fqbn)) {
-    return /cpu=atmega168|cpu=atmega8\b/.test(fqbn) ? null : BOARDS.nano;
-  }
-  if (/^arduino:avr:(uno|unomini|ethernet|duemilanove|diecimila)(:|$)/.test(fqbn)) return BOARDS.uno;
-  if (/^rp2040:rp2040:rpipico(:|$)/.test(fqbn)) return BOARDS.pico;
-  // ATTinyCore's ATtiny85 (the 25 and 45 are smaller and not simulated).
-  if (/^ATTinyCore:avr:attinyx5(micr)?(:|$)/.test(fqbn)) return /chip=(25|45)\b/.test(fqbn) ? null : BOARDS.attiny85;
-  return null;
+  return simulationTarget(fqbn)?.board ?? null;
+}
+
+/**
+ * What to compile and emulate for a drawn board: the upload board's own target
+ * when it runs on this board (a Pro Mini 168 on the Nano), else the board itself.
+ */
+export function compileTarget(board, uploadFqbn) {
+  const target = simulationTarget(uploadFqbn);
+  if (target && target.board.id === board.id) return target;
+  return { board, fqbn: board.fqbn, mcu: board.mcu };
 }
 
 /**

@@ -32,7 +32,7 @@ export async function runSimulatorCheck({ sketchPath, code, context = simulation
   onStage?.('run');
   let run;
   try {
-    run = await runHeadless(programOf(compiled), { seconds, signal, board: context.board, circuit: context.circuit });
+    run = await runHeadless(programOf(compiled), { seconds, signal, board: context.board, mcu: context.mcu, circuit: context.circuit });
   } catch (err) {
     return { ok: false, stage: 'run', error: err.message, parseErrors, board: context.label };
   }

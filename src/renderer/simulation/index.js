@@ -10,7 +10,7 @@ import { createRunner, runnerFamily, programOf } from './runners.js';
 import { CircuitEngine, staticTopology } from './engine.js';
 import { CircuitCanvas } from './canvas.js';
 import { PARTS, partDef } from './parts/catalog.js';
-import { BOARDS, BOARD_ORDER, boardByTag, boardForFqbn, boardPinNumber, boardPowerPin, pinLabel, simulatedBoardsText } from './boards.js';
+import { BOARDS, BOARD_ORDER, boardByTag, boardForFqbn, compileTarget, simulationTarget, boardPinNumber, boardPowerPin, pinLabel, simulatedBoardsText } from './boards.js';
 import { circuitChecks } from './checks.js';
 import { toDiagram, fromDiagram, hintsToPoints, remapBoardWires } from './diagram.js';
 import { validateCircuit, layoutCircuit, catalogText } from './circuit-ai.js';
@@ -383,7 +383,13 @@ export class SimulationManager {
       this.notice.hidden = false;
       return;
     }
-    if (target.id === this.board.id) { this.notice.hidden = true; return; }
+    if (target.id === this.board.id) {
+      const note = simulationTarget(fqbn)?.note;
+      if (!note) { this.notice.hidden = true; return; }
+      this.notice.append(icon('chip', 15), h('span', {}, `${name} ${note}.`), dismiss);
+      this.notice.hidden = false;
+      return;
+    }
     const onlyBoard = this.canvas.parts.length <= 1;
     if (onlyBoard) {
       this.setBoard(target.id, { quiet: true });
@@ -1128,7 +1134,7 @@ export class SimulationManager {
     this._clearSerial();
     this._shorts = [];
     this.canvas.wires.forEach(w => w.groupEl.classList.remove('short'));
-    if (!this.runner.load(program, board.id)) {
+    if (!this.runner.load(program, board.id, this._target(board).mcu)) {
       this._setState('idle');
       return false;
     }
@@ -1170,7 +1176,7 @@ export class SimulationManager {
     this._showPane('debug');
     this.debugPane.running(`Compiling a debug build for ${board.label}…`, this._breakpointList());
     this._systemLine(`Compiling a debug build for ${board.label}…`, 'info');
-    const compileDebug = () => window.electronAPI.arduino.compileDebug(sketchPath, board.fqbn).catch(err => ({ success: false, error: err.message }));
+    const compileDebug = () => window.electronAPI.arduino.compileDebug(sketchPath, this._target(board).fqbn).catch(err => ({ success: false, error: err.message }));
     let result = await compileDebug();
     if (!result.success && result.missingCore && await this._installCore(result.missingCore, board)) {
       this._systemLine('Compiling again…', 'info');
@@ -1359,10 +1365,16 @@ export class SimulationManager {
   }
 
   /** Compile for the simulated board, installing a missing library once if needed. */
+  /** What the drawn board compiles and emulates for the upload board (a Pro Mini 168 on the Nano). */
+  _target(board = this.board) {
+    return compileTarget(board, window.state?.selectedBoard);
+  }
+
   async _compile(sketchPath, board) {
+    const fqbn = this._target(board).fqbn;
     let result;
     try {
-      result = await window.electronAPI.arduino.compileHex(sketchPath, board.fqbn);
+      result = await window.electronAPI.arduino.compileHex(sketchPath, fqbn);
     } catch (err) {
       return { success: false, error: err.message };
     }
@@ -1371,7 +1383,7 @@ export class SimulationManager {
         return { success: false, error: `The ${board.label} core isn't installed, so the sketch can't be compiled for it yet.` };
       }
       this._systemLine('Compiling again…', 'info');
-      result = await window.electronAPI.arduino.compileHex(sketchPath, board.fqbn);
+      result = await window.electronAPI.arduino.compileHex(sketchPath, fqbn);
     }
     if (!result.success) {
       const lib = this._detectMissingLibrary(result.error || '');
@@ -1382,7 +1394,7 @@ export class SimulationManager {
           if (inst && inst.success !== false) {
             this._libCache = null;
             this._systemLine(`Installed ${lib}. Compiling again…`, 'success');
-            result = await window.electronAPI.arduino.compileHex(sketchPath, board.fqbn);
+            result = await window.electronAPI.arduino.compileHex(sketchPath, fqbn);
           } else {
             this._systemLine(`Could not install ${lib}: ${inst?.error || 'unknown error'}`, 'error');
           }
@@ -1717,7 +1729,7 @@ export class SimulationManager {
     this._pinActivity = {};
     this._capturing = true;
     this._runnerFor(this.board);
-    if (!this.runner.load(program, this.board.id)) return { serial: '', pins: 'failed to load' };
+    if (!this.runner.load(program, this.board.id, this._target().mcu)) return { serial: '', pins: 'failed to load' };
     this.engine.setModel(this._engineModel());
     this.engine.start();
     this.running = true;
@@ -1801,7 +1813,8 @@ export class SimulationManager {
   simulationContext() {
     const board = this.board;
     const model = this.canvas ? this.canvas.model() : { parts: [], wires: [] };
-    return { board: board.id, fqbn: board.fqbn, label: board.label, circuit: model };
+    const target = this._target(board);
+    return { board: board.id, fqbn: target.fqbn, mcu: target.mcu, label: board.label, circuit: model };
   }
 
   /**

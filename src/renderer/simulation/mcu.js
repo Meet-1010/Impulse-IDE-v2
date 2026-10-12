@@ -228,8 +228,20 @@ export const ATTINY85 = {
   clock: { CLKPR: 0x46 },
 };
 
+// Smaller siblings: the same peripherals at the same addresses, less memory.
+// The ATmega1280's 128 KB keeps a 16-bit program counter (2-byte return
+// addresses), which its compiled code relies on.
+export const ATMEGA168 = { ...ATMEGA328P, id: 'atmega168', name: 'ATmega168', flashBytes: 16 * 1024, sramBytes: 1024, eepromBytes: 512 };
+export const ATMEGA1280 = { ...ATMEGA2560, id: 'atmega1280', name: 'ATmega1280', flashBytes: 128 * 1024 };
+export const ATTINY45 = { ...ATTINY85, id: 'attiny45', name: 'ATtiny45', flashBytes: 4 * 1024, sramBytes: 256, eepromBytes: 256 };
+export const ATTINY25 = { ...ATTINY85, id: 'attiny25', name: 'ATtiny25', flashBytes: 2 * 1024, sramBytes: 128, eepromBytes: 128 };
+
 export const MCUS = {
   [ATMEGA328P.id]: ATMEGA328P,
+  [ATMEGA168.id]: ATMEGA168,
   [ATMEGA2560.id]: ATMEGA2560,
+  [ATMEGA1280.id]: ATMEGA1280,
   [ATTINY85.id]: ATTINY85,
+  [ATTINY45.id]: ATTINY45,
+  [ATTINY25.id]: ATTINY25,
 };
