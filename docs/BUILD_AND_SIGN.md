@@ -8,6 +8,10 @@
 
 Output goes to `dist/` (installer and unpacked artifacts).
 
+## macOS without a Developer ID
+
+With no certificate configured (no `CSC_LINK` or `CSC_NAME`), `build/afterPack.cjs` signs the app ad hoc and verifies the signature before the DMG and zip are made. Without it, the bundle keeps only the Electron binary's own signature, which no longer matches its contents, and macOS reports a downloaded copy as "damaged" with no way to open it. Signed ad hoc, macOS asks once instead: System Settings › Privacy & Security › Open Anyway. With a Developer ID configured, electron-builder signs (and notarizes) the app properly after the hook.
+
 ## Windows code signing (avoid “Unknown publisher” warnings)
 
 To sign the Windows executable so users don’t see SmartScreen / “Windows protected your PC”:

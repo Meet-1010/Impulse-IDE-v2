@@ -200,6 +200,7 @@
     "appImage": {
       "artifactName": "Impulse-IDE-${version}-${arch}.${ext}"
     },
-    "npmRebuild": false
+    "npmRebuild": false,
+    "afterPack": "build/afterPack.cjs"
   }
 }
