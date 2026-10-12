@@ -299,14 +299,33 @@ class AIAgent {
    * @param {string} mode - 'agent' | 'ask' | 'debug'
    */
   /**
-   * @param {{ onStep?: (step: { type: 'thinking' } | { type: 'tool', name: string }) => void }} [hooks]
+   * @param {{ onStep?: (step: { type: 'thinking' } | { type: 'tool', name: string }) => void, signal?: AbortSignal }} [hooks]
    *   onStep hears each model call and each tool before it runs (the chat shows them).
+   *   signal stops the turn (the chat's Stop): the model call in flight is cancelled,
+   *   no further tool runs, and the turn is dropped from the history.
    */
-  async processQuery(userQuery, context = {}, mode = 'agent', { onStep } = {}) {
+  async processQuery(userQuery, context = {}, mode = 'agent', { onStep, signal } = {}) {
     const step = (s) => { try { onStep?.(s); } catch { /* the UI's problem, not the query's */ } };
     if (!this.currentProvider) {
       throw new Error('No provider selected. Please set a provider first.');
     }
+    const historyLength = this.conversationHistory.length;
+    const stopIfAsked = () => {
+      if (!signal?.aborted) return;
+      this.conversationHistory.length = Math.min(this.conversationHistory.length, historyLength);
+      const stopped = new Error('Stopped');
+      stopped.stopped = true;
+      throw stopped;
+    };
+    const ask = async (msgs, opts) => {
+      stopIfAsked();
+      try {
+        return await this.currentProvider.chat(msgs, { ...opts, signal });
+      } catch (error) {
+        stopIfAsked();
+        throw error;
+      }
+    };
 
     // Track real usage so the "most-used" model stays surfaced even after
     // auto-upgrades. Fire-and-forget — never block the query on disk I/O.
@@ -373,7 +392,7 @@ class AIAgent {
     // Ask mode: single turn, no tools
     if (!useTools) {
       step({ type: 'thinking' });
-      const response = await this.currentProvider.chat(messages, chatOptions);
+      const response = await ask(messages, chatOptions);
       if (response.content) {
         this.conversationHistory.push({
           role: 'assistant',
@@ -394,7 +413,7 @@ class AIAgent {
 
     while (iteration < maxIterations) {
       step({ type: 'thinking' });
-      const response = await this.currentProvider.chat(messages, chatOptions);
+      const response = await ask(messages, chatOptions);
 
       if (!response.toolCalls || response.toolCalls.length === 0) {
         if (response.content) {
@@ -429,6 +448,7 @@ class AIAgent {
       messages.push(assistantMsg);
 
       for (const toolCall of response.toolCalls) {
+        stopIfAsked();
         step({ type: 'tool', name: String(toolCall.name || '') });
         const startTime = Date.now();
         const result = await this.toolExecutor.execute(toolCall);

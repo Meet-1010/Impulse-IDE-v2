@@ -153,9 +153,10 @@ class ClaudeProvider extends BaseProvider {
     const request = this.buildRequest(messages, options);
     let response;
     try {
+      const requestOptions = options.signal ? { signal: options.signal } : undefined;
       const stream = request.betas
-        ? this.client.beta.messages.stream(request)
-        : this.client.messages.stream(request);
+        ? this.client.beta.messages.stream(request, requestOptions)
+        : this.client.messages.stream(request, requestOptions);
       response = await stream.finalMessage();
     } catch (error) {
       throw new Error(ClaudeProvider.describeError(error));

@@ -372,6 +372,38 @@ try {
     await audit('the AI panel with an answer');
   });
 
+  await step('the chat copies answers, stops the agent and starts a new chat', async () => {
+    const pad = await evaluate(`parseFloat(getComputedStyle([...document.querySelectorAll('#aiMessages .ai-message.user')].pop()).paddingLeft)`);
+    if (!(pad >= 10)) throw new Error(`your message has ${pad}px of padding inside its card`);
+    // Copy: the whole answer, then a code block.
+    await evaluate(`[...document.querySelectorAll('#aiMessages .mo-msg')].pop().querySelector('.ai-copy-btn').click()`);
+    await sleep(150);
+    if (!/^Pin 13 blinks every 500 ms\./.test(await evaluate(`window.electronAPI.clipboard.readText()`))) throw new Error('Copy didn\'t put the answer on the clipboard');
+    await evaluate(`[...document.querySelectorAll('#aiMessages .code-copy-btn')].pop().click()`);
+    await sleep(150);
+    if (await evaluate(`window.electronAPI.clipboard.readText()`) !== 'void loop() {}\n') throw new Error('Copy on the code block didn\'t copy the code');
+
+    // Stop: a turn that would never finish ends at once, and its late result is dropped.
+    await evaluate(`window.__orbRelease = null; window.impulse.askWith('Count to a million', (step) => new Promise((resolve) => {
+      step({ type: 'thinking' });
+      window.__orbRelease = () => resolve({ ok: true, content: 'LATE ANSWER' });
+    }))`);
+    await waitFor(`window.impulse.chatPhase === 'think' && !document.getElementById('aiStopBtn').hidden`, 8000, 'the Stop button while the agent works');
+    const [sx, sy, sw, sh] = await evaluate(`(() => { const b = document.getElementById('aiStopBtn').getBoundingClientRect(); return [b.left, b.top, b.width, b.height] })()`);
+    for (const type of ['mousePressed', 'mouseReleased']) await send('Input.dispatchMouseEvent', { type, x: sx + sw / 2, y: sy + sh / 2, button: 'left', clickCount: 1 });
+    await waitFor(`window.impulse.chatPhase === 'idle' && document.getElementById('aiStopBtn').hidden`, 4000, 'Stop to end the turn');
+    const head = await evaluate(`[...document.querySelectorAll('#aiMessages .mo-msg')].pop().querySelector('.mo-a-head').textContent.trim()`);
+    if (head !== 'Stopped') throw new Error(`after Stop the last card says "${head}"`);
+    await evaluate(`window.__orbRelease()`);
+    await sleep(600);
+    if (await evaluate(`document.getElementById('aiMessages').textContent.includes('LATE ANSWER')`)) throw new Error('the stopped turn\'s answer still arrived');
+
+    // New chat: the conversation goes, the starters come back.
+    await evaluate(`document.getElementById('aiNewChatBtn').click()`);
+    await waitFor(`!document.querySelector('#aiMessages .ai-message') && document.querySelectorAll('#aiMessages .ai-starter').length > 0`, 3000, 'New chat to clear the conversation');
+    await audit('the AI panel after New chat');
+  });
+
   await step('light theme is accessible', async () => {
     await evaluate(`document.getElementById('themeToggleBtn').click()`);
     await sleep(300);

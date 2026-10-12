@@ -499,11 +499,12 @@ const sampleAt = (h, t, out) => {
 /**
  * Mount the orb in the AI panel.
  * @param {{ host: HTMLElement, list: HTMLElement, slot: HTMLElement, input: HTMLTextAreaElement,
- *   send: HTMLButtonElement, speed?: number, minThinkMs?: number }} opts
+ *   send: HTMLButtonElement, speed?: number, minThinkMs?: number, onBusy?: (busy: boolean) => void }} opts
  *   host: the panel (the orb's layer covers it); list: the conversation; slot:
- *   where the pill sits in the composer; input/send: the pill's field and button.
+ *   where the pill sits in the composer; input/send: the pill's field and button;
+ *   onBusy: hears when an exchange starts and ends (the chat shows Stop meanwhile).
  */
-export function createChatOrb({ host, list, slot, input, send, speed = 1, minThinkMs = 1500 }) {
+export function createChatOrb({ host, list, slot, input, send, speed = 1, minThinkMs = 1500, onBusy }) {
   const root = host.querySelector('.mo-root');
   const mover = root.querySelector('.mo-mover');
   const actor = root.querySelector('.mo-actor');
@@ -808,7 +809,9 @@ export function createChatOrb({ host, list, slot, input, send, speed = 1, minThi
   };
 
   const idle = () => {
+    const was = busy;
     busy = false;
+    activeJob = null;
     msg = null;
     units = [];
     kind = 'answer';
@@ -817,6 +820,7 @@ export function createChatOrb({ host, list, slot, input, send, speed = 1, minThi
     form.removeAttribute('inert');
     setPhase('idle');
     input.focus({ preventScroll: true });
+    if (was) onBusy?.(false);
   };
 
   /** The whole exchange, from the pill to the answer and back. */
@@ -899,6 +903,8 @@ export function createChatOrb({ host, list, slot, input, send, speed = 1, minThi
       job.after?.(result);
     } catch (e) {
       if (e !== ABORT) console.error('[MorphOrb]', e);
+      // Stopped: stop() already finished this exchange, and a late result is dropped.
+      if (activeJob !== job) return;
       hard(job, result);
     }
   };
@@ -915,6 +921,7 @@ export function createChatOrb({ host, list, slot, input, send, speed = 1, minThi
 
   let work = null;
   let current = null;
+  let activeJob = null;
 
   /** Skip to the end: the answer (if any) in the conversation, the pill in place. */
   function hard(job, result) {
@@ -930,7 +937,7 @@ export function createChatOrb({ host, list, slot, input, send, speed = 1, minThi
     clipToList(false);
     if (result && job && !msg) {
       msg = job.render(result);
-      msg.dataset.kind = result.ok ? 'answer' : 'error';
+      msg.dataset.kind = result.stopped ? 'stopped' : result.ok ? 'answer' : 'error';
       list.append(msg);
       messageHtml = msg.querySelector('.mo-a-body')?.innerHTML || '';
     }
@@ -1026,15 +1033,31 @@ export function createChatOrb({ host, list, slot, input, send, speed = 1, minThi
           return el;
         },
       };
+      activeJob = job;
+      onBusy?.(true);
       // A hidden panel can't animate: answer straight into the conversation.
       if (host.getBoundingClientRect().width < 160) {
-        work.then((r) => hard(job, r));
+        work.then((r) => { if (activeJob === job) hard(job, r); });
         return true;
       }
       void run(job, ac.signal);
       return true;
     },
     busy: () => busy,
+    /**
+     * Stop the exchange in progress: `result` (e.g. { ok: false, stopped: true,
+     * content }) goes into the conversation now, the pill comes back, and the
+     * work's own result, whenever it arrives, is dropped.
+     * @returns {boolean} false when nothing was running
+     */
+    stop(result) {
+      // Once the answer is in, it finishes unfolding: there's nothing left to stop.
+      if (!busy || !activeJob || !['launch', 'assemble', 'think'].includes(phase)) return false;
+      const job = activeJob;
+      activeJob = null;
+      hard(job, result);
+      return true;
+    },
     /** The original's nudge for an empty question. */
     shake() {
       actor.removeAttribute('data-shake');

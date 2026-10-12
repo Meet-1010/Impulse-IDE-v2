@@ -167,6 +167,39 @@ describe('AIAgent', () => {
     });
   });
 
+  describe('stopping a turn (the chat\'s Stop)', () => {
+    it('cancels the model call in flight and drops the turn from the history', async () => {
+      const agent = createAgent();
+      agent.registerProvider('mock', MockProvider);
+      agent.setProvider('mock', 'key');
+      agent.conversationHistory = [{ role: 'user', content: 'earlier' }, { role: 'assistant', content: 'ok' }];
+      const turn = new AbortController();
+      let seen = null;
+      agent.currentProvider.chat = (msgs, opts) => new Promise((resolve, reject) => {
+        seen = opts.signal;
+        opts.signal.addEventListener('abort', () => reject(new Error('Request was aborted.')));
+      });
+      const pending = agent.processQuery('count to a million', {}, 'agent', { signal: turn.signal });
+      await new Promise((r) => setTimeout(r, 10));
+      turn.abort();
+      await expect(pending).rejects.toMatchObject({ stopped: true, message: 'Stopped' });
+      expect(seen).toBe(turn.signal);
+      expect(agent.conversationHistory).toEqual([{ role: 'user', content: 'earlier' }, { role: 'assistant', content: 'ok' }]);
+    });
+
+    it('runs no more tools once stopped', async () => {
+      const agent = createAgent();
+      agent.registerProvider('mock', MockProvider);
+      agent.setProvider('mock', 'key');
+      const turn = new AbortController();
+      agent.currentProvider.chat = async () => ({ content: null, toolCalls: [{ id: 'a', name: 'compile_sketch', arguments: {} }, { id: 'b', name: 'upload_sketch', arguments: {} }] });
+      const ran = [];
+      agent.toolExecutor = { execute: async (call) => { ran.push(call.name); turn.abort(); return { success: true }; } };
+      await expect(agent.processQuery('compile then upload', {}, 'agent', { signal: turn.signal })).rejects.toMatchObject({ stopped: true });
+      expect(ran).toEqual(['compile_sketch']);
+    });
+  });
+
   describe('_getToolsForMode', () => {
     it('should return empty array for ask mode', () => {
       const agent = createAgent();

@@ -109,6 +109,32 @@ function createWindow() {
     else app.quit();
   });
 
+  // Electron shows no menu on right-click: offer the text edits where they
+  // apply (fields, the editor, selected text such as a chat answer). Parts of
+  // the UI with their own menus (the simulator canvas) cancel the event first.
+  mainWindow.webContents.on('context-menu', (event, params) => {
+    const flags = params.editFlags || {};
+    const hasSelection = !!params.selectionText?.trim();
+    let template;
+    if (params.isEditable) {
+      template = [
+        { role: 'undo', enabled: flags.canUndo },
+        { role: 'redo', enabled: flags.canRedo },
+        { type: 'separator' },
+        { role: 'cut', enabled: flags.canCut },
+        { role: 'copy', enabled: flags.canCopy },
+        { role: 'paste', enabled: flags.canPaste },
+        { type: 'separator' },
+        { role: 'selectAll', enabled: flags.canSelectAll },
+      ];
+    } else if (hasSelection) {
+      template = [{ role: 'copy' }, { type: 'separator' }, { role: 'selectAll' }];
+    } else {
+      return;
+    }
+    Menu.buildFromTemplate(template).popup({ window: mainWindow });
+  });
+
   // SECURITY: Prevent navigation to external websites within the app
   mainWindow.webContents.on('will-navigate', (event, navigationUrl) => {
     const parsedUrl = new URL(navigationUrl);

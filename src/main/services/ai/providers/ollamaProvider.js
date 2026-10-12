@@ -386,9 +386,12 @@ class OllamaProvider extends BaseProvider {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
           // A big model on a laptop can take minutes for its first answer.
-          signal: AbortSignal.timeout(10 * 60 * 1000),
+          signal: options.signal
+            ? AbortSignal.any([AbortSignal.timeout(10 * 60 * 1000), options.signal])
+            : AbortSignal.timeout(10 * 60 * 1000),
         });
       } catch (error) {
+        if (options.signal?.aborted) throw error;
         if (error?.name === 'TimeoutError') throw new Error('Ollama took longer than 10 minutes to answer. Try a smaller model.');
         throw new Error('Ollama isn\'t running. Open the Ollama app (or run "ollama serve"), then ask again.');
       }

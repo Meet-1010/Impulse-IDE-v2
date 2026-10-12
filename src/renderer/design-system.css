@@ -2330,3 +2330,164 @@ h2.scm-heading {
 .diff-view .diff-meta {
     color: var(--ds-text-3);
 }
+
+/* ── Chat: room around messages, Stop, Copy ─────────────────────────────── */
+.ai-msg-area {
+    padding: 8px 4px 4px;
+}
+
+/* Your message is a card: its text sat on the border (the flat layout's
+   padding: 0 won over the card's background and border). */
+.ai-msg-area .ai-message.user,
+.ai-msg-area .ai-message + .ai-message.user {
+    margin: 6px 0 14px;
+    padding: 10px 14px 12px;
+    border: 1px solid var(--ds-line);
+    border-radius: 14px;
+    background: var(--ds-surface-2);
+    color: var(--ds-text);
+}
+
+.ai-msg-area .ai-message.user::before {
+    margin-bottom: 5px;
+}
+
+.ai-msg-area .ai-message.user + .ai-message {
+    border-top: none;
+}
+
+.ai-msg-area .ai-message.user .msg-revert-btn {
+    margin-left: 8px;
+    vertical-align: 1px;
+}
+
+.ai-msg-area .ai-message.assistant:not(.mo-msg) {
+    padding-left: 4px;
+    padding-right: 4px;
+}
+
+/* Stop: where the pill was, while the agent works. */
+.ai-composer.mo-dock {
+    position: relative;
+}
+
+.ai-stop-btn {
+    position: absolute;
+    left: 50%;
+    top: 36px;
+    z-index: 5;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    height: 36px;
+    padding: 0 18px 0 14px;
+    border: 1px solid var(--ds-line-strong);
+    border-radius: 999px;
+    background: var(--ds-surface-3);
+    box-shadow: var(--ds-floating-shadow);
+    color: var(--ds-text);
+    font-family: var(--font-ui);
+    font-size: 13px;
+    font-weight: 510;
+    cursor: pointer;
+    transform: translate(-50%, -50%);
+    animation: ai-stop-in 0.25s ease both;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.ai-stop-btn[hidden] {
+    display: none;
+}
+
+.ai-stop-btn:hover {
+    background: var(--ds-active);
+    border-color: var(--ds-text-4);
+}
+
+.ai-stop-btn:focus-visible {
+    outline: 2px solid var(--ds-link);
+    outline-offset: 2px;
+}
+
+.ai-stop-btn svg {
+    color: var(--ds-danger);
+}
+
+@keyframes ai-stop-in {
+    from {
+        opacity: 0;
+        transform: translate(-50%, -40%);
+    }
+}
+
+/* A stopped turn: a grey dot, not an error. */
+.mo-msg[data-kind="stopped"] {
+    --mo-accent: 134 139 147;
+    --mo-accent-hi: 160 165 172;
+    --mo-accent-lo: 110 115 122;
+}
+
+/* Copy: the whole answer, and each code block. */
+.mo-a-head .ai-copy-btn {
+    display: grid;
+    place-items: center;
+    width: 26px;
+    height: 26px;
+    margin: -4px -6px -4px auto;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--ds-text-4);
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.15s ease, background-color 0.15s ease, color 0.15s ease;
+}
+
+.mo-msg:hover .ai-copy-btn,
+.ai-copy-btn:focus-visible,
+.ai-copy-btn.copied {
+    opacity: 1;
+}
+
+.ai-copy-btn:hover {
+    background: var(--ds-hover);
+    color: var(--ds-text);
+}
+
+.ai-copy-btn.copied {
+    color: var(--ds-signal);
+}
+
+.code-block-actions {
+    display: flex;
+    gap: 6px;
+}
+
+.code-copy-btn {
+    border: 1px solid var(--ds-line);
+    border-radius: 9999px;
+    background: transparent;
+    color: var(--ds-text-2);
+    font-family: var(--font-ui);
+    font-size: 11px;
+    font-weight: 510;
+    letter-spacing: -0.01em;
+    padding: 2px 10px;
+    cursor: pointer;
+}
+
+.code-copy-btn:hover {
+    background: var(--ds-hover);
+    color: var(--ds-text);
+}
+
+.code-copy-btn.copied {
+    border-color: var(--ds-signal);
+    color: var(--ds-signal);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ai-stop-btn {
+        animation: none;
+    }
+}

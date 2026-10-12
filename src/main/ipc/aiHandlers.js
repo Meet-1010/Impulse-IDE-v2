@@ -62,9 +62,15 @@ function register(ipcMain, ctx) {
     }
   }));
 
+  // The turn in progress, so the chat's Stop can cancel it.
+  let running = null;
+
   ipcMain.handle('ai:process-query', withDebugLog('ai:process-query', async (event, query, context, mode) => {
     const parsed = parseOrDefault(schemas.aiProcessQuery, { query: query ?? '', context: context ?? {}, mode: mode ?? 'agent' }, defaultFail);
     if (!parsed.ok) return parsed.defaultResult;
+    const turn = new AbortController();
+    running?.abort();
+    running = turn;
     try {
       const ctx = parsed.data.context || {};
       const enrichedContext = {
@@ -79,11 +85,21 @@ function register(ipcMain, ctx) {
       const effectiveMode = parsed.data.mode === 'ask' || parsed.data.mode === 'debug' ? parsed.data.mode : 'agent';
       // Each step goes to the chat as it happens (the orb's label).
       const onStep = (step) => { if (!event.sender.isDestroyed()) event.sender.send('ai:step', step); };
-      const result = await aiAgent.processQuery(parsed.data.query, enrichedContext, effectiveMode, { onStep });
+      const result = await aiAgent.processQuery(parsed.data.query, enrichedContext, effectiveMode, { onStep, signal: turn.signal });
       return { success: true, data: result };
     } catch (error) {
+      if (error?.stopped) return { success: false, stopped: true, error: 'Stopped' };
       return { success: false, error: error?.message ?? 'Process query failed' };
+    } finally {
+      if (running === turn) running = null;
     }
+  }));
+
+  ipcMain.handle('ai:cancel', withDebugLog('ai:cancel', async () => {
+    const wasRunning = !!running;
+    running?.abort();
+    running = null;
+    return { success: true, cancelled: wasRunning };
   }));
 
   ipcMain.handle('ai:analyze-error', withDebugLog('ai:analyze-error', async (event, errorMessage, context) => {

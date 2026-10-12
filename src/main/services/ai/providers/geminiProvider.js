@@ -72,7 +72,7 @@ class GeminiProvider extends BaseProvider {
       const result = await model.generateContent({
         contents: contents,
         systemInstruction: systemInstruction || undefined,
-      });
+      }, options.signal ? { signal: options.signal } : {});
 
       const response = result.response;
       

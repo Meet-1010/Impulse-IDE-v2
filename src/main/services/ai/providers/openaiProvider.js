@@ -65,7 +65,7 @@ class OpenAIProvider extends BaseProvider {
       requestOptions.tool_choice = options.tool_choice || 'auto';
     }
 
-    const response = await this.client.chat.completions.create(requestOptions);
+    const response = await this.client.chat.completions.create(requestOptions, options.signal ? { signal: options.signal } : undefined);
 
     const message = response.choices[0].message;
     

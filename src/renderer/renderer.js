@@ -335,12 +335,19 @@ async function editClipboardAction(kind) {
 
     // cut / copy
     let selected = '';
+    // Text selected on the page (a chat answer, the console) when no field or
+    // the code editor has the focus.
+    const pageSelection = window.getSelection();
+    const pageText = pageSelection && !pageSelection.isCollapsed ? pageSelection.toString() : '';
+    const editorFocused = !!document.activeElement?.closest?.('.CodeMirror');
     if (field) {
         selected = field.value.slice(field.selectionStart ?? 0, field.selectionEnd ?? 0);
         if (kind === 'cut' && selected) {
             field.setRangeText('', field.selectionStart, field.selectionEnd, 'start');
             field.dispatchEvent(new Event('input', { bubbles: true }));
         }
+    } else if (pageText && !editorFocused) {
+        selected = pageText;
     } else if (state.editor) {
         selected = state.editor.getSelection();
         if (kind === 'cut' && selected) state.editor.replaceSelection('');
@@ -1893,7 +1900,16 @@ function setupAIListeners() {
     document.getElementById('aiModelSelect')?.addEventListener('change', onAIModelChange);
     document.getElementById('aiPinModelBtn')?.addEventListener('click', togglePinCurrentModel);
     document.getElementById('aiCompactBtn')?.addEventListener('click', compactConversation);
-    document.getElementById('aiClearBtn')?.addEventListener('click', clearChatUI);
+    // The welcome (starters) as it is before the first message, for New chat.
+    state.aiWelcomeHtml = state.aiWelcomeHtml || document.querySelector('#aiMessages .ai-welcome')?.outerHTML || '';
+    document.getElementById('aiNewChatBtn')?.addEventListener('click', newChat);
+    document.getElementById('aiStopBtn')?.addEventListener('click', stopAIMessage);
+    document.getElementById('aiPanel')?.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && chatOrb?.busy()) {
+            e.preventDefault();
+            stopAIMessage();
+        }
+    });
     document.getElementById('aiSettingsBtn')?.addEventListener('click', openAPIKeyModalForCurrentProvider);
     document.getElementById('aiSend')?.addEventListener('click', sendAIMessage);
     document.getElementById('aiInput')?.addEventListener('keypress', (e) => {
@@ -4399,7 +4415,11 @@ function setupChatOrb() {
     const send = document.getElementById('aiSend');
     if (!host?.querySelector('.mo-root') || !list || !slot || !input || !send) return;
     host.querySelector('.mo-input')?.addEventListener('submit', (e) => e.preventDefault());
-    chatOrb = createChatOrb({ host, list, slot, input, send });
+    const stopBtn = document.getElementById('aiStopBtn');
+    chatOrb = createChatOrb({
+        host, list, slot, input, send,
+        onBusy: (busy) => { if (stopBtn) stopBtn.hidden = !busy; },
+    });
 }
 
 /** The answer card that stays in the conversation. */
@@ -4407,9 +4427,59 @@ function buildAnswerMessage(result) {
     const el = document.createElement('div');
     el.className = 'ai-message assistant mo-msg';
     el.innerHTML = '<div class="mo-a-head"><i class="mo-a-dot" aria-hidden="true"></i><span></span></div><div class="mo-a-body"></div>';
-    el.querySelector('.mo-a-head span').textContent = result.ok ? ORB_COPY.answerTitle : ORB_COPY.errorTitle;
+    el.querySelector('.mo-a-head span').textContent = result.stopped ? 'Stopped' : result.ok ? ORB_COPY.answerTitle : ORB_COPY.errorTitle;
     el.querySelector('.mo-a-body').innerHTML = formatAIContent(result.content);
+    if (!result.stopped && result.content) {
+        const copy = document.createElement('button');
+        copy.type = 'button';
+        copy.className = 'ai-copy-btn';
+        copy.title = 'Copy the answer';
+        copy.setAttribute('aria-label', 'Copy the answer');
+        copy.innerHTML = COPY_ICON;
+        copy.addEventListener('click', () => copyText(String(result.content), copy));
+        el.querySelector('.mo-a-head').appendChild(copy);
+    }
     return el;
+}
+
+const COPY_ICON = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>';
+const COPIED_ICON = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
+
+/** Put text on the clipboard; the button shows a tick for a moment. */
+async function copyText(text, button) {
+    await window.electronAPI.clipboard.writeText(text);
+    if (!button) return;
+    const before = button.innerHTML;
+    button.innerHTML = button.classList.contains('code-copy-btn') ? 'Copied' : COPIED_ICON;
+    button.classList.add('copied');
+    window.setTimeout(() => {
+        button.innerHTML = before;
+        button.classList.remove('copied');
+    }, 1400);
+}
+
+/** Stop the agent (the Stop button and Esc): the turn ends where it is. */
+function stopAIMessage() {
+    if (!chatOrb?.busy()) return;
+    window.electronAPI.ai.cancel?.().catch(() => {});
+    if (chatOrb.stop({ ok: false, stopped: true, content: 'Stopped. Nothing after this point was done. Ask again whenever you like.' })) {
+        logToConsole('AI stopped', 'info');
+    }
+}
+
+/** A fresh conversation: the AI forgets this one, and the starters come back. */
+async function newChat() {
+    stopAIMessage();
+    await window.electronAPI.ai.clearHistory?.().catch(() => {});
+    const container = document.getElementById('aiMessages');
+    if (container) {
+        container.innerHTML = state.aiWelcomeHtml || '';
+        container.scrollTop = 0;
+    }
+    state.aiTokensUsed = 0;
+    updateTokenCounter();
+    const input = document.getElementById('aiInput');
+    if (input) input.focus({ preventScroll: true });
 }
 
 async function sendAIMessage() {
@@ -4446,6 +4516,7 @@ async function sendAIMessage() {
         const stop = window.electronAPI.ai.onStep?.(step);
         try {
             const result = await window.electronAPI.ai.processQuery(message, context, mode);
+            if (result.stopped) return { ok: false, stopped: true, content: 'Stopped.' };
             if (result.success && result.data) {
                 return { ok: true, content: result.data.response || result.data.content || 'No response received', data: result.data };
             }
@@ -4553,7 +4624,10 @@ function formatAIContent(content) {
         const html = `<div class="code-block-wrapper">` +
             `<div class="code-block-header">` +
             `<span class="code-lang">${safeLang}</span>` +
-            `<button class="code-insert-btn" title="Insert at cursor">Insert</button>` +
+            `<span class="code-block-actions">` +
+            `<button class="code-copy-btn" type="button" title="Copy the code">Copy</button>` +
+            `<button class="code-insert-btn" type="button" title="Insert at cursor">Insert</button>` +
+            `</span>` +
             `</div>` +
             `<pre><code class="language-${safeLang}">${escapedCode}</code></pre>` +
             `</div>`;
@@ -4584,6 +4658,11 @@ function setupCodeBlockActions() {
     if (!aiMessages) return;
 
     aiMessages.addEventListener('click', (e) => {
+        if (e.target.classList.contains('code-copy-btn')) {
+            const codeEl = e.target.closest('.code-block-wrapper')?.querySelector('code');
+            if (codeEl) copyText(codeEl.textContent, e.target);
+            return;
+        }
         if (e.target.classList.contains('code-insert-btn')) {
             const wrapper = e.target.closest('.code-block-wrapper');
             if (wrapper) {
@@ -4727,16 +4806,6 @@ function updateTokenCounter() {
 
 // Clear only the visual chat — does NOT reset the AI's LLM history.
 // Use the compact button to also summarise and reset context.
-function clearChatUI() {
-    const container = document.getElementById('aiMessages');
-    if (!container) return;
-    container.innerHTML = '';
-    const welcome = document.createElement('div');
-    welcome.className = 'ai-welcome';
-    welcome.textContent = 'Chat cleared. Context window still active — use compact to reset it.';
-    container.appendChild(welcome);
-}
-
 // ============================================
 // Console/Output Functions
 // ============================================
