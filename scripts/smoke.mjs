@@ -70,9 +70,14 @@ try {
 
   await send('Runtime.enable');
   await send('Page.reload', { ignoreCache: true });
-  await sleep(5000);
-
-  const ready = await evaluate(`!!document.querySelector('.app-footer .status-item') && !!document.getElementById('aiMessages')`);
+  // Wait for the UI rather than a fixed time: a slow CI runner can take longer than 5 s.
+  const uiReady = `!!document.querySelector('.app-footer .status-item') && !!document.getElementById('aiMessages')`;
+  let ready = false;
+  for (const end = Date.now() + 30000; Date.now() < end && !ready;) {
+    await sleep(500);
+    ready = await evaluate(uiReady).catch(() => false);
+  }
+  await sleep(1500);
   if (!ready) problems.push('UI did not finish initialising (status bar / AI panel missing)');
 
   const steps = [
