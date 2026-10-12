@@ -19,6 +19,7 @@ import '@fontsource-variable/jetbrains-mono';
 import './styles.css';
 import './simulation/simulation.css';
 import './design-system.css';
+import './morph-orb/morph-orb.css';
 
 // --- CodeMirror JS (bundled locally, no CDN) ---
 import CodeMirror from 'codemirror';

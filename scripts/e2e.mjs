@@ -300,6 +300,37 @@ try {
     }
   });
 
+  // A stand-in agent, so no API key is needed: the pill becomes the orb, the
+  // label follows the steps, and the answer unfolds into a card in the chat.
+  await step('the AI chat orb works through a question and leaves the answer card', async () => {
+    if (!await evaluate(`window.state.aiPanelOpen`)) await evaluate(`document.getElementById('aiAgentTab').click()`);
+    await waitFor(`window.impulse.chatPhase === 'idle' && document.querySelector('#aiPanel .ai-panel-inner').getBoundingClientRect().width > 200`, 5000, 'the AI panel');
+    await audit('the AI panel with the pill');
+    await evaluate(`window.__orbRelease = null; window.impulse.askWith('Blink pin 13', (step) => new Promise((resolve) => {
+      step({ type: 'thinking' });
+      setTimeout(() => step({ type: 'tool', name: 'compile_sketch' }), 300);
+      window.__orbRelease = () => resolve({ ok: true, content: ['Pin 13 blinks every 500 ms.', '\x60\x60\x60cpp', 'void loop() {}', '\x60\x60\x60', 'It compiled.'].join(String.fromCharCode(10)) });
+    }))`);
+    await waitFor(`window.impulse.chatPhase === 'think'`, 8000, 'the orb to start thinking');
+    await waitFor(`document.querySelector('.mo-status .mo-lab.mo-in')?.textContent.startsWith('Compiling')`, 5000, 'the "Compiling" step on the orb');
+    if (!await evaluate(`document.getElementById('aiInput').closest('form').hasAttribute('inert')`)) throw new Error('the pill takes input while the agent works');
+    await evaluate(`window.__orbRelease()`);
+    await waitFor(`window.impulse.chatPhase === 'idle'`, 15000, 'the answer to unfold and the pill to come back');
+    const card = await evaluate(`(() => {
+      const msg = [...document.querySelectorAll('#aiMessages .mo-msg')].pop();
+      return msg && { head: msg.querySelector('.mo-a-head').textContent.trim(), body: msg.querySelector('.mo-a-body').textContent,
+        code: !!msg.querySelector('.code-block-wrapper pre'), pending: msg.classList.contains('mo-pending'),
+        spans: msg.querySelectorAll('.mo-w').length, slots: document.querySelectorAll('.mo-stage-slot').length,
+        pill: Math.round(document.querySelector('.mo-actor').getBoundingClientRect().height),
+        focused: document.activeElement === document.getElementById('aiInput') };
+    })()`);
+    if (!card) throw new Error('no answer card in the chat');
+    if (card.head !== 'Answer' || !/Pin 13 blinks every 500 ms\./.test(card.body) || !card.code) throw new Error(`answer card: ${JSON.stringify(card)}`);
+    if (card.pending || card.spans || card.slots) throw new Error(`the card was left mid-animation: ${JSON.stringify(card)}`);
+    if (card.pill !== 60 || !card.focused) throw new Error(`the pill didn't come back ready: ${JSON.stringify(card)}`);
+    await audit('the AI panel with an answer');
+  });
+
   await step('light theme is accessible', async () => {
     await evaluate(`document.getElementById('themeToggleBtn').click()`);
     await sleep(300);

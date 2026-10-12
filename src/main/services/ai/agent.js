@@ -280,7 +280,12 @@ class AIAgent {
    * @param {Object} context - IDE context
    * @param {string} mode - 'agent' | 'ask' | 'debug'
    */
-  async processQuery(userQuery, context = {}, mode = 'agent') {
+  /**
+   * @param {{ onStep?: (step: { type: 'thinking' } | { type: 'tool', name: string }) => void }} [hooks]
+   *   onStep hears each model call and each tool before it runs (the chat shows them).
+   */
+  async processQuery(userQuery, context = {}, mode = 'agent', { onStep } = {}) {
+    const step = (s) => { try { onStep?.(s); } catch { /* the UI's problem, not the query's */ } };
     if (!this.currentProvider) {
       throw new Error('No provider selected. Please set a provider first.');
     }
@@ -349,6 +354,7 @@ class AIAgent {
 
     // Ask mode: single turn, no tools
     if (!useTools) {
+      step({ type: 'thinking' });
       const response = await this.currentProvider.chat(messages, chatOptions);
       if (response.content) {
         this.conversationHistory.push({
@@ -369,6 +375,7 @@ class AIAgent {
     const toolResults = [];
 
     while (iteration < maxIterations) {
+      step({ type: 'thinking' });
       const response = await this.currentProvider.chat(messages, chatOptions);
 
       if (!response.toolCalls || response.toolCalls.length === 0) {
@@ -404,6 +411,7 @@ class AIAgent {
       messages.push(assistantMsg);
 
       for (const toolCall of response.toolCalls) {
+        step({ type: 'tool', name: String(toolCall.name || '') });
         const startTime = Date.now();
         const result = await this.toolExecutor.execute(toolCall);
         const executionTime = Date.now() - startTime;

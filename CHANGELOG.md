@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The AI chat's composer is a glowing pill. On send it folds into a ball, flies up into the conversation and becomes a dotted orb whose label follows what the agent is doing (reading the sketch, writing code, compiling, uploading…), then turns green, condenses and unfolds into the answer card, which stays in the chat. Errors resolve red with "Couldn't finish". It follows the light and dark themes and, with reduced motion, cross-fades instead of moving. The agent now reports each step to the chat as it happens.
+
+### Fixed
+
+- Code blocks in chat answers drew a second frame inside their own, and left a blank line after them.
+
 ## [2.0.0-beta.1] - 2026-10-12
 
 ### Added

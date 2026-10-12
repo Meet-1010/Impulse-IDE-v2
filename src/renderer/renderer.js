@@ -16,6 +16,7 @@ import { setupSourceControl } from './source-control.js';
 import { detectBaud, diffSerial, captureBoardSerial, renderCompareReport } from './compare.js';
 import { runHeadless } from './simulation/headless.js';
 import { programOf } from './simulation/runners.js';
+import { createChatOrb, COPY as ORB_COPY } from './morph-orb/morph-orb.js';
 
 // UI State — exposed on window so other modules (validation.js, etc.) can access it
 // without relying on bundler scope-hoisting accidents.
@@ -127,6 +128,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         syncDropdowns();
         setupAIPanelOverlay();
         setupAIPanelResize();
+        setupChatOrb();
         setupContextAwareness();
         setupSerialButtons();
         setupSerialPlotter();
@@ -1899,7 +1901,7 @@ function setupAIListeners() {
     document.getElementById('aiSettingsBtn')?.addEventListener('click', openAPIKeyModalForCurrentProvider);
     document.getElementById('aiSend')?.addEventListener('click', sendAIMessage);
     document.getElementById('aiInput')?.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter' && !e.shiftKey) {
+        if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
             e.preventDefault();
             sendAIMessage();
         }
@@ -4185,11 +4187,39 @@ async function verifyAiEdit() {
     }
 }
 
+// The composer pill, the thinking orb and the answer card (morph-orb.js).
+let chatOrb = null;
+
+function setupChatOrb() {
+    const host = document.querySelector('#aiPanel .ai-panel-inner');
+    const list = document.getElementById('aiMessages');
+    const slot = host?.querySelector('.mo-slot');
+    const input = document.getElementById('aiInput');
+    const send = document.getElementById('aiSend');
+    if (!host?.querySelector('.mo-root') || !list || !slot || !input || !send) return;
+    host.querySelector('.mo-input')?.addEventListener('submit', (e) => e.preventDefault());
+    chatOrb = createChatOrb({ host, list, slot, input, send });
+}
+
+/** The answer card that stays in the conversation. */
+function buildAnswerMessage(result) {
+    const el = document.createElement('div');
+    el.className = 'ai-message assistant mo-msg';
+    el.innerHTML = '<div class="mo-a-head"><i class="mo-a-dot" aria-hidden="true"></i><span></span></div><div class="mo-a-body"></div>';
+    el.querySelector('.mo-a-head span').textContent = result.ok ? ORB_COPY.answerTitle : ORB_COPY.errorTitle;
+    el.querySelector('.mo-a-body').innerHTML = formatAIContent(result.content);
+    return el;
+}
+
 async function sendAIMessage() {
     const input = document.getElementById('aiInput');
     const message = input?.value?.trim();
 
-    if (!message) return;
+    if (chatOrb?.busy()) return;
+    if (!message) {
+        chatOrb?.shake();
+        return;
+    }
 
     if (!state.aiProviderConfigured) {
         addAIMessage('assistant', 'Please select a model and enter your API key first.');
@@ -4202,75 +4232,71 @@ async function sendAIMessage() {
     const snapId = takeCodeSnapshot(message);
 
     addAIMessage('user', message, false, false, snapId);
-    input.value = '';
 
-    const thinkingId = addAIMessage('assistant', '<span class="shimmer-text">Thinking…</span>', true, true);
+    const context = {
+        code: hasFileOpen && state.editor ? state.editor.getValue() : '',
+        sketchPath: state.currentSketch || null,
+        board: document.getElementById('boardSelectSidebar')?.value,
+        port: document.getElementById('portSelectSidebar')?.value,
+        hasFileOpen: hasFileOpen
+    };
+    const mode = state.aiMode || 'agent';
 
-    const safeRemoveThinking = () => {
+    // Agent turns can legitimately take minutes; the orb shows each step
+    // (the SDK enforces the real network timeout).
+    const work = async (step) => {
+        const stop = window.electronAPI.ai.onStep?.(step);
         try {
-            removeAIMessage(thinkingId);
-        } catch (e) {
-            console.error('Error removing thinking message:', e);
+            const result = await window.electronAPI.ai.processQuery(message, context, mode);
+            if (result.success && result.data) {
+                return { ok: true, content: result.data.response || result.data.content || 'No response received', data: result.data };
+            }
+            return { ok: false, content: result.error || 'Unknown error occurred' };
+        } catch (error) {
+            return { ok: false, content: error.message || 'An unexpected error occurred' };
+        } finally {
+            stop?.();
         }
     };
 
-    // Agent turns can legitimately take minutes; show progress instead of a
-    // client-side timeout (the SDK enforces the real network timeout).
-    const startedAt = Date.now();
-    const timeoutId = setInterval(() => {
-        const label = document.querySelector(`#${CSS.escape(thinkingId)} .shimmer-text`);
-        if (label) label.textContent = `Working… ${Math.round((Date.now() - startedAt) / 1000)}s`;
-    }, 1000);
-
-    try {
-        const context = {
-            code: hasFileOpen && state.editor ? state.editor.getValue() : '',
-            sketchPath: state.currentSketch || null,
-            board: document.getElementById('boardSelectSidebar')?.value,
-            port: document.getElementById('portSelectSidebar')?.value,
-            hasFileOpen: hasFileOpen
-        };
-        const mode = state.aiMode || 'agent';
-        const result = await window.electronAPI.ai.processQuery(message, context, mode);
-
-        clearInterval(timeoutId);
-        safeRemoveThinking();
-
-        if (result.success && result.data) {
-            const response = result.data.response || result.data.content || 'No response received';
-            addAIMessage('assistant', response);
-            const editedCode = (result.data.toolResults || []).some(t => t && t.success && CODE_EDIT_TOOLS.has(t.tool));
-            if (editedCode) verifyAiEdit();
-
-            if (result.data.toolResults && result.data.toolResults.length > 0) {
-                const toolSummary = result.data.toolResults
-                    .map(t => `• ${t.tool || 'Action'}: ${t.success ? 'Success' : 'Failed'}`)
-                    .join('\n');
-                addAIMessage('system', `Actions performed:\n${toolSummary}`);
-            }
-
-            // Track token usage and auto-compact when approaching context limits.
-            if (result.data.usage) {
-                const { input } = extractTokens(result.data.usage);
-                state.aiTokensUsed += input;
-                updateTokenCounter();
-                if (state.aiTokensUsed >= AI_COMPACT_THRESHOLD && !state.aiCompacting) {
-                    compactConversation();
-                }
-            }
-        } else {
-            const errorMsg = result.error || 'Unknown error occurred';
-            addAIMessage('assistant', `Error: ${errorMsg}`);
-            logToConsole(`AI Error: ${errorMsg}`, 'error');
+    const after = (result) => {
+        if (!result.ok) {
+            logToConsole(`AI Error: ${result.content}`, 'error');
+            return;
         }
-    } catch (error) {
-        clearInterval(timeoutId);
-        safeRemoveThinking();
+        const data = result.data || {};
+        const editedCode = (data.toolResults || []).some(t => t && t.success && CODE_EDIT_TOOLS.has(t.tool));
+        if (editedCode) verifyAiEdit();
 
-        const errorMsg = error.message || 'An unexpected error occurred';
-        addAIMessage('assistant', `Error: ${errorMsg}`);
-        logToConsole(`AI Error: ${errorMsg}`, 'error');
+        if (data.toolResults && data.toolResults.length > 0) {
+            const toolSummary = data.toolResults
+                .map(t => `• ${t.tool || 'Action'}: ${t.success ? 'Success' : 'Failed'}`)
+                .join('\n');
+            addAIMessage('system', `Actions performed:\n${toolSummary}`);
+        }
+
+        // Track token usage and auto-compact when approaching context limits.
+        if (data.usage) {
+            const { input: used } = extractTokens(data.usage);
+            state.aiTokensUsed += used;
+            updateTokenCounter();
+            if (state.aiTokensUsed >= AI_COMPACT_THRESHOLD && !state.aiCompacting) {
+                compactConversation();
+            }
+        }
+    };
+
+    if (chatOrb) {
+        chatOrb.run({ work, render: buildAnswerMessage, after });
+        return;
     }
+    // No orb (markup missing): answer in place.
+    input.value = '';
+    const result = await work(() => {});
+    const container = document.getElementById('aiMessages');
+    container?.appendChild(buildAnswerMessage(result));
+    if (container) container.scrollTop = container.scrollHeight;
+    after(result);
 }
 
 function addAIMessage(role, content, isTemporary = false, isRawHtml = false, snapshotId = null) {
@@ -4318,7 +4344,8 @@ function formatAIContent(content) {
     // 1. Extract fenced code blocks first so later formatting (esp. \n -> <br>)
     //    never runs inside them — otherwise <pre> code rendered double-spaced.
     const codeBlocks = [];
-    let work = text.replace(/```(\w*)\n([\s\S]*?)```/g, (match, lang, code) => {
+    // The newline after a closing fence goes with the block (it would be a blank line).
+    let work = text.replace(/```(\w*)\n([\s\S]*?)```\n?/g, (match, lang, code) => {
         const language = lang || 'TEXT';
         const escapedCode = code
             .replace(/&/g, '&amp;')
@@ -5106,6 +5133,17 @@ function setupSimulation() {
 
 // Small API the simulator uses to open example sketches.
 window.impulse = {
+    /**
+     * One chat exchange with a stand-in agent (tests and demos): `work(step)`
+     * resolves to { ok, content }. The question goes in as the user typed it.
+     */
+    askWith(text, work) {
+        if (!chatOrb || chatOrb.busy()) return false;
+        addAIMessage('user', text);
+        document.getElementById('aiInput').value = text;
+        return chatOrb.run({ work, render: buildAnswerMessage });
+    },
+    get chatPhase() { return chatOrb?.phase ?? null; },
     async openSketch(folderPath, filePath) {
         if (folderPath) await loadFolder(folderPath);
         const res = await window.electronAPI.file.read(filePath);

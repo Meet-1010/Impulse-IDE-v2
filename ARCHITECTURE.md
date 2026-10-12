@@ -63,6 +63,7 @@ src/
 └── renderer/                       # Electron Renderer (UI)
     ├── index.html                  # Main HTML
     ├── styles.css                  # CSS styles
+    ├── morph-orb/                  # AI chat: the pill composer, thinking orb and answer card
     └── renderer.js                 # UI logic
 ```
 
@@ -210,11 +211,11 @@ Display in console/problems
 ```
 User sends message
       ↓
-renderer.js: sendAIMessage()
+renderer.js: sendAIMessage() → morph-orb: the pill folds into a ball and flies up into the chat
       ↓
 IPC: 'ai:process-query'
       ↓
-agent.js → Provider (OpenAI/Gemini/Claude)
+agent.js → Provider (OpenAI/Gemini/Claude)      ── 'ai:step' (each model call, each tool) → the orb's label
       ↓
 LLM returns tool calls
       ↓
@@ -222,8 +223,15 @@ toolExecutor.execute() → arduinoService/serialMonitor
       ↓
 Results → LLM → Final response
       ↓
-Display in AI panel
+morph-orb: the orb turns green (red on an error), condenses and unfolds
+into the answer card, which stays in the chat; the pill comes back
 ```
+
+`morph-orb/morph-orb.js` is a plain-DOM port of the MorphOrb React component:
+the same timelines, easing and dotted-orb canvas renderer, laid out in the
+panel (the pill's home is the composer slot, the orb's spot a spacer after the
+question), with light and dark palettes and reduced-motion cross-fades. The
+card unfolds into the real message's box and hands over to it at 700 ms.
 
 ## IPC Channels
 

@@ -77,7 +77,9 @@ function register(ipcMain, ctx) {
         lastCompileResult: uiState.lastCompileResult ?? null
       };
       const effectiveMode = parsed.data.mode === 'ask' || parsed.data.mode === 'debug' ? parsed.data.mode : 'agent';
-      const result = await aiAgent.processQuery(parsed.data.query, enrichedContext, effectiveMode);
+      // Each step goes to the chat as it happens (the orb's label).
+      const onStep = (step) => { if (!event.sender.isDestroyed()) event.sender.send('ai:step', step); };
+      const result = await aiAgent.processQuery(parsed.data.query, enrichedContext, effectiveMode, { onStep });
       return { success: true, data: result };
     } catch (error) {
       return { success: false, error: error?.message ?? 'Process query failed' };

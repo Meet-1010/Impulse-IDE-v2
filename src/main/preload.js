@@ -155,7 +155,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     summarizeHistory: () => ipcRenderer.invoke('ai:summarize-history'),
     clearHistory: () => ipcRenderer.invoke('ai:clear-history'),
     getMemoryStats: () => ipcRenderer.invoke('ai:get-memory-stats'),
-    executeTool: (toolName, args) => ipcRenderer.invoke('ai:execute-tool', toolName, args)
+    executeTool: (toolName, args) => ipcRenderer.invoke('ai:execute-tool', toolName, args),
+    onStep: (callback) => {
+      const handler = (event, step) => callback(step);
+      ipcRenderer.on('ai:step', handler);
+      return () => ipcRenderer.removeListener('ai:step', handler);
+    }
   },
   
   // API Key Management methods

@@ -629,8 +629,49 @@
                         </div>
                     </div>
                 </div>
-                <div class="ai-composer">
-                    <textarea id="aiInput" placeholder="Plan, @ for context, / for commands" rows="2"></textarea>
+                <!-- MorphOrb: the pill is the composer; on send it becomes the orb in the
+                     conversation and unfolds into the answer (morph-orb/morph-orb.js). -->
+                <div class="mo-root" data-phase="idle" data-kind="answer">
+                    <div class="mo-halo" aria-hidden="true"></div>
+                    <div class="mo-mover">
+                        <span class="mo-trail" aria-hidden="true"></span>
+                        <span class="mo-trail" aria-hidden="true"></span>
+                        <span class="mo-trail" aria-hidden="true"></span>
+                        <span class="mo-trail" aria-hidden="true"></span>
+                        <span class="mo-trail" aria-hidden="true"></span>
+                        <span class="mo-trail" aria-hidden="true"></span>
+                        <div class="mo-actor">
+                            <div class="mo-underglow" aria-hidden="true"></div>
+                            <div class="mo-halo-green" aria-hidden="true"></div>
+                            <div class="mo-surface" aria-hidden="true">
+                                <div class="mo-aurora"><i></i><i></i><i></i><i></i></div>
+                            </div>
+                            <div class="mo-ball" aria-hidden="true"></div>
+                            <div class="mo-green" aria-hidden="true"></div>
+                            <div class="mo-card" aria-hidden="true"></div>
+                            <div class="mo-ring" aria-hidden="true"></div>
+                            <form class="mo-input" autocomplete="off">
+                                <svg class="mo-spark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                    <path d="M10 3.5l1.7 4.8 4.8 1.7-4.8 1.7L10 16.5l-1.7-4.8L3.5 10l4.8-1.7L10 3.5z" />
+                                    <path d="M18 14.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7.7-1.8z" />
+                                </svg>
+                                <textarea id="aiInput" class="mo-field" rows="1" placeholder="Ask anything…" aria-label="Ask anything" spellcheck="false"></textarea>
+                                <button type="button" id="aiSend" class="mo-send" aria-label="Send" title="Send">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                        <path d="M12 19V5" />
+                                        <path d="M5.5 11.5L12 5l6.5 6.5" />
+                                    </svg>
+                                </button>
+                            </form>
+                            <canvas class="mo-orb" aria-hidden="true"></canvas>
+                            <div class="mo-pulse" aria-hidden="true"></div>
+                        </div>
+                    </div>
+                    <div class="mo-status" aria-hidden="true"></div>
+                    <div class="mo-live" role="status" aria-live="polite"></div>
+                </div>
+                <div class="ai-composer mo-dock">
+                    <div class="mo-slot" aria-hidden="true"></div>
                     <div class="ai-composer-row">
                         <span class="ai-mode-wrap">
                             <svg class="ai-mode-ico" viewBox="0 0 24 24" width="12" height="12" fill="none"
@@ -674,12 +715,6 @@
                                     stroke-width="2">
                                     <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" />
                                     <path d="M19 10v2a7 7 0 01-14 0v-2M12 19v4M8 23h8" />
-                                </svg></button>
-                            <button type="button" id="aiSend" class="ai-send" title="Send"><svg viewBox="0 0 24 24"
-                                    width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"
-                                    stroke-linecap="round" stroke-linejoin="round">
-                                    <line x1="22" y1="2" x2="11" y2="13" />
-                                    <polygon points="22 2 15 22 11 13 2 9 22 2" />
                                 </svg></button>
                         </div>
                     </div>

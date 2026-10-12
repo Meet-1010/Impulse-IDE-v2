@@ -3258,6 +3258,14 @@ body::after {
     padding: 0;
 }
 
+/* A code block's own frame is the wrapper: no second box inside it. */
+.ai-msg-area .code-block-wrapper pre {
+    margin: 0;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+}
+
 /* ============================================
    TextShimmer — CSS-only loading animation
    Inspired by 21st.dev / Framer Motion shimmer

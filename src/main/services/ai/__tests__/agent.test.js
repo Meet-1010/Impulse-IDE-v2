@@ -142,6 +142,31 @@ describe('AIAgent', () => {
     });
   });
 
+  describe('steps reported while a query runs', () => {
+    it('reports each model call and each tool before it runs', async () => {
+      const agent = createAgent();
+      agent.registerProvider('mock', MockProvider);
+      agent.setProvider('mock', 'key');
+      let call = 0;
+      agent.currentProvider.chat = async () => (++call === 1
+        ? { content: null, toolCalls: [{ id: 't1', name: 'compile_sketch', arguments: {} }] }
+        : { content: 'Compiled.', toolCalls: [] });
+      agent.toolExecutor = { execute: async () => ({ success: true, tool: 'compile_sketch' }) };
+      const steps = [];
+      const result = await agent.processQuery('compile it', {}, 'agent', { onStep: (s) => steps.push(s) });
+      expect(result.response).toBe('Compiled.');
+      expect(steps).toEqual([{ type: 'thinking' }, { type: 'tool', name: 'compile_sketch' }, { type: 'thinking' }]);
+    });
+
+    it('a listener that throws does not break the query', async () => {
+      const agent = createAgent();
+      agent.registerProvider('mock', MockProvider);
+      agent.setProvider('mock', 'key');
+      const result = await agent.processQuery('hi', {}, 'ask', { onStep: () => { throw new Error('ui gone'); } });
+      expect(result.response).toBe('Mock response');
+    });
+  });
+
   describe('_getToolsForMode', () => {
     it('should return empty array for ask mode', () => {
       const agent = createAgent();
