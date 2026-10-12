@@ -4,7 +4,7 @@ import './styles.css'
 import { initMachineScene, type StationId } from './scene/machine'
 
 // The release the download buttons point at. Bump with each release.
-const RELEASE = { version: '2.0.0-beta.1', repo: 'Meet-1010/Impulse-IDE-v2' }
+const RELEASE = { version: '2.0.0-beta.2', repo: 'Meet-1010/Impulse-IDE-v2' }
 const tag = `v${RELEASE.version}`
 const asset = (name: string) => `https://github.com/${RELEASE.repo}/releases/download/${tag}/${name}`
 const DOWNLOADS: Record<string, string> = {

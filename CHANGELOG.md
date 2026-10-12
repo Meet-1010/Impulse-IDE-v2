@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0-beta.2] - 2026-10-12
+
 ### Added
 
 - Stop the AI while it works: a Stop button takes the chat box's place during a turn (Esc does the same). The model call in flight is cancelled with Claude, OpenAI, Gemini and Ollama alike, no further tool runs, and the unfinished turn is left out of the conversation the AI remembers.
