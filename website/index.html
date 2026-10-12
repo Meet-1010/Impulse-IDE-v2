@@ -131,7 +131,7 @@
                   Follow one prompt
                 </button>
               </div>
-              <p class="meta">macOS, Windows and Linux · Claude, OpenAI or Gemini with your own key</p>
+              <p class="meta">macOS, Windows and Linux · Claude, OpenAI or Gemini, or free local models with Ollama</p>
             </div>
             <a class="scroll-hint" href="#workflow-steps">
               <span>Scroll through the machine</span>
@@ -149,7 +149,7 @@
                   shows each step as it works: reading, writing, compiling, testing.
                 </p>
                 <ul class="facts">
-                  <li>Claude, OpenAI or Gemini, with your own API key</li>
+                  <li>Claude, OpenAI or Gemini with your key, or free with Ollama</li>
                   <li>Keys stay in your OS keychain, never in the page</li>
                   <li>The agent can't run shell commands</li>
                 </ul>
@@ -249,13 +249,13 @@
             <div class="tile-copy">
               <h3>A simulator that runs your real firmware</h3>
               <p>
-                Uno, Nano, Mega 2560, Raspberry Pi Pico and ATtiny85, with parts that behave like the real ones:
-                capacitors charge, servos sweep, displays draw. Real libraries work unchanged.
+                Any board built on the ATmega328P, ATmega2560, ATtiny85 or RP2040 families, with parts that behave
+                like the real ones: capacitors charge, servos sweep, displays draw. Real libraries work unchanged.
               </p>
             </div>
             <dl class="stats">
               <div><dt>Parts</dt><dd>91</dd></div>
-              <div><dt>Boards</dt><dd>5</dd></div>
+              <div><dt>Boards</dt><dd>100+</dd></div>
               <div><dt>Examples</dt><dd>42</dd></div>
             </dl>
             <div class="marquee" aria-hidden="true">
@@ -348,37 +348,38 @@
       <section class="section" id="boards" aria-labelledby="boards-title">
         <div class="section-head">
           <p class="eyebrow">Boards</p>
-          <h2 id="boards-title">Simulate five boards. Upload to any.</h2>
+          <h2 id="boards-title">Simulate the chip. Upload to any board.</h2>
           <p class="section-lead">
-            The simulator emulates the chip itself, so timers, interrupts and libraries behave as they do on the bench.
-            Uploads go through arduino-cli, to any board it knows.
+            The simulator emulates the chip itself, so timers, interrupts and libraries behave as they do on the bench,
+            on every board built around these chips: Uno, Nano, Pro Mini, Mega, Pico, XIAO RP2040 and more.
+            Plug a board in and Impulse selects it; uploads go through arduino-cli, to any board it knows.
           </p>
         </div>
         <ul class="boards">
           <li class="board">
             <div class="chip chip-28" aria-hidden="true"></div>
-            <h3>Arduino Uno</h3>
-            <p>ATmega328P · 16 MHz · 5 V</p>
-          </li>
-          <li class="board">
-            <div class="chip chip-28 chip-small" aria-hidden="true"></div>
-            <h3>Arduino Nano</h3>
-            <p>ATmega328P · 16 MHz · 5 V</p>
+            <h3>ATmega328P / 168</h3>
+            <p>Uno, Nano, Pro Mini, Fio, LilyPad, Duemilanove</p>
           </li>
           <li class="board">
             <div class="chip chip-100" aria-hidden="true"></div>
-            <h3>Arduino Mega 2560</h3>
-            <p>ATmega2560 · 16 MHz · 5 V</p>
+            <h3>ATmega2560 / 1280</h3>
+            <p>Mega 2560, Mega 1280, Mega ADK · 4 serial ports</p>
           </li>
           <li class="board">
             <div class="chip chip-qfn" aria-hidden="true"></div>
-            <h3>Raspberry Pi Pico</h3>
-            <p>RP2040 · 3.3 V · Serial over USB</p>
+            <h3>RP2040</h3>
+            <p>Pico, XIAO RP2040, Feather RP2040 and about 100 more · 3.3 V</p>
           </li>
           <li class="board">
             <div class="chip chip-8" aria-hidden="true"></div>
-            <h3>ATtiny85</h3>
+            <h3>ATtiny25 / 45 / 85</h3>
             <p>8 pins · software Serial · I²C and SPI over USI</p>
+          </li>
+          <li class="board">
+            <div class="chip chip-qfn" aria-hidden="true"></div>
+            <h3>Every other board</h3>
+            <p>ESP32, Uno R4, Leonardo, SAMD… compile, upload and Serial; not simulated yet</p>
           </li>
         </ul>
       </section>
@@ -421,9 +422,11 @@
             <a class="dl" data-download="deb" data-os="linux"><strong>Linux</strong><span>Debian, Ubuntu · .deb</span></a>
           </div>
           <p class="fineprint">
-            Needs <a href="https://arduino.github.io/arduino-cli/" target="_blank" rel="noopener">arduino-cli</a> with the AVR core.
-            Beta builds aren't notarized yet; the
-            <a data-download="notes" target="_blank" rel="noopener">release notes</a> say what to expect.
+            The first time it opens, Impulse sets up
+            <a href="https://arduino.github.io/arduino-cli/" target="_blank" rel="noopener">arduino-cli</a> and the board cores it needs.
+            The beta isn't code-signed yet: on macOS, open it once from System Settings › Privacy &amp; Security ›
+            Open Anyway; on Windows, choose More info › Run anyway. On Ubuntu and Debian, the .deb is the one to use.
+            <a data-download="notes" target="_blank" rel="noopener">Release notes</a>
           </p>
         </div>
       </section>

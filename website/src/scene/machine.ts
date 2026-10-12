@@ -84,8 +84,8 @@ const DEFINITIONS: StationDef[] = [
     output: 'tests',
     pos: [1.5, 0.29, -2.08],
     desc: 'The real firmware runs on an emulated board. The tests pass or fail.',
-    focus: [1.65, 10.5],
-    view: [3.5, 6.5, 17],
+    focus: [1.8, 8.6],
+    view: [2.5, 7.5, 17],
   },
   {
     id: 'ask',
@@ -156,7 +156,8 @@ export function initMachineScene(root: HTMLElement, options: MachineOptions): ()
       throw e
     }
     renderer.setClearColor(0x000000, 0)
-    renderer.setPixelRatio(Math.min(devicePixelRatio, frameWidth() < 900 ? 1.5 : 1.75))
+    // Full device resolution: the screens carry small text. Slow devices step down on their own (below).
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 2))
     renderer.setSize(frameWidth(), frameHeight())
     renderer.outputColorSpace = THREE.SRGBColorSpace
     renderer.toneMapping = THREE.ACESFilmicToneMapping
@@ -310,15 +311,25 @@ export function initMachineScene(root: HTMLElement, options: MachineOptions): ()
       box(parent, 0.068, 0.005, 0.009, x, y + 0.014, z, M.dark, 0)
     }
     type Painted = { texture: THREE.CanvasTexture; canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D }
-    function canvasTexture(w: number, h: number, draw?: (ctx: CanvasRenderingContext2D, w: number, h: number) => void) {
+    // Screens are painted above their nominal size, so text stays sharp in the
+    // close-ups on high-density displays; painters keep drawing in nominal units.
+    const TEXTURE_SCALE = Math.min(devicePixelRatio, 2) >= 1.5 ? 2 : 1.5
+    const maxAnisotropy = renderer.capabilities.getMaxAnisotropy()
+    function canvasTexture(
+      w: number,
+      h: number,
+      draw?: (ctx: CanvasRenderingContext2D, w: number, h: number) => void,
+      scale = TEXTURE_SCALE
+    ) {
       const canvas = document.createElement('canvas')
-      canvas.width = w
-      canvas.height = h
+      canvas.width = Math.round(w * scale)
+      canvas.height = Math.round(h * scale)
       const ctx = canvas.getContext('2d')!
+      ctx.scale(scale, scale)
       draw?.(ctx, w, h)
       const texture = new THREE.CanvasTexture(canvas)
       texture.colorSpace = THREE.SRGBColorSpace
-      texture.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy())
+      texture.anisotropy = maxAnisotropy
       return { texture, canvas, ctx } as Painted
     }
     function screen(parent: THREE.Object3D, w: number, h: number, x: number, y: number, z: number, tex: Painted) {
@@ -484,7 +495,7 @@ export function initMachineScene(root: HTMLElement, options: MachineOptions): ()
     box(ask, 1.75, 1.77, 1.02, 0, 1.24, -0.13, S.body, 0.12)
     box(ask, 1.58, 0.13, 1.09, 0, 2.16, -0.13, S.accent, 0.04)
     box(ask, 1.47, 1.38, 0.055, 0, 1.31, 0.405, M.dark, 0.025)
-    const chatTex = canvasTexture(480, 460)
+    const chatTex = canvasTexture(480, 460, undefined, TEXTURE_SCALE * 1.25)
     screen(ask, 1.31, 1.255, 0, 1.37, 0.44, chatTex)
     box(ask, 1.27, 0.075, 0.29, 0, 0.57, 0.55, M.chrome, 0.02)
     for (let row = 0; row < 3; row++)
@@ -1242,12 +1253,23 @@ export function initMachineScene(root: HTMLElement, options: MachineOptions): ()
       rafId = 0
     const askBase = byId('ask').group.position,
       writeBase = byId('write').group.position
-    function paintScreens(t: number) {
-      P.paintCode(codeTex.ctx, 384, 640, t, F)
-      P.paintChat(chatTex.ctx, 480, 460, t, F)
-      P.paintSim(simTex.ctx, 896, 592, t, F)
-      P.paintUpload(uploadTex.ctx, 512, 176, t, F)
-      for (const tex of [codeTex, chatTex, simTex, uploadTex]) tex.texture.needsUpdate = true
+    // The live screens and their stations. The one in the close-up repaints at
+    // 15 fps; the rest, small in the frame, at 4, which keeps texture uploads light.
+    const liveScreens: Array<{ tex: Painted; station: StationId; paint: (t: number) => void; last: number }> = [
+      { tex: codeTex, station: 'write', paint: (t) => P.paintCode(codeTex.ctx, 384, 640, t, F), last: -1 },
+      { tex: chatTex, station: 'ask', paint: (t) => P.paintChat(chatTex.ctx, 480, 460, t, F), last: -1 },
+      { tex: simTex, station: 'simulate', paint: (t) => P.paintSim(simTex.ctx, 896, 592, t, F), last: -1 },
+      { tex: uploadTex, station: 'ship', paint: (t) => P.paintUpload(uploadTex.ctx, 512, 176, t, F), last: -1 },
+    ]
+    function paintScreens(t: number, force = false) {
+      for (const s of liveScreens) {
+        const close = cameraMode === 'station' ? selected === s.station : mode === 'order' || cameraMode !== 'overview'
+        const interval = close ? 1 / 15 : cameraMode === 'station' ? 1 / 3 : 1 / 8
+        if (!force && s.last >= 0 && t >= s.last && t - s.last < interval) continue
+        s.paint(t)
+        s.tex.texture.needsUpdate = true
+        s.last = t
+      }
     }
     function animate(now: number) {
       rafId = requestAnimationFrame(animate)
@@ -1315,8 +1337,8 @@ export function initMachineScene(root: HTMLElement, options: MachineOptions): ()
       incoming.rotation.z = Math.sin(incomingBeat * Math.PI) * -0.14
       incoming.scale.setScalar(Math.min(1, incomingBeat * 8 + 0.15, (1 - incomingBeat) * 7 + 0.1))
       toggles.forEach((o, i) => (o.rotation.x = Math.sin(tact + i) > 0 ? -0.4 : 0.4))
-      if (t - lastDraw > 1 / 15 || lastDraw < 0 || t < lastDraw) {
-        paintScreens(t)
+      paintScreens(t)
+      if (t - lastDraw > 1 / 30 || lastDraw < 0 || t < lastDraw) {
         updateBelt(t)
         lastDraw = t
       }
@@ -1439,7 +1461,7 @@ export function initMachineScene(root: HTMLElement, options: MachineOptions): ()
         }
       }
     }
-    paintScreens(simTime)
+    paintScreens(simTime, true)
     rafId = requestAnimationFrame(animate)
     cleanups.push(() => {
       cancelAnimationFrame(rafId)
