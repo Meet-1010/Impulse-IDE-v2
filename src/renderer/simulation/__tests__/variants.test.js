@@ -49,7 +49,7 @@ describe('which boards the simulator runs, and how', () => {
   });
 
   test('chips with no emulator are not simulated', () => {
-    for (const fqbn of ['arduino:avr:leonardo', 'arduino:megaavr:nona4809', 'arduino:renesas_uno:unor4wifi', 'esp32:esp32:esp32', 'arduino:samd:mkrzero']) {
+    for (const fqbn of ['arduino:avr:leonardo', 'arduino:megaavr:nona4809', 'arduino:renesas_uno:unor4wifi', 'esp32:esp32:esp32c6', 'arduino:samd:mkrzero']) {
       expect(simulationTarget(fqbn)).toBeNull();
     }
   });

@@ -19,7 +19,11 @@ await build({
   format: 'esm',
   // The toolchain module is CommonJS; give it a require() inside the ES module bundle.
   banner: { js: "import { createRequire as __createRequire } from 'node:module';\nconst require = __createRequire(import.meta.url);" },
-  define: { __IMPULSE_VERSION__: JSON.stringify(pkg.version) },
+  define: {
+    __IMPULSE_VERSION__: JSON.stringify(pkg.version),
+    // The ESP32 simulator bridge, compiled into ESP32 sketches (see src/main/services/esp32sim).
+    __IMPULSE_BRIDGE_SOURCE__: JSON.stringify(fs.readFileSync(path.join(root, 'src', 'main', 'services', 'esp32sim', 'impulse_sim.cpp'), 'utf8')),
+  },
   legalComments: 'eof',
   logLevel: 'warning',
 });

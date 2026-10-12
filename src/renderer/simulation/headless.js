@@ -52,7 +52,7 @@ export function headlessCircuit(runner, model) {
 }
 
 /**
- * @param {string|Uint8Array} hex - the program: Intel HEX (AVR boards) or UF2 (Raspberry Pi Pico)
+ * @param {string|Uint8Array|object} hex - the program: Intel HEX (AVR boards), UF2 (Raspberry Pi Pico) or an ESP32 flash image ({ image, chip })
  * @param {{ seconds?: number, board?: string, mcu?: string, signal?: AbortSignal, onProgress?: (simSeconds: number) => void,
  *   setup?: (runner: AvrRunner) => void, circuit?: object }} [options]
  * @returns {Promise<{ serial: string, trace: {pin: number, high: boolean, t: number}[], finalStates: boolean[],
@@ -87,6 +87,22 @@ export async function runHeadless(hex, options = {}) {
     engine.start();
   }
   options.setup?.(runner);
+
+  if (runner.realtime) {
+    // ESP32 boards: the firmware runs in real time in its emulator.
+    runner.start();
+    const timer = setInterval(() => engine?.frame(), 10);
+    try {
+      await runner.waitUntil(seconds, { signal: options.signal });
+    } finally {
+      clearInterval(timer);
+      runner.shutdown();
+    }
+    engine?.stop();
+    const board = runner.board;
+    const finalStates = Array.from({ length: board.pinCount }, (_, pin) => runner.getPinState(pin));
+    return { serial, trace, finalStates, simSeconds: runner.time, truncated, board: board.id, shorts };
+  }
 
   const target = Math.round(seconds * F_CPU);
   const frame = F_CPU / 100;

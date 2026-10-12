@@ -103,6 +103,20 @@ const EXTRA_CORES = {
     size: 'about 10 MB',
     fqbn: /^ATTinyCore:/,
   },
+  esp32: {
+    id: 'esp32:esp32',
+    url: 'https://espressif.github.io/arduino-esp32/package_esp32_index.json',
+    label: 'ESP32 boards (Espressif core)',
+    size: 'about 650 MB',
+    fqbn: /^esp32:esp32:/,
+  },
+  nanoesp32: {
+    id: 'arduino:esp32',
+    url: null, // in Arduino's own board index
+    label: 'Arduino Nano ESP32 (Arduino ESP32 core)',
+    size: 'about 450 MB',
+    fqbn: /^arduino:esp32:/,
+  },
 };
 
 /** The EXTRA_CORES key that provides a board, or null. */
@@ -196,7 +210,7 @@ class Toolchain extends EventEmitter {
     if (!core) throw new Error(`Unknown core "${key}"`);
     const cli = this.findCli();
     if (!cli) throw new Error('arduino-cli is not installed. Run Tools › Set Up Arduino Tools first.');
-    const urls = ['--additional-urls', core.url];
+    const urls = core.url ? ['--additional-urls', core.url] : [];
     this._progress('core', 'Updating the board list…', null);
     const index = await this._run(cli.path, ['core', 'update-index', ...urls]);
     if (!index.success) throw new Error(`Could not update the board list: ${(index.stderr || index.stdout).trim().split('\n').pop()}`);

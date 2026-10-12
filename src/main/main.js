@@ -28,6 +28,7 @@ const { debug } = require('./utils/logger');
 const notifications = require('./utils/notifications');
 const WorkspaceStore = require('./services/workspaceStore');
 const { Toolchain } = require('./services/toolchain');
+const { Esp32Simulator, bundledQemuDir } = require('./services/esp32sim');
 const { validatePath } = require('./utils/pathValidator');
 
 const logger = require('./utils/logger');
@@ -61,6 +62,7 @@ let errorMemory;
 let aiAgent;
 let apiKeyManager;
 let workspace;
+let esp32sim;
 
 const uiState = {
   currentBaudRate: 115200,
@@ -413,6 +415,12 @@ app.whenReady().then(() => {
     ignoreSystem: process.env.IMPULSE_TOOLCHAIN_ISOLATED === '1'
   });
   arduinoService = new ArduinoService({ cliPath: toolchain.findCli()?.path || null });
+  esp32sim = new Esp32Simulator({
+    runCli: (args, opts) => arduinoService.runCommand(args, opts),
+    dataDir: path.join(app.getPath('userData'), 'emulators'),
+    bundledDir: app.isPackaged ? bundledQemuDir() : bundledQemuDir(path.join(__dirname, '..', '..', 'build')),
+  });
+  arduinoService.esp32sim = esp32sim;
   serialMonitor = new SerialMonitor();
   errorMemory = new ErrorMemory();
   apiKeyManager = new APIKeyManager();
@@ -543,13 +551,18 @@ app.whenReady().then(() => {
     app,
     workspace,
     problemReporter,
-    toolchain
+    toolchain,
+    esp32sim
   };
   registerAllIpc(ipcMain, ctx);
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
+});
+
+app.on('will-quit', () => {
+  esp32sim?.stopAll();
 });
 
 app.on('window-all-closed', () => {

@@ -19,6 +19,7 @@ const problemHandlers = require('./problemHandlers');
 const toolchainHandlers = require('./toolchainHandlers');
 const platformioHandlers = require('./platformioHandlers');
 const gitHandlers = require('./gitHandlers');
+const esp32simHandlers = require('./esp32simHandlers');
 
 /**
  * Register all IPC handlers. Requires ipcMain and a context object with services and state.
@@ -54,6 +55,7 @@ function registerAllIpc(ipcMain, ctx) {
   toolchainHandlers.register(ipcMain, ctx);
   platformioHandlers.register(ipcMain, ctx);
   gitHandlers.register(ipcMain, ctx);
+  esp32simHandlers.register(ipcMain, ctx);
 }
 
 module.exports = { registerAllIpc };

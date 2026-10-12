@@ -661,7 +661,12 @@ export class CircuitEngine {
     if (dt > 0) {
       const n = this.board.pinCount;
       for (let p = 0; p < n; p++) {
-        if (this._edges[p]) {
+        // ESP32 boards report their PWM (LEDC) as duty and frequency, not edges.
+        const hw = this.runner.pwmOf?.(p);
+        if (hw) {
+          this._duty[p] = hw.duty;
+          this._freq[p] = hw.freq;
+        } else if (this._edges[p]) {
           let acc = this._highAcc[p];
           if (this._lastHigh[p]) acc += now - this._segStart[p];
           this._duty[p] = Math.max(0, Math.min(1, acc / dt));

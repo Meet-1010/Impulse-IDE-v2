@@ -10,7 +10,7 @@ import { createRunner, runnerFamily, programOf } from './runners.js';
 import { CircuitEngine, staticTopology } from './engine.js';
 import { CircuitCanvas } from './canvas.js';
 import { PARTS, partDef } from './parts/catalog.js';
-import { BOARDS, BOARD_ORDER, boardByTag, boardForFqbn, compileTarget, simulationTarget, boardPinNumber, boardPowerPin, pinLabel, simulatedBoardsText } from './boards.js';
+import { BOARDS, BOARD_ORDER, boardByTag, boardForFqbn, compileTarget, simulationTarget, boardPinNumber, boardPowerPin, pinLabel, simulatedBoardsText, registerBoardChip } from './boards.js';
 import { circuitChecks } from './checks.js';
 import { toDiagram, fromDiagram, hintsToPoints, remapBoardWires } from './diagram.js';
 import { validateCircuit, layoutCircuit, catalogText } from './circuit-ai.js';
@@ -361,6 +361,24 @@ export class SimulationManager {
     return { x: Math.round(spot[0] / 4.8) * 4.8, y: Math.round(spot[1] / 4.8) * 4.8 };
   }
 
+  /**
+   * ESP32 boards: ask the installed core which chip a board is built on (a
+   * board newer than Impulse's table), then check the toolbar board again.
+   */
+  _learnBoardChip(fqbn) {
+    if (!/^(esp32|arduino):esp32:/.test(fqbn)) return;
+    const base = fqbn.split(':').slice(0, 3).join(':');
+    this._learnedChips ??= new Set();
+    if (this._learnedChips.has(base)) return;
+    this._learnedChips.add(base);
+    window.electronAPI?.esp32sim?.chipOf(base).then((mcu) => {
+      if (!mcu) return;
+      const before = boardForFqbn(fqbn)?.id;
+      registerBoardChip(base, mcu);
+      if (boardForFqbn(fqbn)?.id !== before && window.state?.selectedBoard === fqbn) this._checkToolbarBoard();
+    }).catch(() => {});
+  }
+
   /** Hint when the upload board (toolbar) differs from the simulated one. */
   _checkToolbarBoard() {
     const pio = window.state?.pio;
@@ -373,6 +391,7 @@ export class SimulationManager {
     }
     const fqbn = window.state?.selectedBoard;
     if (!fqbn || this._noticeDismissed === fqbn) { this.notice.hidden = true; return; }
+    this._learnBoardChip(fqbn);
     const target = boardForFqbn(fqbn);
     const name = window.state?.boards?.find?.(b => b.fqbn === fqbn)?.name || fqbn;
     this.notice.innerHTML = '';
@@ -1040,6 +1059,7 @@ export class SimulationManager {
       this.analyzer?.push(pin, high, cycles / F_CPU);
     };
     this.runner.onReset = () => this.engine.restartParts();
+    this.runner.onNotice = (msg) => this._systemLine(msg, 'info');
     this.engine.log = (msg) => this._systemLine(msg.replace(/^\[sim\] /, 'Simulator: '), 'info');
     this.engine.onShort = (short) => {
       this._shorts.push(short);
@@ -1076,6 +1096,10 @@ export class SimulationManager {
     const sketchPath = await this._prepareRun();
     if (!sketchPath) return;
     const board = this.board;
+    if (runnerFamily(board.id) === 'esp32' && !await this._ensureEmulator(board)) {
+      this._setState('idle');
+      return;
+    }
     this._systemLine(`Compiling for ${board.label}…`, 'info');
     const result = await this._compile(sketchPath, board);
     if (!result.success) {
@@ -1122,6 +1146,7 @@ export class SimulationManager {
     const family = runnerFamily(board.id);
     if (family === this._runnerFamily) return;
     this.runner.stop();
+    this.runner.shutdown?.();
     this.runner = createRunner(board.id);
     this._runnerFamily = family;
     this.engine.runner = this.runner;
@@ -1406,6 +1431,43 @@ export class SimulationManager {
     return result;
   }
 
+  /**
+   * ESP32 boards run in Espressif's QEMU: ask to download it the first time
+   * (on macOS it ships with Impulse). True when it's ready.
+   */
+  async _ensureEmulator(board) {
+    const api = window.electronAPI?.esp32sim;
+    if (!api) return false;
+    const chip = this._target(board).mcu === 'esp32c3' ? 'esp32c3' : 'esp32';
+    const status = await api.status(chip).catch(() => null);
+    if (!status?.success) return false;
+    if (status.data.installed) return true;
+    if (!status.data.supported) {
+      this._systemLine('The ESP32 emulator has no build for this computer, so ESP32 boards can\'t be simulated here.', 'error');
+      return false;
+    }
+    const name = chip === 'esp32c3' ? 'the ESP32-C3 emulator' : 'the ESP32 emulator';
+    const ok = await confirmDialog(`Install ${name}?`,
+      `ESP32 boards run in Espressif's QEMU, the emulator Espressif uses to test ESP-IDF: a one-time download of about ${status.data.sizeMB} MB from Espressif's GitHub releases, checked against its published checksum.`,
+      { confirmLabel: 'Install' });
+    if (!ok) return false;
+    const text = h('span', { role: 'status' }, `Installing ${name}…`);
+    this.notice.replaceChildren(icon('download', 15), text);
+    this.notice.hidden = false;
+    const stop = api.onProgress((p) => {
+      text.textContent = p.percent === null ? p.message : `${p.message} ${p.percent}%`;
+    });
+    const res = await api.install(chip).catch(e => ({ success: false, error: e.message }));
+    stop?.();
+    this.notice.hidden = true;
+    if (!res?.success) {
+      this._systemLine(`Could not install ${name}: ${res?.error || 'unknown error'}`, 'error');
+      return false;
+    }
+    this._systemLine(`Installed ${name}.`, 'success');
+    return true;
+  }
+
   /** Ask to install a board core the simulator needs (the Pico's, ATTinyCore), with progress in the notice bar. */
   async _installCore(key, board) {
     const info = await window.electronAPI.toolchain?.extraCore?.(key).catch(() => null);
@@ -1453,6 +1515,7 @@ export class SimulationManager {
 
   stop() {
     this.runner.stop();
+    this.runner.shutdown?.();
     this._endDebug();
     this.engine.stop();
     const was = this.running;
@@ -1736,7 +1799,12 @@ export class SimulationManager {
     this.runner.start();
     this._setState('running');
     this._startLoop();
-    await new Promise(r => setTimeout(r, seconds * 1000));
+    if (this.runner.realtime) {
+      // The ESP32 emulator boots first; wait for the firmware's own time.
+      await Promise.race([this.runner.waitUntil(seconds).catch(() => {}), new Promise(r => setTimeout(r, (seconds + 20) * 1000))]);
+    } else {
+      await new Promise(r => setTimeout(r, seconds * 1000));
+    }
     this._capturing = false;
     this.stop();
     return { serial: this._captureBuf, pins: this._summarizePins() };
@@ -1754,7 +1822,7 @@ export class SimulationManager {
     try {
       const res = await window.electronAPI.ai.verifyExecution({
         ...obs,
-        board: `${this.board.label} (${{ atmega2560: 'ATmega2560', rp2040: 'RP2040, 3.3 V logic' }[this.board.mcu] || 'ATmega328P'})`,
+        board: `${this.board.label} (${{ atmega2560: 'ATmega2560', rp2040: 'RP2040, 3.3 V logic', esp32: 'ESP32, 3.3 V logic', esp32s3: 'ESP32-S3, 3.3 V logic', esp32c3: 'ESP32-C3, 3.3 V logic' }[this.board.mcu] || 'ATmega328P'})`,
         circuit: this._wiringSummary(),
       });
       if (!res || !res.success) {

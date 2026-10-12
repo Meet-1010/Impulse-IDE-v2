@@ -247,14 +247,21 @@ export class BoardBehavior extends Behavior {
   }
 
   frame() {
-    const led = this.ctx.board.ledBuiltin;
+    const board = this.ctx.board;
     const runner = this.ctx.runner;
-    this.el.led13 = runner.isOutput(led) ? this.ctx.engine._duty[led] > 0.2 : false;
+    // ESP32 DevKits: an RGB LED (WS2812) instead of a plain one.
+    if (board.rgbLed !== undefined) {
+      this.el.rgb = runner.rgbOf?.(board.rgbLed) || null;
+      return;
+    }
+    const led = board.ledBuiltin;
+    this.el[board.ledProp || 'led13'] = runner.isOutput(led) ? this.ctx.engine._duty[led] > 0.2 : false;
   }
 
   stop() {
     this.el.removeEventListener('button-press', this._reset);
-    this.el.led13 = false;
+    this.el[this.ctx.board.ledProp || 'led13'] = false;
+    if (this.ctx.board.rgbLed !== undefined) this.el.rgb = null;
     this.el.ledPower = false;
     this.el.ledTX = false;
     this.el.ledRX = false;

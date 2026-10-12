@@ -618,6 +618,12 @@ class ArduinoService {
     if (!this.validateFQBN(boardFQBN)) {
       return { success: false, error: `Invalid board: "${boardFQBN}"` };
     }
+    // ESP32 boards run in Espressif's QEMU: a flash image built with the simulator bridge.
+    if (/^(esp32|arduino):esp32:/.test(boardFQBN) && this.esp32sim) {
+      const res = await this.esp32sim.build(this.sketchDir(sketchPath), boardFQBN);
+      if (res.success || !res.missingCore) return res;
+      return { ...res, error: ArduinoService.explainToolchainError(res.error) || res.error, missingCore: extraCoreFor(boardFQBN) || undefined };
+    }
     const outputDir = path.join(os.tmpdir(), `impulse-hex-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
     fs.mkdirSync(outputDir, { recursive: true });
 

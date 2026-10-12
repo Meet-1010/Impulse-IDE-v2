@@ -210,6 +210,26 @@ contextBridge.exposeInMainWorld('electronAPI', {
       return () => ipcRenderer.removeListener('toolchain:progress', handler);
     }
   },
+  // The ESP32 simulator: Espressif's QEMU, run by the main process.
+  esp32sim: {
+    chipOf: (fqbn) => ipcRenderer.invoke('esp32sim:chip-of', fqbn),
+    status: (chip) => ipcRenderer.invoke('esp32sim:status', chip),
+    install: (chip) => ipcRenderer.invoke('esp32sim:install', chip),
+    start: (imageId) => ipcRenderer.invoke('esp32sim:start', imageId),
+    send: (session, lines) => ipcRenderer.send('esp32sim:send', session, lines),
+    write: (session, text) => ipcRenderer.send('esp32sim:write', session, text),
+    control: (session, action) => ipcRenderer.invoke('esp32sim:control', session, action),
+    onEvent: (callback) => {
+      const handler = (event, e) => callback(e);
+      ipcRenderer.on('esp32sim:event', handler);
+      return () => ipcRenderer.removeListener('esp32sim:event', handler);
+    },
+    onProgress: (callback) => {
+      const handler = (event, p) => callback(p);
+      ipcRenderer.on('esp32sim:progress', handler);
+      return () => ipcRenderer.removeListener('esp32sim:progress', handler);
+    }
+  },
   problem: {
     details: (crashId) => ipcRenderer.invoke('problem:details', { crashId }),
     report: (spec) => ipcRenderer.invoke('problem:report', spec),

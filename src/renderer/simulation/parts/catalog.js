@@ -76,6 +76,27 @@ const defs = {
     pins: { PB0: 'Pin 0 · PWM · Serial TX · I²C SDA · SPI DI', PB1: 'Pin 1 · PWM · LED_BUILTIN · Serial RX · SPI DO', PB2: 'Pin 2 · A1 · I²C SCL · SPI USCK · INT0', PB3: 'Pin 3 · A3', PB4: 'Pin 4 · A2 · PWM', PB5: 'Pin 5 · A0 · RESET', VCC: 'Supply (5 V)', GND: 'Ground' },
   },
 
+  'wokwi-esp32-devkit-v1': {
+    label: 'ESP32 DevKit V1', category: 'Boards', board: 'esp32', behavior: BoardBehavior,
+    keywords: ['esp32', 'esp-32', 'devkit', 'devkit v1', 'doit', 'esp32 dev module', 'esp-wroom-32', 'wroom', 'wifi', 'bluetooth', 'espressif', 'nodemcu-32s', '3.3v', 'board', 'microcontroller'],
+    description: 'ESP32 (dual-core, 240 MHz) with 3.3 V logic: pins are GPIO numbers; the blue LED is on GPIO2 (LED_BUILTIN); analog inputs on GPIO32–39 (ADC1) and others; GPIO34–39 are inputs only, without pull-ups; I²C on 21/22, SPI on 18/19/23/5; Serial on GPIO1/3. Runs in Espressif\'s ESP32 emulator (Wi-Fi and Bluetooth aren\'t simulated). Compiles with Espressif\'s ESP32 core.',
+  },
+  'impulse-esp32-s3-devkitc': {
+    label: 'ESP32-S3 DevKitC-1', category: 'Boards', board: 'esp32s3', behavior: BoardBehavior,
+    keywords: ['esp32-s3', 'esp32s3', 's3', 'devkitc', 'devkitc-1', 'esp32-s3-wroom-1', 'espressif', 'rgb led', 'neopixel', 'ws2812', 'wifi', '3.3v', 'board', 'microcontroller'],
+    description: 'ESP32-S3 (dual-core, 240 MHz) with 3.3 V logic: pins are GPIO numbers; an RGB LED (WS2812) on GPIO48 lights with digitalWrite(LED_BUILTIN, HIGH) or neopixelWrite(); analog inputs on GPIO1–20; I²C on 8/9, SPI on 10–13; Serial on TX (GPIO43) / RX (GPIO44). Runs in Espressif\'s ESP32-S3 emulator. ESP32-S2 boards run on it too.',
+  },
+  'impulse-esp32-c3-devkitm': {
+    label: 'ESP32-C3 DevKitM-1', category: 'Boards', board: 'esp32c3', behavior: BoardBehavior,
+    keywords: ['esp32-c3', 'esp32c3', 'c3', 'devkitm', 'devkitm-1', 'risc-v', 'riscv', 'esp32-c3-mini-1', 'espressif', 'rgb led', 'xiao esp32c3', '3.3v', 'board', 'microcontroller'],
+    description: 'ESP32-C3 (single-core RISC-V, 160 MHz) with 3.3 V logic: pins are GPIO numbers; an RGB LED (WS2812) on GPIO8 (LED_BUILTIN); analog inputs on GPIO0–5; I²C on 8/9, SPI on 4–7; Serial on TX (GPIO21) / RX (GPIO20). Runs in Espressif\'s ESP32-C3 emulator.',
+  },
+  'impulse-nano-esp32': {
+    label: 'Arduino Nano ESP32', category: 'Boards', board: 'nanoesp32', behavior: BoardBehavior,
+    keywords: ['nano esp32', 'nano-esp32', 'nano_nora', 'esp32-s3', 'arduino', 'nano', 'board', 'microcontroller', '3.3v', 'wifi'],
+    description: 'An ESP32-S3 in the Nano shape with 3.3 V logic: D0–D13 and A0–A7 as on every Nano (the core maps them to GPIOs), LED_BUILTIN on D13, I²C on A4/A5, SPI on D10–D13. Runs in Espressif\'s ESP32-S3 emulator. Compiles with Arduino\'s ESP32 core.',
+  },
+
   // ── Breadboards ────────────────────────────────────────────────────────────
   'impulse-breadboard': {
     label: 'Breadboard (full, 830 points)', category: 'Breadboards',

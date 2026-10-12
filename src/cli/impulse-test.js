@@ -16,6 +16,8 @@ import { circuitChecks } from '../renderer/simulation/checks.js';
 import { BOARDS, boardForFqbn, simulationTarget } from '../renderer/simulation/boards.js';
 import { partDef } from '../renderer/simulation/parts/catalog.js';
 import toolchain from '../main/services/toolchain.js';
+import esp32sim from '../main/services/esp32sim/index.js';
+import { setEsp32Bridge } from '../renderer/simulation/esp32-runner.js';
 
 export const EXIT = { PASS: 0, FAIL: 1, ERROR: 2 };
 
@@ -32,7 +34,8 @@ diagram.json, and checks the "// @expect" lines in its source.
 A <sketch> is a sketch folder, its .ino file, or a folder of sketches.
 
 Options:
-  --board <uno|nano|mega|pico|attiny85>  Board to simulate (default: the board in diagram.json, else uno)
+  --board <id>             Board to simulate: uno, nano, mega, pico, attiny85, esp32, esp32s3, esp32c3 or
+                           nanoesp32 (default: the board in diagram.json, else uno)
   --fqbn <fqbn>            Compile for this FQBN (must be a board the simulator runs)
   --seconds <n>            Simulated time per sketch, overriding "// @run" (max ${MAX_SECONDS})
   --expect <line>          Extra expectation for every sketch, e.g. --expect 'pin 13 toggles'
@@ -121,6 +124,8 @@ export function parseArgs(argv) {
     if (opts.board && opts.board !== board.id) throw new UsageError(`--fqbn ${opts.fqbn} is not a ${BOARDS[opts.board].label}`);
   }
   if (opts.hex && opts.sketches.length > 1) throw new UsageError('--hex tests one sketch at a time');
+  const hexBoard = opts.board ? BOARDS[opts.board] : opts.fqbn ? boardForFqbn(opts.fqbn) : null;
+  if (opts.hex && hexBoard?.family === 'esp32') throw new UsageError('--hex runs AVR and Pico programs; ESP32 sketches are compiled for the simulator (its bridge is built in)');
   if (!opts.help && !opts.version && !opts.sketches.length && !(opts.hex && opts.expect.length)) {
     throw new UsageError('Give a sketch to test (or --hex with --expect)');
   }
@@ -237,8 +242,54 @@ const CORE_URLS = {
   'ATTinyCore:avr': 'https://drazzy.com/package_drazzy.com_index.json',
 };
 
+let esp32 = null;
+
+/** The ESP32 simulator (Espressif's QEMU), shared with an installed Impulse when there is one. */
+function esp32Simulator(cli) {
+  if (esp32) return esp32;
+  const dataRoot = appDataDirs().find(d => fs.existsSync(d)) || appDataDirs()[0];
+  const bundled = process.platform === 'darwin' ? '/Applications/Impulse IDE.app/Contents/Resources' : null;
+  esp32 = new esp32sim.Esp32Simulator({
+    runCli: async (args, o = {}) => {
+      const r = await run(cli, args, o.timeout || 15 * 60 * 1000);
+      return { success: r.ok, stdout: r.stdout, stderr: r.stderr };
+    },
+    dataDir: process.env.IMPULSE_EMULATOR_DIR || path.join(dataRoot, 'emulators'),
+    bundledDir: bundled ? esp32sim.bundledQemuDir(bundled) : null,
+  });
+  setEsp32Bridge(() => esp32sim.localBridge(esp32));
+  return esp32;
+}
+
+/** Stop ESP32 emulators still running (end of a test run). */
+export function stopEmulators() {
+  esp32?.stopAll();
+}
+
+/** Compile for the ESP32 simulator: a flash image ({ image, chip }) with the bridge built in. */
+async function compileEsp32(cli, sketch, fqbn, libraries) {
+  if (libraries.length) throw new Error('--libraries isn\'t supported for ESP32 boards yet; install the libraries with arduino-cli lib install');
+  const sim = esp32Simulator(cli);
+  const res = await sim.build(sketch.dir, fqbn);
+  if (!res.success) {
+    if (res.missingCore) {
+      const core = fqbn.split(':').slice(0, 2).join(':');
+      const url = core === 'esp32:esp32' ? ' --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json' : '';
+      throw new SetupError(`arduino-cli has no core for ${fqbn}. Install it with: arduino-cli core install ${core}${url}`);
+    }
+    throw new Error(compilerError(res.error, sketch.dir));
+  }
+  try {
+    await sim.installEmulator(res.esp32.chip);
+  } catch (err) {
+    throw new SetupError(`The ESP32 emulator isn't available: ${err.message}`);
+  }
+  return res.esp32;
+}
+
 /** Compile a sketch folder; resolves to the HEX text. Throws SetupError when the toolchain is missing. */
 export async function compile(cli, sketch, fqbn, libraries = []) {
+  if (/^(esp32|arduino):esp32:/.test(fqbn)) return compileEsp32(cli, sketch, fqbn, libraries);
   const out = fs.mkdtempSync(path.join(os.tmpdir(), 'impulse-test-'));
   try {
     const args = ['compile', '--fqbn', fqbn, ...libraries.flatMap(l => ['--libraries', path.resolve(l)]), '--output-dir', out, sketch.dir];
@@ -514,6 +565,8 @@ export async function main(argv, { version = '0.0.0', stdout = process.stdout, s
     if (!(err instanceof UsageError || err instanceof SetupError)) throw err;
     stderr.write(`impulse-test: ${err.message}\n`);
     return EXIT.ERROR;
+  } finally {
+    stopEmulators();
   }
 
   const meta = { version, cli };

@@ -7,6 +7,7 @@ import { BatteryElement, DiodeElement, CapacitorElement, MosfetElement } from '.
 import { AndGateElement, NandGateElement, OrGateElement, NorGateElement, XorGateElement, NotGateElement, FlipFlopDElement } from './logic.js';
 import { Tm1637Element, Stepper28byjElement, L298nElement } from './kits.js';
 import { PiPicoElement } from './boards.js';
+import { Esp32S3DevKitElement, Esp32C3DevKitElement, NanoEsp32Element } from './esp32.js';
 
 const ELEMENTS = {
   'impulse-breadboard': BreadboardElement,
@@ -39,6 +40,9 @@ const ELEMENTS = {
   'impulse-l298n': L298nElement,
   'impulse-pi-pico': PiPicoElement,
   'impulse-attiny85': Attiny85Element,
+  'impulse-esp32-s3-devkitc': Esp32S3DevKitElement,
+  'impulse-esp32-c3-devkitm': Esp32C3DevKitElement,
+  'impulse-nano-esp32': NanoEsp32Element,
 };
 
 if (typeof customElements !== 'undefined') {

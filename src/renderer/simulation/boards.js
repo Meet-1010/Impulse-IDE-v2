@@ -61,6 +61,41 @@ const TINY85_ALIASES = Object.fromEntries(range(0, 5).map(n => [`PB${n}`, String
 
 const AVR_LEVELS = { logicVolts: 5, threshold: 2.5, pullupOhms: 35000, pulldownOhms: null, adcRef: 5, maxPinVolts: 5 };
 
+// ── ESP32 family (run in Espressif's QEMU) ──────────────────────────────────
+
+// Pin numbers are GPIO numbers, as in Espressif's Arduino core; an analog
+// input's ADC channel is its GPIO number too (analogRead takes the GPIO).
+const gpioPins = (gpios, analog = {}) => gpios.map(n => pin(n, 'GPIO', n, n in analog ? { adc: n, analog: analog[n] } : {}));
+const ESP32_LEVELS = { logicVolts: 3.3, threshold: 1.65, pullupOhms: 45000, pulldownOhms: 45000, adcRef: 3.3, maxPinVolts: 3.6 };
+
+// ESP32 DevKit V1 (DOIT, 30 pins): variants/doitESP32devkitV1.
+const ESP32_GPIO = [1, 2, 3, 4, 5, 12, 13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 25, 26, 27, 32, 33, 34, 35, 36, 39];
+const ESP32_ANALOG = { 36: 'A0', 39: 'A3', 32: 'A4', 33: 'A5', 34: 'A6', 35: 'A7', 4: 'A10', 2: 'A12', 15: 'A13', 13: 'A14', 12: 'A15', 14: 'A16', 27: 'A17', 25: 'A18', 26: 'A19' };
+const ESP32_INPUT_ONLY = [34, 35, 36, 39];
+const ESP32_ALIASES = {
+  ...Object.fromEntries(ESP32_GPIO.map(n => [`D${n}`, String(n)])),
+  RX0: '3', TX0: '1', RX2: '16', TX2: '17', VP: '36', VN: '39',
+};
+
+// ESP32-S3-DevKitC-1: variants/esp32s3. The RGB LED (WS2812) is on GPIO48.
+const S3_GPIO = [...range(0, 21), ...range(35, 48)];
+const S3_ANALOG = Object.fromEntries(range(1, 20).map(n => [n, `A${n - 1}`]));
+
+// ESP32-C3-DevKitM-1: variants/esp32c3. The RGB LED is on GPIO8.
+const C3_GPIO = [...range(0, 10), 18, 19, 20, 21];
+const C3_ANALOG = Object.fromEntries(range(0, 5).map(n => [n, `A${n}`]));
+
+// Arduino Nano ESP32 (ESP32-S3), with the core's default Arduino pin numbering:
+// D0–D13 and A0–A7 as on every Nano, mapped to GPIOs by the core.
+const NANO_ESP32_D = [44, 43, 5, 6, 7, 8, 9, 10, 17, 18, 21, 38, 47, 48];
+const NANO_ESP32_A = [1, 2, 3, 4, 11, 12, 13, 14];
+const NANO_ESP32_GPIO = [...new Set([...NANO_ESP32_D, ...NANO_ESP32_A, 46, 0, 45])].sort((a, b) => a - b);
+const NANO_ESP32_LABELS = {
+  ...Object.fromEntries(NANO_ESP32_D.map((g, d) => [g, `D${d}`])),
+  ...Object.fromEntries(NANO_ESP32_A.map((g, a) => [g, `A${a}`])),
+  46: 'LED_RED', 0: 'LED_GREEN', 45: 'LED_BLUE',
+};
+
 /**
  * @typedef {object} BoardProfile
  * @property {string} id
@@ -183,12 +218,100 @@ export const BOARDS = {
   },
 };
 
-export const BOARD_ORDER = ['uno', 'nano', 'mega', 'pico', 'attiny85'];
+const ESP32_COMMON = { family: 'esp32', pinPrefix: 'GPIO', ...ESP32_LEVELS };
+
+Object.assign(BOARDS, {
+  esp32: {
+    id: 'esp32',
+    label: 'ESP32 DevKit V1',
+    short: 'ESP32',
+    tag: 'wokwi-esp32-devkit-v1',
+    fqbn: 'esp32:esp32:esp32doit-devkit-v1',
+    mcu: 'esp32',
+    pins: gpioPins(ESP32_GPIO, ESP32_ANALOG),
+    pwm: ESP32_GPIO.filter(n => !ESP32_INPUT_ONLY.includes(n)),
+    inputOnly: ESP32_INPUT_ONLY,
+    ledBuiltin: 2,
+    ledProp: 'led1',
+    i2c: { sda: 21, scl: 22 },
+    spi: { ss: 5, mosi: 23, miso: 19, sck: 18 },
+    serial: [{ rx: 3, tx: 1 }],
+    interrupts: ESP32_GPIO,
+    aliases: ESP32_ALIASES,
+    description: 'ESP32 · dual-core Xtensa LX6 at 240 MHz · 25 GPIO on the header · 3.3 V logic',
+    ...ESP32_COMMON,
+  },
+  esp32s3: {
+    id: 'esp32s3',
+    label: 'ESP32-S3 DevKitC-1',
+    short: 'ESP32-S3',
+    tag: 'impulse-esp32-s3-devkitc',
+    fqbn: 'esp32:esp32:esp32s3',
+    mcu: 'esp32s3',
+    pins: gpioPins(S3_GPIO, S3_ANALOG),
+    pwm: S3_GPIO,
+    ledBuiltin: 48,
+    rgbLed: 48,
+    i2c: { sda: 8, scl: 9 },
+    spi: { ss: 10, mosi: 11, miso: 13, sck: 12 },
+    serial: [{ tx: 43, rx: 44 }],
+    interrupts: S3_GPIO,
+    aliases: { TX: '43', RX: '44' },
+    description: 'ESP32-S3 · dual-core Xtensa LX7 at 240 MHz · 36 GPIO · RGB LED on GPIO48 · 3.3 V logic',
+    ...ESP32_COMMON,
+  },
+  esp32c3: {
+    id: 'esp32c3',
+    label: 'ESP32-C3 DevKitM-1',
+    short: 'ESP32-C3',
+    tag: 'impulse-esp32-c3-devkitm',
+    fqbn: 'esp32:esp32:esp32c3',
+    mcu: 'esp32c3',
+    pins: gpioPins(C3_GPIO, C3_ANALOG),
+    pwm: C3_GPIO,
+    ledBuiltin: 8,
+    rgbLed: 8,
+    i2c: { sda: 8, scl: 9 },
+    spi: { ss: 7, mosi: 6, miso: 5, sck: 4 },
+    serial: [{ tx: 21, rx: 20 }],
+    interrupts: C3_GPIO,
+    aliases: { TX: '21', RX: '20' },
+    description: 'ESP32-C3 · single-core RISC-V at 160 MHz · 15 GPIO · RGB LED on GPIO8 · 3.3 V logic',
+    ...ESP32_COMMON,
+  },
+  nanoesp32: {
+    id: 'nanoesp32',
+    label: 'Arduino Nano ESP32',
+    short: 'Nano ESP32',
+    tag: 'impulse-nano-esp32',
+    fqbn: 'arduino:esp32:nano_nora',
+    mcu: 'esp32s3',
+    pins: NANO_ESP32_GPIO.map(n => pin(n, 'GPIO', n, NANO_ESP32_A.includes(n) ? { adc: n, analog: `A${NANO_ESP32_A.indexOf(n)}` } : {})),
+    pwm: NANO_ESP32_GPIO,
+    ledBuiltin: 48,
+    i2c: { sda: 11, scl: 12 },
+    spi: { ss: 21, mosi: 38, miso: 47, sck: 48 },
+    serial: [{ rx: 44, tx: 43 }],
+    interrupts: NANO_ESP32_GPIO,
+    // Header names (the Nano's) → GPIO; D-numbers in sketches and tests → GPIO.
+    aliases: {
+      ...Object.fromEntries(NANO_ESP32_D.map((g, d) => [String(d), String(g)])),
+      '11.2': '38', '12.2': '47', '13.2': '48',
+    },
+    digitalPins: NANO_ESP32_D,
+    labels: NANO_ESP32_LABELS,
+    description: 'ESP32-S3 in the Nano shape · D0–D13 and A0–A7 like every Nano · RGB LED · 3.3 V logic',
+    family: 'esp32',
+    ...ESP32_LEVELS,
+  },
+});
+
+export const BOARD_ORDER = ['uno', 'nano', 'mega', 'pico', 'attiny85', 'esp32', 'esp32s3', 'esp32c3', 'nanoesp32'];
 export const DEFAULT_BOARD = 'uno';
 
 /** Which boards run, for messages: every board built on an emulated chip. */
 export function simulatedBoardsText() {
-  return 'boards built on the ATmega328P or 168 (Uno, Nano, Pro Mini…), the ATmega2560 or 1280 (Mega), the ATtiny25/45/85 and the RP2040 (Pico, XIAO, Feather…)';
+  return 'boards built on the ATmega328P or 168 (Uno, Nano, Pro Mini…), the ATmega2560 or 1280 (Mega), the ATtiny25/45/85, the RP2040 (Pico, XIAO, Feather…) and the ESP32, ESP32-S2, ESP32-S3 and ESP32-C3';
 }
 
 for (const board of Object.values(BOARDS)) {
@@ -221,6 +344,38 @@ const RP2350_BOARDS = new Set([
   'pimoroni_pico_plus_2w', 'rpipico2', 'rpipico2w', 'sparkfun_xrp_controller', 'wiznet_5100s_evb_pico2',
   'wiznet_5500_evb_pico2', 'wiznet_6300_evb_pico2',
 ]);
+
+// Boards of Espressif's core (esp32:esp32 2.0.17) not built on the classic
+// ESP32, by chip (build.mcu in boards.txt); the rest are ESP32 boards. Boards
+// added in later cores are looked up in the installed core (registerBoardChip).
+const ESP32_CHIPS = {
+  esp32s3: ['Bee_Data_Logger', 'Bee_Motion_S3', 'Bee_S3', 'Edgebox-ESP-100', 'XIAO_ESP32S3', 'adafruit_camera_esp32s3', 'adafruit_feather_esp32s3', 'adafruit_feather_esp32s3_nopsram', 'adafruit_feather_esp32s3_reversetft', 'adafruit_feather_esp32s3_tft', 'adafruit_matrixportal_esp32s3', 'adafruit_metro_esp32s3', 'adafruit_qtpy_esp32s3_n4r2', 'adafruit_qtpy_esp32s3_nopsram', 'adafruit_qualia_s3_rgb666', 'atd147_s3', 'aventen_s3_sync', 'bpi_leaf_s3', 'crabik_slot_esp32_s3', 'cytron_maker_feather_aiot_s3', 'deneyapkart1Av2', 'dfrobot_firebeetle2_esp32s3', 'dfrobot_romeo_esp32s3', 'esp32s3', 'esp32s3_powerfeather', 'esp32s3box', 'esp32s3camlcd', 'esp32s3usbotg', 'feathers3', 'gen4-ESP32-S3R8n16', 'heltec_wifi_kit_32_V3', 'heltec_wifi_lora_32_V3', 'lilygo_t_display_s3', 'lionbits3', 'lolin_s3', 'lolin_s3_mini', 'lolin_s3_pro', 'm5stack-atoms3', 'm5stack-cores3', 'motorgo_mini_1', 'namino_arancio', 'namino_rosso', 'nano_nora', 'nanos3', 'nebulas3', 'nora_w10', 'pros3', 'redpill_esp32s3', 'stamp-s3', 'tamc_termod_s3', 'tinys3', 'unphone8', 'unphone9', 'wifiduino32s3'],
+  esp32c3: ['AirM2M_CORE_ESP32C3', 'Bee_Motion_Mini', 'VALTRACK_V4_MFW_ESP32_C3', 'VALTRACK_V4_VTS_ESP32_C3', 'XIAO_ESP32C3', 'adafruit_qtpy_esp32c3', 'deneyapkartg', 'dfrobot_beetle_esp32c3', 'esp32c3', 'esp32c3m1IKit', 'lolin_c3_mini', 'ttgo-t-oi-plus', 'wifiduino32c3'],
+  esp32s2: ['Bee_Motion', 'adafruit_feather_esp32s2', 'adafruit_feather_esp32s2_reversetft', 'adafruit_feather_esp32s2_tft', 'adafruit_funhouse_esp32s2', 'adafruit_magtag29_esp32s2', 'adafruit_metro_esp32s2', 'adafruit_qtpy_esp32s2', 'atmegazero_esp32s2', 'deneyapmini', 'deneyapminiv2', 'department_of_alchemy_minimain_esp32s2', 'esp32s2', 'esp32s2usb', 'feathers2', 'feathers2neo', 'franzininho_wifi_esp32s2', 'franzininho_wifi_msc_esp32s2', 'lolin_s2_mini', 'lolin_s2_pico', 'micros2', 'rmp', 'sensebox_mcu_esp32s2', 'sparkfun_esp32s2_thing_plus', 'tinys2'],
+};
+const ESP32_CHIP_OF = new Map(Object.entries(ESP32_CHIPS).flatMap(([chip, ids]) => ids.map(id => [id, chip])));
+const registeredChips = new Map();
+
+/** The chip a board is built on (build.mcu from the installed core), for boards the table doesn't know. */
+export function registerBoardChip(fqbn, mcu) {
+  const base = String(fqbn || '').split(':').slice(0, 3).join(':');
+  if (base && mcu) registeredChips.set(base, String(mcu));
+}
+
+/** build.mcu of an ESP32-family board: registered, from the table, else guessed from its id. */
+export function esp32ChipOf(fqbn) {
+  const base = String(fqbn || '').split(':').slice(0, 3).join(':');
+  if (registeredChips.has(base)) return registeredChips.get(base);
+  const [vendor, , id = ''] = base.split(':');
+  if (vendor === 'arduino') return id === 'nano_nora' ? 'esp32s3' : null;
+  if (ESP32_CHIP_OF.has(id)) return ESP32_CHIP_OF.get(id);
+  if (/c6|h2|p4|c2|c5|c61/i.test(id)) return null;
+  return /s3/i.test(id) ? 'esp32s3' : /s2/i.test(id) ? 'esp32s2' : /c3/i.test(id) ? 'esp32c3' : 'esp32';
+}
+
+/** The drawn board a chip's boards run on. */
+const ESP32_DRAWN = { esp32: 'esp32', esp32s3: 'esp32s3', esp32s2: 'esp32s3', esp32c3: 'esp32c3' };
+const CHIP_NAMES = { esp32: 'ESP32', esp32s3: 'ESP32-S3', esp32s2: 'ESP32-S2', esp32c3: 'ESP32-C3' };
 
 /**
  * How a board from the board menu is simulated: which drawn board it runs on,
@@ -257,6 +412,21 @@ export function simulationTarget(fqbn) {
     if (chip === '85') return as(BOARDS.attiny85);
     if (chip !== '45' && chip !== '25') return null;
     return as(BOARDS.attiny85, { fqbn: `ATTinyCore:avr:attinyx5:chip=${chip},clock=16pll`, mcu: `attiny${chip}`, note: `runs on an emulated ATtiny${chip}, drawn as the ATtiny85` });
+  }
+  // ESP32 family: compiled for the board itself (its pins, its options) and
+  // run in QEMU; S2 boards run on the S3, which the main process handles.
+  const esp = /^(esp32|arduino):esp32:([^:]+)/.exec(fqbn);
+  if (esp) {
+    const chip = esp32ChipOf(fqbn);
+    const drawn = BOARDS[esp[1] === 'arduino' ? (chip ? 'nanoesp32' : '') : ESP32_DRAWN[chip]];
+    if (!drawn) return null;
+    const own = fqbn.split(':').slice(0, 3).join(':') === drawn.fqbn;
+    const runsOn = chip === 'esp32s2' ? 'ESP32-S3 (the ESP32-S2 isn\'t emulated; its GPIO numbers are the same)' : CHIP_NAMES[chip];
+    return as(drawn, {
+      fqbn,
+      mcu: chip,
+      note: own ? undefined : `runs on the emulated ${runsOn}, drawn as the ${drawn.label}: wire by GPIO number`,
+    });
   }
   const rp = /^rp2040:rp2040:([^:]+)/.exec(fqbn);
   if (rp) {
@@ -315,6 +485,9 @@ const POWER_PINS = {
   VSYS: { kind: 'vcc', volts: 5 },
   AGND: { kind: 'gnd', volts: 0 },
   RUN: { kind: 'reset' },
+  // ESP32 boards
+  EN: { kind: 'reset' },
+  RST: { kind: 'reset' },
   // Bare chips (ATtiny85)
   VCC: { kind: 'vcc', volts: 5 },
 };
@@ -329,6 +502,7 @@ export function boardPowerPin(name) {
 
 /** "D13" / "A0" for an Arduino pin number. */
 export function pinLabel(board, n) {
+  if (board?.labels?.[n]) return board.labels[n];
   if (board?.pinPrefix) return `${board.pinPrefix}${n}`;
   const entry = board?.byPin.get(n);
   if (entry?.analog) return entry.analog;
@@ -348,6 +522,13 @@ export function parseBoardPin(board, ref) {
   if (s === 'MISO') return board.spi.miso;
   if (s === 'SCK') return board.spi.sck;
   if (s === 'SS') return board.spi.ss;
+  // Boards numbered the Arduino way on another chip (Nano ESP32): D13 is a GPIO.
+  if (board.digitalPins) {
+    const d = /^D?(\d{1,2})$/.exec(s);
+    if (d) return board.digitalPins[Number(d[1])] ?? null;
+    const g = /^GPIO(\d{1,2})$/.exec(s);
+    if (g) return board.byPin.has(Number(g[1])) ? Number(g[1]) : null;
+  }
   let m = board.pinPrefix ? new RegExp(`^${board.pinPrefix}(\\d{1,2})$`).exec(s) : null;
   if (m) {
     const n = Number(m[1]);
