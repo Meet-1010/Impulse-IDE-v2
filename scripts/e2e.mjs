@@ -311,11 +311,23 @@ try {
       await sleep(120);
     };
     const focused = () => evaluate(`document.activeElement?.id || ''`);
+    // A CI runner's window may not have the system's focus; focus inside the page should still move.
+    await send('Emulation.setFocusEmulationEnabled', { enabled: true });
+    const hitAt = (x, y) => evaluate(`(() => { const el = document.elementFromPoint(${x}, ${y}); return el ? (el.id ? '#' + el.id : el.tagName.toLowerCase() + '.' + String(el.className.baseVal ?? el.className).split(' ')[0]) : 'nothing' })()`);
+    // The pill glides to its dock as the panel opens: click once it has settled.
+    let last = '';
+    for (let i = 0; i < 40; i++) {
+      const now = JSON.stringify((await rect('.mo-actor')).map(Math.round));
+      if (now === last) break;
+      last = now;
+      await sleep(150);
+    }
     const [px, py, pw, ph] = await rect('.mo-actor');
     await evaluate(`document.activeElement?.blur(); 1`);
     // Inside the pill but off the one-line field.
-    await click(px + pw * 0.62, py + ph - 8);
-    if (await focused() !== 'aiInput') throw new Error(`a click on the pill focused "${await focused()}", not the field`);
+    const [cx, cy] = [px + pw * 0.62, py + ph - 8];
+    await click(cx, cy);
+    if (await focused() !== 'aiInput') throw new Error(`a click on the pill focused "${await focused()}", not the field (the click landed on ${await hitAt(cx, cy)})`);
     for (const id of ['aiModelSelect', 'aiModeSelect']) {
       const [x, y, w] = await rect(`#${id}`);
       await evaluate(`document.activeElement?.blur(); 1`);
@@ -324,8 +336,9 @@ try {
       const got = await focused();
       await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
       await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: x + w / 2, y: y + 3, button: 'left', clickCount: 1 });
-      if (got !== id) throw new Error(`a click on the top edge of #${id} reached "${got}"`);
+      if (got !== id) throw new Error(`a click on the top edge of #${id} reached "${got}" (it landed on ${await hitAt(x + w / 2, y + 3)})`);
     }
+    await send('Emulation.setFocusEmulationEnabled', { enabled: false });
   });
 
   // A stand-in agent, so no API key is needed: the pill becomes the orb, the

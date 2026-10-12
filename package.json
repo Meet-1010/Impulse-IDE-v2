@@ -34,6 +34,7 @@
     "build:mac": "npm run build:renderer && electron-builder --mac",
     "build:linux": "npm run build:renderer && electron-builder --linux",
     "build:all": "npm run build:renderer && electron-builder --win --mac --linux",
+    "install:mac": "node scripts/install-mac.mjs",
     "test": "jest",
     "lint": "eslint src/ scripts/ test/ bin/ --ext .js,.mjs",
     "lint:fix": "eslint src/ scripts/ test/ bin/ --ext .js,.mjs --fix",
