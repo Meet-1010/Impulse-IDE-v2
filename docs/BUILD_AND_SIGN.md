@@ -71,7 +71,7 @@ All are optional: missing secrets mean an unsigned build for that platform, not 
 
 After building:
 
-1. Copy the installer (e.g. `dist/Impulse-IDE-Setup-2.0.0-beta.1.exe`) to a clean machine or VM.
+1. Copy the installer (e.g. `dist/Impulse-IDE-Setup-2.0.0-beta.2.exe`) to a clean machine or VM.
 2. Install and run. Confirm: open folder, compile, upload, serial monitor, AI panel.
 3. Check that user data (sketches, memory, settings) lives under the correct app data folder (e.g. `%APPDATA%\Impulse IDE` on Windows when built with this productName).
 

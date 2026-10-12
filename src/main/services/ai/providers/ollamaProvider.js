@@ -19,6 +19,15 @@ const DEFAULT_PORT = 11434;
 // The system prompt and tool schemas are ~3.5k tokens; Ollama's default
 // context (4k) would cut the conversation off almost at once.
 const MAX_CONTEXT = 16384;
+// size is the download; minMemGB the memory to run it alongside the IDE.
+const DOWNLOADS = [
+  { name: 'qwen3-coder:30b', displayName: 'Qwen3-Coder 30B', size: '19 GB', note: 'best for code and the agent', minMemGB: 32 },
+  { name: 'devstral-small-2:24b', displayName: 'Devstral Small 2', size: '15 GB', note: 'agent work across files', minMemGB: 32 },
+  { name: 'qwen3:14b', displayName: 'Qwen3 14B', size: '9.3 GB', note: 'reliable tool use', minMemGB: 24 },
+  { name: 'qwen3:8b', displayName: 'Qwen3 8B', size: '5.2 GB', note: 'reliable tool use', minMemGB: 16 },
+  { name: 'rnj-1:8b', displayName: 'Rnj-1 8B', size: '5.1 GB', note: 'tuned for code', minMemGB: 16 },
+  { name: 'qwen3:4b', displayName: 'Qwen3 4B', size: '2.5 GB', note: 'for smaller computers', minMemGB: 0 },
+];
 const NO_TOOLS_NOTE = '\n\n_This model can\'t use Impulse\'s tools, so it answered in text and didn\'t touch your sketch. For the agent, pick a model with tool support, such as qwen3 or llama3.1._';
 
 /** The server's base URL, following OLLAMA_HOST the way the ollama CLI does. */
@@ -209,13 +218,19 @@ class OllamaProvider extends BaseProvider {
   }
 
   /**
-   * The model to offer when none is installed: Qwen3 calls tools reliably.
-   * The 8B needs about 16 GB of memory to run alongside the IDE; else the 4B.
+   * Local models worth downloading for Impulse, best first, that fit this
+   * computer's memory with the IDE running beside them. All of them call tools
+   * (the agent needs that); the coder models are tuned for code. Checked
+   * against the Ollama library in October 2026.
    */
+  static recommendedModels(totalMem = os.totalmem()) {
+    const gb = totalMem / 1024 ** 3;
+    return DOWNLOADS.filter((m) => gb >= m.minMemGB * 0.94);
+  }
+
+  /** The model to offer first when none is installed. */
   static recommendedModel(totalMem = os.totalmem()) {
-    return totalMem >= 15 * 1024 ** 3
-      ? { name: 'qwen3:8b', displayName: 'Qwen3 8B', size: '5.2 GB' }
-      : { name: 'qwen3:4b', displayName: 'Qwen3 4B', size: '2.5 GB' };
+    return OllamaProvider.recommendedModels(totalMem)[0];
   }
 
   /**

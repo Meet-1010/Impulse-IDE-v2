@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Free local models: the model menu offers the ones worth downloading for Impulse that fit the computer's memory, best first, each with what it's good at: Qwen3-Coder 30B and Devstral Small 2 (32 GB and up), Qwen3 14B (24 GB), Qwen3 8B and the code-tuned Rnj-1 8B (16 GB), Qwen3 4B (smaller computers). All of them call tools, which the agent needs.
+
 ## [2.0.0-beta.2] - 2026-10-12
 
 ### Added

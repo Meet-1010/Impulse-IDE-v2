@@ -9,7 +9,7 @@ It needs Node.js 22 or newer and [arduino-cli](https://arduino.github.io/arduino
 - **Standalone:** every release has `impulse-test.mjs` attached, a single file with no other dependencies:
 
   ```bash
-  curl -fsSL -o impulse-test.mjs https://github.com/Meet-1010/Impulse-IDE-v2/releases/download/v2.0.0-beta.1/impulse-test.mjs
+  curl -fsSL -o impulse-test.mjs https://github.com/Meet-1010/Impulse-IDE-v2/releases/download/v2.0.0-beta.2/impulse-test.mjs
   node impulse-test.mjs my_sketch
   ```
 
@@ -93,7 +93,7 @@ jobs:
           arduino-cli core install arduino:avr
           # Libraries your sketches include, pinned:
           # arduino-cli lib install "LiquidCrystal I2C@1.1.2"
-      - run: curl -fsSL -o impulse-test.mjs https://github.com/Meet-1010/Impulse-IDE-v2/releases/download/v2.0.0-beta.1/impulse-test.mjs
+      - run: curl -fsSL -o impulse-test.mjs https://github.com/Meet-1010/Impulse-IDE-v2/releases/download/v2.0.0-beta.2/impulse-test.mjs
       - run: node impulse-test.mjs . --junit impulse-test.xml
       - uses: actions/upload-artifact@v7
         if: always()

@@ -150,7 +150,10 @@ function register(ipcMain, ctx) {
       const local = await aiAgent.refreshLocalModels();
       const list = aiAgent.getUnifiedModelList();
       const OllamaProvider = require('../services/ai/providers/ollamaProvider');
-      return { success: true, data: list ?? [], local: { running: local.running, count: local.models.length, recommended: OllamaProvider.recommendedModel() } };
+      // Recommended downloads that aren't installed yet, best first.
+      const installed = new Set(local.models.map((m) => m.name));
+      const downloads = OllamaProvider.recommendedModels().filter((m) => !installed.has(m.name));
+      return { success: true, data: list ?? [], local: { running: local.running, count: local.models.length, downloads } };
     } catch (error) {
       return { success: false, error: error?.message ?? 'Get models failed' };
     }

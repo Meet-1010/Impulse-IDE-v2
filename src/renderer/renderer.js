@@ -3899,9 +3899,10 @@ async function startLocalModels() {
     await useKeyFor('ollama');
 }
 
-/** Download the recommended free model through Ollama, with progress under the chat. */
-async function pullLocalModel() {
-    const rec = state.aiLocal?.recommended;
+/** Download a free model through Ollama (the first recommended one by default), with progress under the chat. */
+async function pullLocalModel(name) {
+    const downloads = state.aiLocal?.downloads || [];
+    const rec = downloads.find(m => m.name === name) || downloads[0];
     if (!rec) return;
     const ok = await confirmDialog(`Download ${rec.displayName}?`,
         `A free AI model that runs on this computer, with no API key: a one-time download of ${rec.size} through Ollama. Answers take longer than a cloud model's, and nothing leaves your computer.`,
@@ -4012,16 +4013,18 @@ async function loadAIUnifiedModels() {
                     opt.textContent = modelOptionLabel(m, state.aiModelSuggestion);
                     group.appendChild(opt);
                 }
-                if (keyless && !groups.get(provider).length) {
-                    const opt = document.createElement('option');
-                    if (state.aiLocal?.running) {
-                        const rec = state.aiLocal.recommended;
-                        opt.value = OLLAMA_PULL;
-                        opt.textContent = rec ? `Download ${rec.displayName} (${rec.size})…` : 'Download a model…';
-                    } else {
-                        opt.value = OLLAMA_START;
-                        opt.textContent = 'Start Ollama…';
+                // Ollama: free models to download that fit this computer, or a way to start it.
+                if (keyless && state.aiLocal?.running) {
+                    for (const rec of state.aiLocal.downloads || []) {
+                        const opt = document.createElement('option');
+                        opt.value = OLLAMA_PULL + rec.name;
+                        opt.textContent = `Download ${rec.displayName} · ${rec.note} · ${rec.size}…`;
+                        group.appendChild(opt);
                     }
+                } else if (keyless) {
+                    const opt = document.createElement('option');
+                    opt.value = OLLAMA_START;
+                    opt.textContent = 'Start Ollama…';
                     group.appendChild(opt);
                 }
                 select.appendChild(group);
@@ -4129,10 +4132,10 @@ async function togglePinCurrentModel() {
 
 async function onAIModelChange(e) {
     const modelId = e.target.value;
-    if (modelId === OLLAMA_START || modelId === OLLAMA_PULL) {
+    if (modelId === OLLAMA_START || modelId.startsWith(OLLAMA_PULL)) {
         e.target.value = state.aiModelId || '';
         if (modelId === OLLAMA_START) await startLocalModels();
-        else await pullLocalModel();
+        else await pullLocalModel(modelId.slice(OLLAMA_PULL.length));
         return;
     }
     if (!modelId) {

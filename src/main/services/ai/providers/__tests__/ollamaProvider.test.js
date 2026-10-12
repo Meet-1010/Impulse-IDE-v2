@@ -170,9 +170,13 @@ describe('tool calls written as text', () => {
 });
 
 describe('getting a model', () => {
-  test('recommends Qwen3, sized to the computer', () => {
-    expect(OllamaProvider.recommendedModel(32 * 1024 ** 3).name).toBe('qwen3:8b');
-    expect(OllamaProvider.recommendedModel(8 * 1024 ** 3).name).toBe('qwen3:4b');
+  test('offers models that call tools and fit the computer, best first', () => {
+    const names = (gb) => OllamaProvider.recommendedModels(gb * 1024 ** 3).map((m) => m.name);
+    expect(names(64)).toEqual(['qwen3-coder:30b', 'devstral-small-2:24b', 'qwen3:14b', 'qwen3:8b', 'rnj-1:8b', 'qwen3:4b']);
+    expect(names(16)).toEqual(['qwen3:8b', 'rnj-1:8b', 'qwen3:4b']);
+    expect(names(8)).toEqual(['qwen3:4b']);
+    expect(OllamaProvider.recommendedModel(16 * 1024 ** 3)).toMatchObject({ name: 'qwen3:8b', size: '5.2 GB' });
+    for (const m of OllamaProvider.recommendedModels(128 * 1024 ** 3)) expect(m.note).toBeTruthy();
   });
 
   test('downloads with progress from Ollama\'s streamed status lines', async () => {
