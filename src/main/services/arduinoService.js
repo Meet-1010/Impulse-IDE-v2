@@ -606,7 +606,13 @@ class ArduinoService {
   /**
    * Compile sketch and return the generated .hex file content for simulation.
    */
-  async compileHex(sketchPath, boardFQBN) {
+  /**
+   * @param {string} sketchPath
+   * @param {string} boardFQBN
+   * @param {{ properties?: Record<string, string> }} [options]  build properties the simulator
+   *   needs (only build.f_cpu: 8 MHz boards compile for its 16 MHz clock)
+   */
+  async compileHex(sketchPath, boardFQBN, options = {}) {
     const pioRoot = this.platformioRoot(sketchPath);
     if (pioRoot) {
       const res = await this.platformio.build(pioRoot, { fqbn: boardFQBN });
@@ -626,11 +632,15 @@ class ArduinoService {
     }
     const outputDir = path.join(os.tmpdir(), `impulse-hex-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
     fs.mkdirSync(outputDir, { recursive: true });
+    const properties = Object.entries(options?.properties || {})
+      .filter(([k, v]) => k === 'build.f_cpu' && /^\d{6,9}L?$/.test(String(v)))
+      .flatMap(([k, v]) => ['--build-property', `${k}=${v}`]);
 
     return new Promise((resolve) => {
       const args = [
         'compile',
         '--fqbn', boardFQBN,
+        ...properties,
         '--output-dir', outputDir,
         sketchPath,
       ];

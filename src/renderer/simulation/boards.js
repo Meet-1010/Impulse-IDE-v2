@@ -61,6 +61,16 @@ const TINY85_ALIASES = Object.fromEntries(range(0, 5).map(n => [`PB${n}`, String
 
 const AVR_LEVELS = { logicVolts: 5, threshold: 2.5, pullupOhms: 35000, pulldownOhms: null, adcRef: 5, maxPinVolts: 5 };
 
+// ── ATmega32U4 (Leonardo) ───────────────────────────────────────────────────
+
+// variants/leonardo/pins_arduino.h: digital pins 0-17, A0-A5 as 18-23. A6-A11
+// share digital pins 4, 6, 8, 9, 10 and 12 (ADC channels 8, 10, 11, 12, 13, 9).
+const LEONARDO_PORTS = ['D2', 'D3', 'D1', 'D0', 'D4', 'C6', 'D7', 'E6', 'B4', 'B5', 'B6', 'B7', 'D6', 'C7', 'B3', 'B1', 'B2', 'B0',
+  'F7', 'F6', 'F5', 'F4', 'F1', 'F0'];
+const LEONARDO_ADC = { 4: 8, 6: 10, 8: 11, 9: 12, 10: 13, 12: 9, 18: 7, 19: 6, 20: 5, 21: 4, 22: 1, 23: 0 };
+const PINS_LEONARDO = LEONARDO_PORTS.map((pb, n) => pin(n, pb[0], Number(pb[1]),
+  n >= 18 ? { adc: LEONARDO_ADC[n], analog: `A${n - 18}` } : n in LEONARDO_ADC ? { adc: LEONARDO_ADC[n] } : {}));
+
 // ── ESP32 family (run in Espressif's QEMU) ──────────────────────────────────
 
 // Pin numbers are GPIO numbers, as in Espressif's Arduino core; an analog
@@ -220,6 +230,27 @@ export const BOARDS = {
 
 const ESP32_COMMON = { family: 'esp32', pinPrefix: 'GPIO', ...ESP32_LEVELS };
 
+BOARDS.leonardo = {
+  id: 'leonardo',
+  label: 'Arduino Leonardo',
+  short: 'Leonardo',
+  tag: 'impulse-arduino-leonardo',
+  fqbn: 'arduino:avr:leonardo',
+  mcu: 'atmega32u4',
+  pins: PINS_LEONARDO,
+  pwm: [3, 5, 6, 9, 10, 11, 13],
+  ledBuiltin: 13,
+  i2c: { sda: 2, scl: 3 },
+  spi: { ss: 17, mosi: 16, miso: 14, sck: 15 },
+  // Serial is the 32U4's own USB port; Serial1 is pins 0 and 1.
+  serial: [null, { rx: 0, tx: 1 }],
+  interrupts: [0, 1, 2, 3, 7],
+  // The R3 header's SDA/SCL next to AREF are D2/D3 on this board.
+  aliases: { 'A4.2': '2', 'A5.2': '3' },
+  description: 'ATmega32U4 · native USB (Serial) · 20 digital pins · 12 analog inputs',
+  ...AVR_LEVELS,
+};
+
 Object.assign(BOARDS, {
   esp32: {
     id: 'esp32',
@@ -306,12 +337,12 @@ Object.assign(BOARDS, {
   },
 });
 
-export const BOARD_ORDER = ['uno', 'nano', 'mega', 'pico', 'attiny85', 'esp32', 'esp32s3', 'esp32c3', 'nanoesp32'];
+export const BOARD_ORDER = ['uno', 'nano', 'mega', 'leonardo', 'pico', 'attiny85', 'esp32', 'esp32s3', 'esp32c3', 'nanoesp32'];
 export const DEFAULT_BOARD = 'uno';
 
 /** Which boards run, for messages: every board built on an emulated chip. */
 export function simulatedBoardsText() {
-  return 'boards built on the ATmega328P or 168 (Uno, Nano, Pro Mini…), the ATmega2560 or 1280 (Mega), the ATtiny25/45/85, the RP2040 (Pico, XIAO, Feather…) and the ESP32, ESP32-S2, ESP32-S3 and ESP32-C3';
+  return 'boards built on the ATmega328P or 168 (Uno, Nano, Pro Mini…), the ATmega2560 or 1280 (Mega), the ATmega32U4 (Leonardo, Micro…), the ATtiny25/45/85, the RP2040 (Pico, XIAO, Feather…) and the ESP32, ESP32-S2, ESP32-S3 and ESP32-C3';
 }
 
 for (const board of Object.values(BOARDS)) {
@@ -398,11 +429,37 @@ export function simulationTarget(fqbn) {
       ? as(BOARDS.mega, { fqbn: 'arduino:avr:mega:cpu=atmega1280', mcu: 'atmega1280', note: 'runs on an emulated ATmega1280, drawn as the Mega 2560' })
       : as(BOARDS.mega);
   }
+  // Arduino NG or older: an ATmega8 or ATmega168 in the Uno's pinout.
+  if (/^arduino:avr:atmegang(:|$)/.test(fqbn)) {
+    const cpu = opt('cpu') || 'atmega168';
+    if (cpu === 'atmega8') return as(BOARDS.uno, { fqbn: 'arduino:avr:atmegang:cpu=atmega8', mcu: 'atmega8', note: 'runs on an emulated ATmega8, drawn as the Uno' });
+    return atmega168(BOARDS.uno, 'Uno');
+  }
   if (/^arduino:avr:(nano|pro|mini|fio|bt|lilypad)(:|$)/.test(fqbn)) {
     const cpu = opt('cpu');
-    if (/atmega8\b|^atmega8$/.test(cpu)) return null; // the ATmega8 has its own register map
+    if (/atmega8\b|^atmega8$/.test(cpu)) {
+      // ATmega8 Nano/Pro/Mini/LilyPad builds: the board's own pins, on the ATmega8.
+      return as(BOARDS.nano, { fqbn, mcu: 'atmega8', note: 'runs on an emulated ATmega8, drawn as the Nano' });
+    }
     return /atmega168/.test(cpu) ? atmega168(BOARDS.nano, 'Nano') : as(BOARDS.nano);
   }
+  // ATmega32U4 boards. The 8 MHz ones compile as 16 MHz, the simulator's clock.
+  const u4 = /^arduino:avr:(leonardo|leonardoeth|micro|esplora|LilyPadUSB|yun|yunmini|chiwawa|one|robotControl|robotMotor|circuitplay32u4cat)(:|$)/.exec(fqbn);
+  if (u4) {
+    const own = u4[1] === 'leonardo';
+    const slow = u4[1] === 'LilyPadUSB' || u4[1] === 'circuitplay32u4cat';
+    return as(BOARDS.leonardo, {
+      fqbn: fqbn.split(':').slice(0, 3).join(':'),
+      ...(slow ? { properties: { 'build.f_cpu': '16000000L' } } : {}),
+      note: own ? undefined : `runs on an emulated ATmega32U4${slow ? ' at 16 MHz' : ''}, drawn as the Leonardo`,
+    });
+  }
+  // Adafruit Gemma in Arduino's core: an ATtiny85 at 8 MHz, compiled for 16 MHz.
+  if (/^arduino:avr:gemma(:|$)/.test(fqbn)) {
+    return as(BOARDS.attiny85, { fqbn: 'arduino:avr:gemma', mcu: 'attiny85-gemma', properties: { 'build.f_cpu': '16000000L' }, note: 'runs on an emulated ATtiny85 at 16 MHz, drawn as the ATtiny85' });
+  }
+  // The Uno WiFi's sketch runs on its ATmega328P.
+  if (/^arduino:avr:unowifi(:|$)/.test(fqbn)) return as(BOARDS.uno, { note: 'runs on its ATmega328P, drawn as the Uno (the Wi-Fi module isn\'t simulated)' });
   if (/^arduino:avr:(uno|unomini|ethernet|duemilanove|diecimila)(:|$)/.test(fqbn)) {
     return /atmega168/.test(opt('cpu')) ? atmega168(BOARDS.uno, 'Uno') : as(BOARDS.uno);
   }

@@ -1053,7 +1053,9 @@ async function compareSimulatorWithBoard() {
         const code = state.editor.getValue();
         const baud = detectBaud(code);
         container.innerHTML = '<p class="tests-hint">Running in the simulator…</p>';
-        const compiled = await window.electronAPI.arduino.compileHex(state.currentSketch, state.selectedBoard);
+        const target = simulationTarget(state.selectedBoard);
+        const compiled = await window.electronAPI.arduino.compileHex(state.currentSketch, target?.fqbn || state.selectedBoard,
+            target?.properties ? { properties: target.properties } : undefined);
         if (!compiled?.success) {
             container.innerHTML = '';
             const pre = document.createElement('pre');

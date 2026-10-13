@@ -76,6 +76,11 @@ const defs = {
     pins: { PB0: 'Pin 0 · PWM · Serial TX · I²C SDA · SPI DI', PB1: 'Pin 1 · PWM · LED_BUILTIN · Serial RX · SPI DO', PB2: 'Pin 2 · A1 · I²C SCL · SPI USCK · INT0', PB3: 'Pin 3 · A3', PB4: 'Pin 4 · A2 · PWM', PB5: 'Pin 5 · A0 · RESET', VCC: 'Supply (5 V)', GND: 'Ground' },
   },
 
+  'impulse-arduino-leonardo': {
+    label: 'Arduino Leonardo', category: 'Boards', board: 'leonardo', behavior: BoardBehavior,
+    keywords: ['leonardo', 'atmega32u4', '32u4', 'micro', 'pro micro', 'esplora', 'yun', 'native usb', 'keyboard', 'mouse', 'hid', 'arduino', 'board', 'microcontroller'],
+    description: 'ATmega32U4 with native USB: Serial is the USB port itself (the core waits for the computer with while (!Serial)), Serial1 is pins 0/1, I²C is on 2/3 (SDA/SCL), PWM on 3, 5, 6, 9, 10, 11 and 13, analog inputs A0–A5 plus A6–A11 on pins 4, 6, 8, 9, 10 and 12. The Micro, Esplora, Yún and other 32U4 boards run on it.',
+  },
   'wokwi-esp32-devkit-v1': {
     label: 'ESP32 DevKit V1', category: 'Boards', board: 'esp32', behavior: BoardBehavior,
     keywords: ['esp32', 'esp-32', 'devkit', 'devkit v1', 'doit', 'esp32 dev module', 'esp-wroom-32', 'wroom', 'wifi', 'bluetooth', 'espressif', 'nodemcu-32s', '3.3v', 'board', 'microcontroller'],

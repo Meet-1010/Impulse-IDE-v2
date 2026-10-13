@@ -42,7 +42,8 @@ describe('board profiles', () => {
     expect(boardForFqbn('arduino:avr:pro:cpu=16MHzatmega328').id).toBe('nano');
     expect(boardForFqbn('arduino:avr:mega:cpu=atmega2560').id).toBe('mega');
     expect(boardForFqbn('arduino:avr:mega')).not.toBeNull();
-    expect(boardForFqbn('arduino:avr:leonardo')).toBeNull();
+    expect(boardForFqbn('arduino:avr:leonardo').id).toBe('leonardo');
+    expect(boardForFqbn('arduino:megaavr:uno2018')).toBeNull();
     expect(boardForFqbn('esp32:esp32:esp32').id).toBe('esp32');
     expect(boardForFqbn('esp32:esp32:esp32c6')).toBeNull();
   });

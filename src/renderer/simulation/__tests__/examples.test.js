@@ -105,6 +105,14 @@ const CHECKS = {
   },
   'dc-motor': { run: 1.0, check: (b) => expect(b.behavior('motor1').rpm).toBeGreaterThan(20) },
   'shift-register': { run: 0.2, check: (b) => expect(b.part('seg1').el.values.slice(0, 7)).toEqual([1, 1, 1, 1, 1, 1, 0]) },
+  'leonardo-usb-serial': {
+    run: 1, actions: [[0.5, (b) => b.runner.serialWrite('ok', 0)]],
+    check: (b) => {
+      expect(b.serial).toContain('Leonardo ready');
+      expect(b.serial).toContain('You typed: o\r\nYou typed: k\r\n');
+      expect(b.trace(13).length).toBeGreaterThan(100);
+    },
+  },
   'esp32-blink': {
     run: 1.5,
     check: (r) => {

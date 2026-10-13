@@ -23,8 +23,8 @@ describe('which boards the simulator runs, and how', () => {
     }
     expect(simulationTarget('arduino:avr:diecimila:cpu=atmega168').board).toBe(BOARDS.uno);
     expect(simulationTarget('arduino:avr:nano:cpu=atmega168').board).toBe(BOARDS.nano);
-    // The ATmega8 has a different register map.
-    expect(simulationTarget('arduino:avr:nano:cpu=atmega8')).toBeNull();
+    // The ATmega8 has a register map of its own, emulated too.
+    expect(simulationTarget('arduino:avr:nano:cpu=atmega8')).toMatchObject({ board: BOARDS.nano, mcu: 'atmega8' });
   });
 
   test('the Mega 1280 and Mega ADK run on the Mega', () => {
@@ -49,7 +49,7 @@ describe('which boards the simulator runs, and how', () => {
   });
 
   test('chips with no emulator are not simulated', () => {
-    for (const fqbn of ['arduino:avr:leonardo', 'arduino:megaavr:nona4809', 'arduino:renesas_uno:unor4wifi', 'esp32:esp32:esp32c6', 'arduino:samd:mkrzero']) {
+    for (const fqbn of ['arduino:megaavr:uno2018', 'arduino:megaavr:nona4809', 'arduino:renesas_uno:unor4wifi', 'esp32:esp32:esp32c6', 'arduino:samd:mkrzero']) {
       expect(simulationTarget(fqbn)).toBeNull();
     }
   });

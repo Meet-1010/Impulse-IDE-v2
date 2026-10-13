@@ -45,10 +45,11 @@ function register(ipcMain, ctx) {
     }
   }));
 
-  ipcMain.handle('arduino:compile-hex', withDebugLog('arduino:compile-hex', async (event, sketchPath, boardFQBN) => {
+  ipcMain.handle('arduino:compile-hex', withDebugLog('arduino:compile-hex', async (event, sketchPath, boardFQBN, options) => {
     const blocked = denied(sketchPath);
     if (blocked) return blocked;
-    return arduinoService.compileHex(sketchPath, boardFQBN || 'arduino:avr:uno');
+    const properties = options && typeof options.properties === 'object' ? options.properties : undefined;
+    return arduinoService.compileHex(sketchPath, boardFQBN || 'arduino:avr:uno', { properties });
   }));
 
   ipcMain.handle('arduino:compile-debug', withDebugLog('arduino:compile-debug', async (event, sketchPath, boardFQBN) => {

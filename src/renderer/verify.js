@@ -25,7 +25,7 @@ export function simulationContext() {
 export async function runSimulatorCheck({ sketchPath, code, context = simulationContext(), signal, onStage }) {
   const { seconds, items, errors: parseErrors } = parseExpectations(code, context.board);
   onStage?.('compile');
-  const compiled = await window.electronAPI.arduino.compileHex(sketchPath, context.fqbn);
+  const compiled = await window.electronAPI.arduino.compileHex(sketchPath, context.fqbn, context.properties ? { properties: context.properties } : undefined);
   if (!compiled?.success) {
     return { ok: false, stage: 'compile', error: (compiled?.error || 'Compilation failed').trim(), parseErrors, board: context.label };
   }

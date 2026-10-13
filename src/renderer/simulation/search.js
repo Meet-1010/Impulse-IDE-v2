@@ -120,9 +120,9 @@ export function searchParts(query, parts = Object.values(PARTS)) {
 // Things people look for that the simulator can't run, with a way forward.
 const ADVICE = [
   {
-    match: /\b(esp ?32-?(c2|c5|c6|c61|h2|p4)|esp ?8266|esp-?01|nodemcu|wemos|d1 mini|pico ?w|pico ?2|rp2350|raspberry ?pi ?([2-5]|zero|4b)|stm32|blue ?pill|teensy|leonardo|pro micro|32u4|due|zero|mkr|r4|minima|giga|portenta|nano ?(33|every|rp2040)|attiny(?!85)\d+|digispark)\b/,
+    match: /\b(esp ?32-?(c2|c5|c6|c61|h2|p4)|esp ?8266|esp-?01|nodemcu|wemos|d1 mini|pico ?w|pico ?2|rp2350|raspberry ?pi ?([2-5]|zero|4b)|stm32|blue ?pill|teensy|due|zero|mkr|r4|minima|giga|portenta|nano ?(33|every|rp2040)|attiny(?!85)\d+|digispark)\b/,
     title: 'This board isn’t simulated',
-    text: 'The simulator runs the Arduino Uno, Nano and Mega 2560, the Raspberry Pi Pico, the ATtiny85, and ESP32, ESP32-S2, ESP32-S3, ESP32-C3 and Nano ESP32 boards. You can still write, compile and upload code for other boards — or try your logic on one of these first (an ESP32 for Wi-Fi boards like the ESP8266, a Pico for 3.3 V and ARM projects, the ATtiny85 for other ATtinys and the Digispark).',
+    text: 'The simulator runs the Arduino Uno, Nano, Mega 2560 and Leonardo (and the Micro and other ATmega32U4 boards), the Raspberry Pi Pico, the ATtiny85, and ESP32, ESP32-S2, ESP32-S3, ESP32-C3 and Nano ESP32 boards. You can still write, compile and upload code for other boards — or try your logic on one of these first (an ESP32 for Wi-Fi boards like the ESP8266, a Pico for 3.3 V and ARM projects, the ATtiny85 for other ATtinys and the Digispark).',
     parts: ['wokwi-arduino-uno', 'wokwi-arduino-nano', 'wokwi-arduino-mega', 'impulse-pi-pico', 'impulse-attiny85', 'wokwi-esp32-devkit-v1', 'impulse-esp32-s3-devkitc'],
   },
   {

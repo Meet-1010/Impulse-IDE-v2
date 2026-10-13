@@ -64,8 +64,9 @@ const CACHE_DIR = path.join(os.tmpdir(), 'impulse-test-hex-cache');
  * Compile `code` for `fqbn` (cached on disk by content): the application HEX
  * text for AVR chips, the UF2 bytes for the Raspberry Pi Pico.
  */
-export function compileSketch(code, fqbn = 'arduino:avr:uno', name = 'sketch') {
-  const key = `${fqbn}\n${EXTRA_LIBS.join(path.delimiter)}\n${code}`;
+export function compileSketch(code, fqbn = 'arduino:avr:uno', name = 'sketch', properties = {}) {
+  const props = Object.entries(properties).flatMap(([k, v]) => ['--build-property', `${k}=${v}`]);
+  const key = `${fqbn}\n${props.join(' ')}\n${EXTRA_LIBS.join(path.delimiter)}\n${code}`;
   if (cache.has(key)) return cache.get(key);
   const digest = crypto.createHash('sha1').update(key).digest('hex');
   const cached = path.join(CACHE_DIR, `${digest}.${isPico(fqbn) ? 'uf2' : 'hex'}`);
@@ -82,7 +83,7 @@ export function compileSketch(code, fqbn = 'arduino:avr:uno', name = 'sketch') {
   let hex;
   try {
     const libs = [...EXTRA_LIBS, ...(isExtraCore(fqbn) ? SKETCHBOOK_LIBS : [])].flatMap(lib => ['--libraries', lib]);
-    execFileSync(CLI, [...(isExtraCore(fqbn) ? EXTRA_CONFIG : []), 'compile', '--fqbn', fqbn, ...libs, '--output-dir', outDir, sketchDir], { stdio: 'pipe' });
+    execFileSync(CLI, [...(isExtraCore(fqbn) ? EXTRA_CONFIG : []), 'compile', '--fqbn', fqbn, ...props, ...libs, '--output-dir', outDir, sketchDir], { stdio: 'pipe' });
     hex = isPico(fqbn)
       ? new Uint8Array(fs.readFileSync(path.join(outDir, `${name}.ino.uf2`)))
       : fs.readFileSync(path.join(outDir, `${name}.ino.hex`), 'utf8');

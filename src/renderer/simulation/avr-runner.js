@@ -23,6 +23,8 @@ import {
 import { SoftUartTx, SoftUartRx } from './soft-uart.js';
 import { TinyTimer1 } from './tiny-timer1.js';
 import { TinyUsi } from './usi.js';
+import { Usb32u4 } from './usb32u4.js';
+import { Timer4 } from './timer4.js';
 import { parseHex, hexImageSize } from './hex-loader.js';
 import { MCUS } from './mcu.js';
 import { boardById } from './boards.js';
@@ -177,14 +179,37 @@ export class AvrRunner {
       this.ports[letter] = new AVRIOPort(cpu, config);
     }
 
-    for (const t of mcu.timers) new AVRTimer(cpu, t);
+    // Timers that share TIMSK/TIFR (the ATmega8's) each install a hook there; chain them.
+    const shared = new Map();
+    for (const t of mcu.timers) {
+      new AVRTimer(cpu, t);
+      for (const addr of [t.TIMSK, t.TIFR]) {
+        if (!shared.has(addr)) shared.set(addr, []);
+        shared.get(addr).push(cpu.writeHooks[addr]);
+      }
+    }
+    for (const [addr, hooks] of shared) {
+      if (hooks.length < 2) continue;
+      const flags = mcu.timers.some(t => t.TIFR === addr);
+      cpu.writeHooks[addr] = (value, oldValue, a, mask) => {
+        // TIFR: writing 1 clears a flag, 0 leaves it.
+        const keep = cpu.data[addr] & ~value;
+        for (const hook of hooks) hook?.(value, oldValue, a, mask);
+        cpu.data[addr] = flags ? keep : value;
+        return true;
+      };
+    }
     if (mcu.tinyTimer1) new TinyTimer1(cpu, mcu.tinyTimer1);
+    if (mcu.timer4) new Timer4(cpu, mcu.timer4);
+    mcu.setup?.(cpu);
 
     this.clock = new AVRClock(cpu, F_CPU, mcu.clock);
+    // Serial port numbers: 0 is Serial. On the ATmega32U4 that's USB, and the USART is Serial1.
+    const offset = mcu.usartPortOffset || 0;
     this.usarts = mcu.usarts.map((cfg, index) => {
       const usart = new AVRUSART(cpu, cfg, F_CPU);
       usart.onByteTransmit = (byte) => {
-        if (this.onSerial) this.onSerial(String.fromCharCode(byte), index);
+        if (this.onSerial) this.onSerial(String.fromCharCode(byte), index + offset);
       };
       // RX pacing: the UART accepts one byte per character time.
       usart._rxQueue = [];
@@ -192,6 +217,10 @@ export class AvrRunner {
       return usart;
     });
     this.usart = this.usarts[0];
+    this.usb = mcu.usb ? new Usb32u4(cpu, mcu.usb, {
+      cyclesPerMs: F_CPU / 1000,
+      onSerial: (byte) => this.onSerial?.(String.fromCharCode(byte), 0),
+    }) : null;
 
     this.adc = new AVRADC(cpu, mcu.adc);
     if (mcu.adcReferenceOf) {
@@ -206,7 +235,7 @@ export class AvrRunner {
     this._comparator = mcu.analogComparator ? this._buildComparator(cpu, mcu.analogComparator) : null;
     this._softTx = null;
     this._softRx = null;
-    if (this.board.softSerial && this._comparator) this._buildSoftSerial(cpu);
+    if (this.board.softSerial && this._comparator && !mcu.noSoftSerial) this._buildSoftSerial(cpu);
     // The ATtiny85's USI: I²C (two-wire) and SPI (three-wire) on PB0-PB2.
     this.usi = mcu.usi ? new TinyUsi(cpu, cpu.gpioByPort[mcu.usi.PORT], mcu.usi, this.i2c) : null;
 
@@ -346,12 +375,14 @@ export class AvrRunner {
     for (const cfg of Object.values(mcu.ports)) { zero(cfg.DDR); zero(cfg.PORT); }
     for (const t of mcu.timers) { zero(t.TIMSK); zero(t.TCCRA); zero(t.TCCRB); }
     if (mcu.tinyTimer1) { zero(mcu.tinyTimer1.TCCR1); zero(mcu.tinyTimer1.GTCCR); }
+    if (mcu.timer4) for (const r of ['TCCR4A', 'TCCR4B', 'TCCR4C', 'TCCR4D']) zero(mcu.timer4[r]);
     for (const u of mcu.usarts) zero(u.UCSRB);
     zero(mcu.adc.ADCSRA);
     if (mcu.twi) zero(mcu.twi.TWCR);
     if (mcu.spi) zero(mcu.spi.SPCR);
     if (mcu.analogComparator) zero(mcu.analogComparator.ACSR);
     this.usi?.reset();
+    this.usb?.reset();
   }
 
   _refreshPin(p, port) {
@@ -517,7 +548,11 @@ export class AvrRunner {
       this._softRx.write([...text].map(ch => ch.charCodeAt(0) & 0xff));
       return;
     }
-    const usart = this.usarts[port];
+    if (port === 0 && this.usb) {
+      this.usb.write([...text].map(ch => ch.charCodeAt(0) & 0xff));
+      return;
+    }
+    const usart = this.usarts[port - (this.mcu.usartPortOffset || 0)];
     if (!usart) return;
     for (const ch of text) usart._rxQueue.push(ch.charCodeAt(0) & 0xff);
     this._pumpRx(usart);

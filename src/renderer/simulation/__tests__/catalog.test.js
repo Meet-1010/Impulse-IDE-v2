@@ -81,6 +81,12 @@ describe('part search', () => {
     expect(adviceFor('esp32-c6')?.parts.map(p => p.type)).toContain('wokwi-esp32-devkit-v1');
   });
 
+  it('finds the Leonardo for ATmega32U4 boards', () => {
+    expect(adviceFor('leonardo')).toBeNull();
+    expect(top('leonardo')[0]).toBe('impulse-arduino-leonardo');
+    expect(top('pro micro')).toContain('impulse-arduino-leonardo');
+  });
+
   it('finds the ESP32 boards', () => {
     expect(adviceFor('esp32')).toBeNull();
     expect(top('esp32')[0]).toBe('wokwi-esp32-devkit-v1');

@@ -15,7 +15,7 @@ class Layout {
     this.wires = [];
     this.boardId = {
       'wokwi-arduino-uno': 'uno', 'wokwi-arduino-nano': 'nano', 'wokwi-arduino-mega': 'mega', 'impulse-pi-pico': 'pico', 'impulse-attiny85': 'attiny85',
-      'wokwi-esp32-devkit-v1': 'esp32', 'impulse-esp32-s3-devkitc': 'esp32s3', 'impulse-esp32-c3-devkitm': 'esp32c3', 'impulse-nano-esp32': 'nanoesp32',
+      'impulse-arduino-leonardo': 'leonardo', 'wokwi-esp32-devkit-v1': 'esp32', 'impulse-esp32-s3-devkitc': 'esp32s3', 'impulse-esp32-c3-devkitm': 'esp32c3', 'impulse-nano-esp32': 'nanoesp32',
     }[boardType];
     this.part(boardType, this.boardId, { x, y });
   }
@@ -506,6 +506,13 @@ const circuits = {
     L.wire('pot1:GND', 'pico:AGND', 'black');
     ledOnPin(L, 'pico', 'GP16', 'led1', 'green', 140, 240);
     L.wire('led1:C', 'pico:GND.6', 'black');
+    return L.done();
+  },
+
+  leonardoKeys() {
+    const L = new Layout('impulse-arduino-leonardo', 0, 160);
+    ledOnPin(L, 'leonardo', '13', 'led1', 'yellow', 120, 40);
+    L.wire('led1:C', 'leonardo:GND.1', 'black');
     return L.done();
   },
 
@@ -2146,6 +2153,41 @@ void loop() {
 `,
   }),
 
+  ex({
+    id: 'leonardo-usb-serial', title: 'Leonardo: USB serial', category: 'Boards', board: 'leonardo', level: 'Beginner',
+    summary: 'The Leonardo’s Serial is its own USB port: it waits for the computer, then echoes what you type and fades an LED.',
+    tags: ['Leonardo', 'ATmega32U4', 'native USB', 'Serial', 'PWM'],
+    circuit: circuits.leonardoKeys,
+    code: `// Leonardo: USB serial
+// The ATmega32U4 talks USB itself: Serial is its USB port, so the sketch
+// waits until the computer opens it (while (!Serial)). Type in the Serial
+// monitor and the board answers. The LED on pin 13 fades with PWM from the
+// chip's Timer4. (Serial1 is the UART on pins 0 and 1.)
+// @run 1s
+// @expect serial contains "Leonardo ready"
+// @expect pin 13 frequency 490Hz ±2%
+
+void setup() {
+  Serial.begin(9600);
+  while (!Serial);
+  Serial.println("Leonardo ready. Type something:");
+}
+
+int level = 0;
+int step = 5;
+
+void loop() {
+  analogWrite(13, level);
+  level += step;
+  if (level <= 0 || level >= 255) step = -step;
+  while (Serial.available()) {
+    Serial.print("You typed: ");
+    Serial.println((char)Serial.read());
+  }
+  delay(20);
+}
+`,
+  }),
   ex({
     id: 'esp32-blink', title: 'ESP32: blink', category: 'Boards', board: 'esp32', level: 'Beginner',
     summary: 'The ESP32 DevKit’s blue LED (GPIO2) and an LED on GPIO4 blink, and the count goes to Serial.',

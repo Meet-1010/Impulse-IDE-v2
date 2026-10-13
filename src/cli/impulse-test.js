@@ -288,11 +288,12 @@ async function compileEsp32(cli, sketch, fqbn, libraries) {
 }
 
 /** Compile a sketch folder; resolves to the HEX text. Throws SetupError when the toolchain is missing. */
-export async function compile(cli, sketch, fqbn, libraries = []) {
+export async function compile(cli, sketch, fqbn, libraries = [], properties = {}) {
   if (/^(esp32|arduino):esp32:/.test(fqbn)) return compileEsp32(cli, sketch, fqbn, libraries);
   const out = fs.mkdtempSync(path.join(os.tmpdir(), 'impulse-test-'));
   try {
-    const args = ['compile', '--fqbn', fqbn, ...libraries.flatMap(l => ['--libraries', path.resolve(l)]), '--output-dir', out, sketch.dir];
+    const props = Object.entries(properties).flatMap(([k, v]) => ['--build-property', `${k}=${v}`]);
+    const args = ['compile', '--fqbn', fqbn, ...props, ...libraries.flatMap(l => ['--libraries', path.resolve(l)]), '--output-dir', out, sketch.dir];
     const res = await run(cli, args, 15 * 60 * 1000);
     if (!res.ok) {
       const text = `${res.stderr}\n${res.stdout}`;
@@ -396,7 +397,7 @@ export async function testSketch(sketch, opts, { cli, onStage = () => {} } = {})
     } else {
       onStage('compile', entry);
       try {
-        hex = await compile(cli, sketch, entry.fqbn, opts.libraries);
+        hex = await compile(cli, sketch, entry.fqbn, opts.libraries, target?.properties || {});
       } catch (err) {
         if (err instanceof SetupError) throw err;
         return finish('error', `Compile failed: ${err.message}`);

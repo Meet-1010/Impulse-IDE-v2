@@ -1396,10 +1396,12 @@ export class SimulationManager {
   }
 
   async _compile(sketchPath, board) {
-    const fqbn = this._target(board).fqbn;
+    const target = this._target(board);
+    const fqbn = target.fqbn;
+    const options = target.properties ? { properties: target.properties } : undefined;
     let result;
     try {
-      result = await window.electronAPI.arduino.compileHex(sketchPath, fqbn);
+      result = await window.electronAPI.arduino.compileHex(sketchPath, fqbn, options);
     } catch (err) {
       return { success: false, error: err.message };
     }
@@ -1408,7 +1410,7 @@ export class SimulationManager {
         return { success: false, error: `The ${board.label} core isn't installed, so the sketch can't be compiled for it yet.` };
       }
       this._systemLine('Compiling again…', 'info');
-      result = await window.electronAPI.arduino.compileHex(sketchPath, fqbn);
+      result = await window.electronAPI.arduino.compileHex(sketchPath, fqbn, options);
     }
     if (!result.success) {
       const lib = this._detectMissingLibrary(result.error || '');
@@ -1419,7 +1421,7 @@ export class SimulationManager {
           if (inst && inst.success !== false) {
             this._libCache = null;
             this._systemLine(`Installed ${lib}. Compiling again…`, 'success');
-            result = await window.electronAPI.arduino.compileHex(sketchPath, fqbn);
+            result = await window.electronAPI.arduino.compileHex(sketchPath, fqbn, options);
           } else {
             this._systemLine(`Could not install ${lib}: ${inst?.error || 'unknown error'}`, 'error');
           }
@@ -1882,7 +1884,7 @@ export class SimulationManager {
     const board = this.board;
     const model = this.canvas ? this.canvas.model() : { parts: [], wires: [] };
     const target = this._target(board);
-    return { board: board.id, fqbn: target.fqbn, mcu: target.mcu, label: board.label, circuit: model };
+    return { board: board.id, fqbn: target.fqbn, mcu: target.mcu, properties: target.properties, label: board.label, circuit: model };
   }
 
   /**

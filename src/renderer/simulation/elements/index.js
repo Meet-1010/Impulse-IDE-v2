@@ -8,6 +8,7 @@ import { AndGateElement, NandGateElement, OrGateElement, NorGateElement, XorGate
 import { Tm1637Element, Stepper28byjElement, L298nElement } from './kits.js';
 import { PiPicoElement } from './boards.js';
 import { Esp32S3DevKitElement, Esp32C3DevKitElement, NanoEsp32Element } from './esp32.js';
+import { LeonardoElement } from './leonardo.js';
 
 const ELEMENTS = {
   'impulse-breadboard': BreadboardElement,
@@ -43,6 +44,7 @@ const ELEMENTS = {
   'impulse-esp32-s3-devkitc': Esp32S3DevKitElement,
   'impulse-esp32-c3-devkitm': Esp32C3DevKitElement,
   'impulse-nano-esp32': NanoEsp32Element,
+  'impulse-arduino-leonardo': LeonardoElement,
 };
 
 if (typeof customElements !== 'undefined') {
