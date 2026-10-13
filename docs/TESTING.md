@@ -52,8 +52,8 @@ node impulse-test.mjs sketch --junit report.xml --json report.json
 
 | Option | |
 | --- | --- |
-| `--board uno\|nano\|mega\|pico\|attiny85` | board to simulate; by default the one in `diagram.json`, else the Uno. The Pico needs the Arduino-Pico core (`arduino-cli core install rp2040:rp2040 --additional-urls https://github.com/earlephilhower/arduino-pico/releases/download/global/package_rp2040_index.json`), the ATtiny85 ATTinyCore (`arduino-cli core install ATTinyCore:avr --additional-urls https://drazzy.com/package_drazzy.com_index.json`) |
-| `--fqbn <fqbn>` | compile for this FQBN; it has to be a board the simulator runs |
+| `--board uno\|nano\|mega\|pico\|attiny85\|esp32\|esp32s3\|esp32c3\|nanoesp32` | board to simulate; by default the one in `diagram.json`, else the Uno. ESP32 boards need Espressif's core (`arduino-cli core install esp32:esp32 --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json`) and run in Espressif's QEMU, which impulse-test downloads into Impulse's data folder (or `IMPULSE_EMULATOR_DIR`) the first time; on Linux it needs `libpixman-1-0 libgcrypt20 libsdl2-2.0-0 libslirp0`. The Pico needs the Arduino-Pico core (`arduino-cli core install rp2040:rp2040 --additional-urls https://github.com/earlephilhower/arduino-pico/releases/download/global/package_rp2040_index.json`), the ATtiny85 ATTinyCore (`arduino-cli core install ATTinyCore:avr --additional-urls https://drazzy.com/package_drazzy.com_index.json`) |
+| `--fqbn <fqbn>` | compile for this FQBN; it has to be a board the simulator runs (any ESP32, ESP32-S2, ESP32-S3 or ESP32-C3 board of Espressif's core runs, compiled for itself) |
 | `--seconds <n>` | simulated time, overriding `// @run` (at most 60) |
 | `--expect "<line>"` | an extra expectation for every sketch; repeatable |
 | `--hex <file>` | test a prebuilt program instead of compiling: a `.hex` for the AVR boards and the ATtiny85 (from PlatformIO, for example; an ATtiny85 build must be for 16 MHz), a `.uf2` or `.bin` for the Pico |
