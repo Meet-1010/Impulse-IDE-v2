@@ -26,6 +26,8 @@ const quiet = (cmd, args) => execFileSync(cmd, args, { cwd: root, encoding: 'utf
 
 console.log(`Building ${appName} ${pkg.version} for ${arch}…`);
 run('npm', ['run', 'build:renderer']);
+// The ESP32 emulator ships inside the Mac app (build/qemu-<arch>).
+run('node', ['scripts/qemu-mac-pack.mjs', arch]);
 run('npx', ['electron-builder', '--mac', 'dir', `--${arch}`], { env: { ...process.env, CSC_IDENTITY_AUTO_DISCOVERY: 'false' } });
 
 const built = path.join(root, 'dist', arch === 'arm64' ? 'mac-arm64' : 'mac', appName);

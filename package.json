@@ -169,7 +169,17 @@
       "gatekeeperAssess": false,
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
-      "artifactName": "Impulse-IDE-${version}-${arch}-mac.${ext}"
+      "artifactName": "Impulse-IDE-${version}-${arch}-mac.${ext}",
+      "extraResources": [
+        {
+          "from": "build/qemu-${arch}",
+          "to": "qemu",
+          "filter": [
+            "**/*",
+            "!.stamp"
+          ]
+        }
+      ]
     },
     "dmg": {
       "artifactName": "Impulse-IDE-${version}-${arch}.${ext}"

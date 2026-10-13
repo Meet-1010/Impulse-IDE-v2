@@ -13,7 +13,10 @@ class Layout {
   constructor(boardType, x = 0, y = 0) {
     this.parts = [];
     this.wires = [];
-    this.boardId = { 'wokwi-arduino-uno': 'uno', 'wokwi-arduino-nano': 'nano', 'wokwi-arduino-mega': 'mega', 'impulse-pi-pico': 'pico', 'impulse-attiny85': 'attiny85' }[boardType];
+    this.boardId = {
+      'wokwi-arduino-uno': 'uno', 'wokwi-arduino-nano': 'nano', 'wokwi-arduino-mega': 'mega', 'impulse-pi-pico': 'pico', 'impulse-attiny85': 'attiny85',
+      'wokwi-esp32-devkit-v1': 'esp32', 'impulse-esp32-s3-devkitc': 'esp32s3', 'impulse-esp32-c3-devkitm': 'esp32c3', 'impulse-nano-esp32': 'nanoesp32',
+    }[boardType];
     this.part(boardType, this.boardId, { x, y });
   }
 
@@ -503,6 +506,45 @@ const circuits = {
     L.wire('pot1:GND', 'pico:AGND', 'black');
     ledOnPin(L, 'pico', 'GP16', 'led1', 'green', 140, 240);
     L.wire('led1:C', 'pico:GND.6', 'black');
+    return L.done();
+  },
+
+  esp32Blink() {
+    const L = new Layout('wokwi-esp32-devkit-v1', 0, 0);
+    ledOnPin(L, 'esp32', 'D4', 'led1', 'red', 180, 40);
+    L.wire('led1:C', 'esp32:GND.1', 'black');
+    return L.done();
+  },
+
+  esp32Dimmer() {
+    const L = new Layout('wokwi-esp32-devkit-v1', 0, 0);
+    L.at('wokwi-potentiometer', 'pot1', 'SIG', { x: -110, y: 60 }, { attrs: { value: '512' } });
+    L.wire('pot1:SIG', 'esp32:D34', 'green');
+    L.wire('pot1:VCC', 'esp32:3V3', 'red');
+    L.wire('pot1:GND', 'esp32:GND.2', 'black');
+    ledOnPin(L, 'esp32', 'D18', 'led1', 'yellow', 190, 30);
+    L.wire('led1:C', 'esp32:GND.1', 'black');
+    return L.done();
+  },
+
+  esp32s3Rgb() {
+    return new Layout('impulse-esp32-s3-devkitc', 0, 0).done();
+  },
+
+  esp32c3Button() {
+    const L = new Layout('impulse-esp32-c3-devkitm', 0, 0);
+    ledOnPin(L, 'esp32c3', '5', 'led1', 'green', 200, 20);
+    L.wire('led1:C', 'esp32c3:GND.8', 'black');
+    L.at('wokwi-pushbutton', 'btn1', '1.l', { x: 190, y: 160 }, { attrs: { color: 'blue', key: 'b' } });
+    L.wire('btn1:1.l', 'esp32c3:4', 'blue');
+    L.wire('btn1:2.l', 'esp32c3:GND.9', 'black');
+    return L.done();
+  },
+
+  nanoEsp32Blink() {
+    const L = new Layout('impulse-nano-esp32', 0, 120);
+    ledOnPin(L, 'nanoesp32', '2', 'led1', 'red', 255, 20);
+    L.wire('led1:C', 'nanoesp32:GND.2', 'black');
     return L.done();
   },
 
@@ -2100,6 +2142,180 @@ void setup() {
 
 void loop() {
   digitalWrite(LED, digitalRead(BUTTON) == LOW ? HIGH : LOW);
+}
+`,
+  }),
+
+  ex({
+    id: 'esp32-blink', title: 'ESP32: blink', category: 'Boards', board: 'esp32', level: 'Beginner',
+    summary: 'The ESP32 DevKit’s blue LED (GPIO2) and an LED on GPIO4 blink, and the count goes to Serial.',
+    tags: ['ESP32', 'Espressif', '3.3 V', 'Serial'],
+    circuit: circuits.esp32Blink,
+    code: `// ESP32: blink
+// The DevKit's blue LED (GPIO2, LED_BUILTIN) and the LED on GPIO4 blink twice
+// a second, and the count goes to the Serial monitor. ESP32 pins are 3.3 V and
+// numbered by GPIO: the board's "D4" is GPIO4.
+// @run 1.5s
+// @expect pin LED_BUILTIN frequency 2Hz ±5%
+// @expect serial contains "Blink 2"
+
+const int LED = 4;
+int count = 0;
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(LED_BUILTIN, OUTPUT);
+  pinMode(LED, OUTPUT);
+}
+
+void loop() {
+  digitalWrite(LED_BUILTIN, HIGH);
+  digitalWrite(LED, HIGH);
+  delay(250);
+  digitalWrite(LED_BUILTIN, LOW);
+  digitalWrite(LED, LOW);
+  delay(250);
+  Serial.print("Blink ");
+  Serial.println(++count);
+}
+`,
+  }),
+  ex({
+    id: 'esp32-dimmer', title: 'ESP32: dimmer', category: 'Boards', board: 'esp32', level: 'Beginner',
+    summary: 'A potentiometer on GPIO34 sets the brightness of an LED on GPIO18 with PWM.',
+    tags: ['ESP32', 'analogRead', 'PWM', 'potentiometer'],
+    circuit: circuits.esp32Dimmer,
+    code: `// ESP32: dimmer
+// The potentiometer on GPIO34 sets the brightness of the LED on GPIO18. The
+// ESP32's ADC reads 0-4095 (12 bits) for 0-3.3 V, and analogWrite takes
+// 0-255. Turn the potentiometer in the inspector while it runs.
+// @run 1s
+// @expect serial matches /^Reading: \\d+/m
+
+const int POT = 34;  // an input-only pin on ADC1
+const int LED = 18;
+
+void setup() {
+  Serial.begin(115200);
+}
+
+void loop() {
+  int reading = analogRead(POT);
+  analogWrite(LED, reading / 16);
+  Serial.print("Reading: ");
+  Serial.println(reading);
+  delay(100);
+}
+`,
+  }),
+  ex({
+    id: 'esp32s3-rgb', title: 'ESP32-S3: RGB LED', category: 'Boards', board: 'esp32s3', level: 'Beginner',
+    summary: 'The DevKitC’s RGB LED (a WS2812 on GPIO48) steps through red, green and blue.',
+    tags: ['ESP32-S3', 'RGB LED', 'WS2812', 'NeoPixel'],
+    circuit: circuits.esp32s3Rgb,
+    code: `// ESP32-S3: RGB LED
+// The DevKitC-1's RGB LED is a WS2812 on GPIO48 (RGB_BUILTIN). Espressif's
+// core drives it with rgbLedWrite() (neopixelWrite() before core 3.0).
+// @run 2s
+// @expect serial contains "blue"
+
+void setColor(uint8_t r, uint8_t g, uint8_t b) {
+#if ESP_ARDUINO_VERSION_MAJOR >= 3
+  rgbLedWrite(RGB_BUILTIN, r, g, b);
+#else
+  neopixelWrite(RGB_BUILTIN, r, g, b);
+#endif
+}
+
+void setup() {
+  Serial.begin(115200);
+}
+
+void loop() {
+  setColor(64, 0, 0);
+  Serial.println("red");
+  delay(400);
+  setColor(0, 64, 0);
+  Serial.println("green");
+  delay(400);
+  setColor(0, 0, 64);
+  Serial.println("blue");
+  delay(400);
+}
+`,
+  }),
+  ex({
+    id: 'esp32c3-button', title: 'ESP32-C3: button interrupt', category: 'Boards', board: 'esp32c3', level: 'Intermediate',
+    summary: 'An interrupt counts presses of a button on GPIO4; the LED on GPIO5 shows the button.',
+    tags: ['ESP32-C3', 'RISC-V', 'attachInterrupt', 'button'],
+    circuit: circuits.esp32c3Button,
+    code: `// ESP32-C3: button interrupt
+// An interrupt on GPIO4 counts presses of the button (or hold B); the LED on
+// GPIO5 lights while it's held. The C3 is a RISC-V chip; the sketch is the
+// same as on any Arduino.
+// @run 1s
+// @expect serial contains "Press the button"
+
+const int BUTTON = 4;
+const int LED = 5;
+volatile int presses = 0;
+
+void IRAM_ATTR onPress() {
+  presses++;
+}
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(BUTTON, INPUT_PULLUP);
+  pinMode(LED, OUTPUT);
+  attachInterrupt(digitalPinToInterrupt(BUTTON), onPress, FALLING);
+  Serial.println("Press the button");
+}
+
+int shown = 0;
+
+void loop() {
+  digitalWrite(LED, digitalRead(BUTTON) == LOW ? HIGH : LOW);
+  if (presses != shown) {
+    shown = presses;
+    Serial.print("Presses: ");
+    Serial.println(shown);
+  }
+  delay(10);
+}
+`,
+  }),
+  ex({
+    id: 'nano-esp32-blink', title: 'Nano ESP32: blink', category: 'Boards', board: 'nanoesp32', level: 'Beginner',
+    summary: 'The Nano ESP32’s LED (D13) and an LED on D2 blink, numbered the Arduino way.',
+    tags: ['Nano ESP32', 'ESP32-S3', 'Arduino', '3.3 V'],
+    circuit: circuits.nanoEsp32Blink,
+    code: `// Nano ESP32: blink
+// The Nano ESP32 keeps the Nano's pin names: D13 is LED_BUILTIN and D2 is
+// pin 2, whichever ESP32-S3 GPIO they're wired to. It starts with a short
+// fade of its RGB LED, then blinks.
+// @run 2.5s
+// @expect pin 2 toggles
+// @expect serial contains "Blink 1"
+
+const int LED = 2;
+int count = 0;
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(LED_BUILTIN, OUTPUT);
+  pinMode(LED, OUTPUT);
+}
+
+void loop() {
+  digitalWrite(LED_BUILTIN, HIGH);
+  digitalWrite(LED, HIGH);
+  delay(250);
+  digitalWrite(LED_BUILTIN, LOW);
+  digitalWrite(LED, LOW);
+  delay(250);
+  Serial.print("Blink ");
+  Serial.println(++count);
 }
 `,
   }),

@@ -72,6 +72,11 @@ jobs:
       - name: Build renderer
         run: npm run build:renderer
 
+      # The ESP32 emulator ships inside the Mac app, with the libraries it needs.
+      - name: Bundle the ESP32 emulator (macOS)
+        if: runner.os == 'macOS'
+        run: node scripts/qemu-mac-pack.mjs all
+
       # Signing and notarization happen only when the secrets exist; without
       # them the installers are built unsigned (see docs/BUILD_AND_SIGN.md).
       - name: Build installers and upload them to the draft release

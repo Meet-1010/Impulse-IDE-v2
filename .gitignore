@@ -17,4 +17,4 @@ dist-cli/
 *~
 error-memory.json
 
-build/qemu/
+build/qemu-*/

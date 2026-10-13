@@ -168,3 +168,58 @@ jobs:
           npx jest src/renderer/simulation/__tests__/pico.test.js src/renderer/simulation/__tests__/attiny.test.js
           npx jest src/renderer/simulation/__tests__/examples.test.js -t "pico-|attiny-"
           npx jest src/cli -t ATtiny
+
+  esp32:
+    name: ESP32 boards (Espressif QEMU)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup arduino-cli
+        uses: arduino/setup-arduino-cli@v2
+
+      - name: Cache the ESP32 core and the emulator
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.arduino15/staging
+            ~/.cache/impulse-emulators
+          key: esp32-3.3.12-qemu-esp-develop-9.2.2-20260417
+
+      # Espressif's Linux QEMU uses these system libraries.
+      - name: Install the emulator's libraries
+        run: sudo apt-get update && sudo apt-get install -y libpixman-1-0 libgcrypt20 libsdl2-2.0-0 libslirp0
+
+      - name: Install the ESP32 core
+        run: |
+          URL=https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli core update-index --additional-urls "$URL"
+          arduino-cli core install esp32:esp32@3.3.12 --additional-urls "$URL"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: ESP32 examples in the emulator
+        env:
+          IMPULSE_ESP32_TESTS: '1'
+        run: |
+          export IMPULSE_EMULATOR_DIR="$HOME/.cache/impulse-emulators"
+          npx jest src/renderer/simulation/__tests__/examples.test.js -t "ESP32 examples run"
+
+      - name: impulse-test on ESP32 sketches
+        run: |
+          export IMPULSE_EMULATOR_DIR="$HOME/.cache/impulse-emulators"
+          mkdir -p "$RUNNER_TEMP/esp_blink"
+          printf '%s\n' '// @run 2s' '// @expect pin 2 toggles' '// @expect serial contains "tick 3"' \
+            'void setup() { Serial.begin(115200); pinMode(2, OUTPUT); }' \
+            'int n = 0;' 'void loop() { digitalWrite(2, n & 1); Serial.printf("tick %d\n", n++); delay(200); }' > "$RUNNER_TEMP/esp_blink/esp_blink.ino"
+          for fqbn in esp32:esp32:esp32 esp32:esp32:esp32s3 esp32:esp32:esp32c3 esp32:esp32:lolin_s2_mini; do
+            node bin/impulse-test.mjs "$RUNNER_TEMP/esp_blink" --fqbn "$fqbn"
+          done

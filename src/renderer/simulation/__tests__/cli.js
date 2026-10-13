@@ -1,6 +1,6 @@
 // Shared helper for end-to-end tests that need a real arduino-cli build.
 // Tests using it are skipped when arduino-cli or the AVR core isn't installed.
-import { execFileSync } from 'child_process';
+import { execFile, execFileSync } from 'child_process';
 import crypto from 'crypto';
 import fs from 'fs';
 import os from 'os';
@@ -118,5 +118,52 @@ export function installedLibraries() {
 }
 
 export const describeWithCli = CLI ? describe : describe.skip;
+
+// ESP32 boards run in Espressif's QEMU. Their tests are opt-in
+// (IMPULSE_ESP32_TESTS=1): they need the ESP32 core (in arduino-cli's own
+// configuration, or IMPULSE_ESP32_CLI_CONFIG) and the emulator, which comes
+// from a checkout's build/qemu-<arch> (scripts/qemu-mac-pack.mjs) or is
+// downloaded into IMPULSE_EMULATOR_DIR (default: a temporary folder).
+const ESP32_CONFIG = process.env.IMPULSE_ESP32_CLI_CONFIG ? ['--config-file', process.env.IMPULSE_ESP32_CLI_CONFIG] : [];
+export const ESP32 = process.env.IMPULSE_ESP32_TESTS === '1' && !!CLI && (() => {
+  try {
+    return execFileSync(CLI, [...ESP32_CONFIG, 'core', 'list'], { stdio: 'pipe' }).toString().includes('esp32:esp32');
+  } catch {
+    return false;
+  }
+})();
+
+let esp32 = null;
+
+/** Build `code` for the ESP32 simulator; resolves to the program ({ image, chip }) for runHeadless. */
+export async function compileEsp32(code, fqbn, name) {
+  const { Esp32Simulator, localBridge, packedQemuDir } = (await import('../../../main/services/esp32sim/index.js')).default;
+  const { setEsp32Bridge } = await import('../esp32-runner.js');
+  if (!esp32) {
+    esp32 = new Esp32Simulator({
+      runCli: (args, o = {}) => new Promise((resolve) => {
+        execFile(CLI, [...ESP32_CONFIG, ...args], { cwd: o.cwd, timeout: o.timeout, maxBuffer: 64 * 1024 * 1024 }, (err, stdout, stderr) => {
+          resolve({ success: !err, stdout: String(stdout), stderr: String(stderr) });
+        });
+      }),
+      dataDir: process.env.IMPULSE_EMULATOR_DIR || path.join(os.tmpdir(), 'impulse-test-emulators'),
+      bundledDir: packedQemuDir(),
+    });
+    setEsp32Bridge(() => localBridge(esp32));
+  }
+  // One folder per sketch, so rebuilds are incremental.
+  const dir = path.join(os.tmpdir(), 'impulse-esp32-examples', name);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, `${name}.ino`), code);
+  const res = await esp32.build(dir, fqbn);
+  if (!res.success) throw new Error(`Compile failed for ${fqbn}:\n${res.error}`);
+  await esp32.installEmulator(res.esp32.chip);
+  return res.esp32;
+}
+
+/** Stop the emulators the ESP32 tests started. */
+export function stopEsp32() {
+  esp32?.stopAll();
+}
 export const describeWithPico = PICO ? describe : describe.skip;
 export const describeWithAttiny = ATTINY ? describe : describe.skip;

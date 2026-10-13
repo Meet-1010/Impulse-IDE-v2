@@ -137,4 +137,10 @@ function bundledQemuDir(resourcesPath = process.resourcesPath) {
   return dir && fs.existsSync(dir) ? dir : null;
 }
 
-module.exports = { Esp32Simulator, bundledQemuDir, localBridge };
+/** The emulators scripts/qemu-mac-pack.mjs bundled in a checkout (running from source), or null. */
+function packedQemuDir(repoRoot = path.join(__dirname, '..', '..', '..', '..')) {
+  const dir = path.join(repoRoot, 'build', `qemu-${process.arch === 'arm64' ? 'arm64' : 'x64'}`);
+  return process.platform === 'darwin' && fs.existsSync(dir) ? dir : null;
+}
+
+module.exports = { Esp32Simulator, bundledQemuDir, packedQemuDir, localBridge };

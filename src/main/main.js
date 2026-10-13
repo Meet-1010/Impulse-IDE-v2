@@ -28,7 +28,7 @@ const { debug } = require('./utils/logger');
 const notifications = require('./utils/notifications');
 const WorkspaceStore = require('./services/workspaceStore');
 const { Toolchain } = require('./services/toolchain');
-const { Esp32Simulator, bundledQemuDir } = require('./services/esp32sim');
+const { Esp32Simulator, bundledQemuDir, packedQemuDir } = require('./services/esp32sim');
 const { validatePath } = require('./utils/pathValidator');
 
 const logger = require('./utils/logger');
@@ -418,7 +418,7 @@ app.whenReady().then(() => {
   esp32sim = new Esp32Simulator({
     runCli: (args, opts) => arduinoService.runCommand(args, opts),
     dataDir: path.join(app.getPath('userData'), 'emulators'),
-    bundledDir: app.isPackaged ? bundledQemuDir() : bundledQemuDir(path.join(__dirname, '..', '..', 'build')),
+    bundledDir: app.isPackaged ? bundledQemuDir() : packedQemuDir(),
   });
   arduinoService.esp32sim = esp32sim;
   serialMonitor = new SerialMonitor();

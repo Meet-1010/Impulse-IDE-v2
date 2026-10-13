@@ -54,6 +54,31 @@ const runtime = [
     note: 'Not bundled. Installed through arduino-cli when you simulate an ATtiny85 for the first time and agree to the download; it uses the AVR compiler of the Arduino AVR core.',
   },
   {
+    name: 'ESP32 cores (esp32:esp32, arduino:esp32)', version: 'installed', license: 'LGPL-2.1 and others',
+    homepage: 'https://github.com/espressif/arduino-esp32',
+    note: 'Not bundled. Installed through arduino-cli when you simulate an ESP32 board without its core and agree to the download. Impulse compiles a small simulator bridge (src/main/services/esp32sim/impulse_sim.cpp) into sketches it simulates, never into uploads.',
+  },
+  {
+    name: 'Espressif QEMU', version: 'esp-develop-9.2.2-20260417', license: 'GPL-2.0-or-later',
+    homepage: 'https://github.com/espressif/qemu',
+    note: 'The ESP32 emulator, run as a separate program. On Windows and Linux it is downloaded from Espressif\'s release the first time you simulate an ESP32 board (you are asked first) and checked against its published SHA-256. On macOS it ships with the app (Contents/Resources/qemu) together with the libraries listed next. Source code: https://github.com/espressif/qemu/releases/download/esp-develop-9.2.2-20260417/qemu-esp_develop_9.2.2_20260417-src.tar.xz. The ESP32 ROM images in its share/qemu folder are Espressif\'s.',
+  },
+  {
+    name: 'pixman', version: '0.46.4', license: 'MIT',
+    homepage: 'https://www.cairographics.org/releases/pixman-0.46.4.tar.gz',
+    note: 'macOS only: built from the release source by scripts/qemu-mac-pack.mjs and shipped as a dynamic library next to QEMU.',
+  },
+  {
+    name: 'libgcrypt', version: '1.12.4', license: 'LGPL-2.1-or-later',
+    homepage: 'https://gnupg.org/ftp/gcrypt/libgcrypt/libgcrypt-1.12.4.tar.bz2',
+    note: 'macOS only: built unmodified from the release source by scripts/qemu-mac-pack.mjs and shipped as a separate dynamic library (Contents/Resources/qemu/*/qemu/lib) that QEMU loads; it can be replaced with another build.',
+  },
+  {
+    name: 'libgpg-error', version: '1.61', license: 'LGPL-2.1-or-later',
+    homepage: 'https://gnupg.org/ftp/gcrypt/libgpg-error/libgpg-error-1.61.tar.bz2',
+    note: 'macOS only: built unmodified from the release source by scripts/qemu-mac-pack.mjs and shipped as a separate dynamic library next to libgcrypt; it can be replaced with another build.',
+  },
+  {
     name: 'Electron', version: self.devDependencies.electron.replace(/^[^\d]*/, ''), license: 'MIT',
     homepage: 'https://www.electronjs.org',
     note: 'The app runtime. The licenses of Chromium and its components ship inside the app as LICENSES.chromium.html.',

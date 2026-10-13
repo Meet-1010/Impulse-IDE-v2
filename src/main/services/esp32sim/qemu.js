@@ -4,7 +4,8 @@
  * macOS it ships inside the app (Espressif's macOS builds need Homebrew
  * libraries, so scripts/qemu-mac-pack.mjs bundles them). On Windows and Linux
  * it's downloaded from Espressif's GitHub release on first use and checked
- * against the published SHA-256.
+ * against the published SHA-256; the Linux build uses the system's pixman,
+ * libgcrypt, SDL2 and libslirp.
  * @module main/services/esp32sim/qemu
  */
 
@@ -166,6 +167,10 @@ class QemuManager extends EventEmitter {
     const run = spawnSync(exe, ['--version'], { windowsHide: true, timeout: 15000, encoding: 'utf8' });
     if (run.status === 0) return null;
     const err = `${run.stderr || ''}${run.error?.message || ''}`.trim();
+    const so = /error while loading shared libraries: ([^:\s]+)/.exec(err)?.[1];
+    if (so) {
+      return `The ESP32 emulator needs ${so}, which isn't installed. On Ubuntu or Debian: sudo apt install libpixman-1-0 libgcrypt20 libsdl2-2.0-0 libslirp0 — on Fedora: sudo dnf install pixman libgcrypt SDL2 libslirp.`;
+    }
     if (/Library not loaded/i.test(err)) {
       const lib = /Library not loaded: (\S+)/.exec(err)?.[1] || 'a library';
       return `The ESP32 emulator needs ${path.basename(lib)}, which isn't on this Mac. Install Homebrew's pixman, libgcrypt and sdl2 (brew install pixman libgcrypt sdl2), or use an Impulse build that bundles them.`;

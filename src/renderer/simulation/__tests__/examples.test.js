@@ -7,11 +7,14 @@ import { parseExpectations, evaluateExpectations } from '../expectations.js';
 import { BOARDS } from '../boards.js';
 import { partDef } from '../parts/catalog.js';
 import { Bench } from './bench.js';
-import { compileSketch, describeWithCli, installedLibraries, PICO, ATTINY } from './cli.js';
+import { compileSketch, describeWithCli, installedLibraries, PICO, ATTINY, ESP32, compileEsp32, stopEsp32 } from './cli.js';
+import { F_CPU } from '../avr-runner.js';
 
 const LIBS = installedLibraries();
 // Examples for boards whose core isn't installed here are skipped.
-const needsCore = (ex) => (ex.board === 'pico' && !PICO) || (ex.board === 'attiny85' && !ATTINY);
+const needsCore = (ex) => (ex.board === 'pico' && !PICO) || (ex.board === 'attiny85' && !ATTINY) || isEsp32(ex);
+// ESP32 examples run in the emulator, in real time (their own suite below).
+const isEsp32 = (ex) => BOARDS[ex.board].family === 'esp32';
 const lcdText = (b, id) => String.fromCharCode(...(b.part(id).el.characters || []));
 const press = (id) => (b) => b.behavior(id).set(true);
 const release = (id) => (b) => b.behavior(id).set(false);
@@ -102,6 +105,44 @@ const CHECKS = {
   },
   'dc-motor': { run: 1.0, check: (b) => expect(b.behavior('motor1').rpm).toBeGreaterThan(20) },
   'shift-register': { run: 0.2, check: (b) => expect(b.part('seg1').el.values.slice(0, 7)).toEqual([1, 1, 1, 1, 1, 1, 0]) },
+  'esp32-blink': {
+    run: 1.5,
+    check: (r) => {
+      expect(r.trace(2).length).toBeGreaterThanOrEqual(4);
+      expect(r.trace(4).length).toBeGreaterThanOrEqual(4);
+      expect(r.serial).toContain('Blink 2');
+    },
+  },
+  'esp32-dimmer': {
+    run: 1,
+    check: (r) => {
+      const reading = Number(r.lines().slice(-1)[0].replace('Reading: ', ''));
+      expect(Math.abs(reading - 2048)).toBeLessThan(60);
+      expect(Math.abs(r.part('led1').el.brightness - reading / 4095)).toBeLessThan(0.1);
+    },
+  },
+  'esp32s3-rgb': {
+    run: 2,
+    check: (r) => {
+      expect(r.serial).toMatch(/red\s+green\s+blue/);
+      expect([[64, 0, 0], [0, 64, 0], [0, 0, 64]]).toContainEqual(r.runner.rgbOf(48));
+    },
+  },
+  'esp32c3-button': {
+    run: 1.2, actions: [[0.6, press('btn1')], [0.8, release('btn1')]],
+    check: (r) => {
+      expect(r.serial).toContain('Presses: 1');
+      expect(r.trace(5).map(e => e.high)).toEqual([true, false]);
+    },
+  },
+  'nano-esp32-blink': {
+    run: 2.5,
+    check: (r) => {
+      expect(r.trace(5).length).toBeGreaterThanOrEqual(2);   // D2
+      expect(r.trace(48).length).toBeGreaterThanOrEqual(2);  // D13, LED_BUILTIN
+      expect(r.serial).toContain('Blink 1');
+    },
+  },
   'pico-blink': {
     run: 1.2,
     check: (b) => {
@@ -286,5 +327,42 @@ describeWithCli('example hardware tests pass in the headless runner', () => {
       const results = evaluateExpectations(items, run, ex.board);
       for (const r of results) expect({ check: r.raw, pass: r.pass, detail: r.detail }).toMatchObject({ pass: true });
     }, 120000);
+  }
+});
+
+(ESP32 ? describe : describe.skip)('ESP32 examples run in the emulator (IMPULSE_ESP32_TESTS=1)', () => {
+  afterAll(() => stopEsp32());
+  for (const ex of EXAMPLES.filter(isEsp32)) {
+    it(`${ex.id}: ${ex.title}`, async () => {
+      const { runHeadless } = await import('../headless.js');
+      const program = await compileEsp32(ex.code, BOARDS[ex.board].fqbn, ex.id.replace(/-/g, '_'));
+      const spec = CHECKS[ex.id];
+      const { seconds } = parseExpectations(ex.code, ex.board);
+      let rig = null;
+      let checked = false;
+      const run = await runHeadless(program, {
+        seconds: Math.max(spec.run, seconds),
+        board: ex.board,
+        circuit: ex.circuit(),
+        setup: (runner, engine) => {
+          rig = { runner, engine, behavior: (id) => engine.behaviorOf(id), part: (id) => engine.parts.find(p => p.id === id) };
+          for (const [t, action] of spec.actions || []) runner.schedule(t * F_CPU, () => action(rig));
+        },
+        // Parts are checked while the circuit still runs.
+        beforeStop: (runner, engine, { serial, trace }) => {
+          spec.check({
+            ...rig,
+            serial,
+            trace: (pin) => trace.filter(e => e.pin === pin),
+            lines: () => serial.split('\n').map(l => l.trim()).filter(Boolean),
+          });
+          checked = true;
+        },
+      });
+      expect(checked).toBe(true);
+      expect(run.shorts).toEqual([]);
+      const { items } = parseExpectations(ex.code, ex.board);
+      for (const r of evaluateExpectations(items, run, ex.board)) expect({ check: r.raw, pass: r.pass, detail: r.detail }).toMatchObject({ pass: true });
+    }, 600000);
   }
 });
