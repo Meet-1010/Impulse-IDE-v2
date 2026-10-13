@@ -142,6 +142,14 @@ describe('ESP32 runner', () => {
     expect(fake.sent).toContain('r6,0,'); // nothing at 0x50
   });
 
+  it('says once that Wi-Fi joined a pretend network', async () => {
+    const { runner, fake } = await booted();
+    const notices = [];
+    runner.onNotice = (n) => notices.push(n);
+    fake.say('Besp32', 'Fjoin,Home, upstairs', 'Fjoin,Home, upstairs');
+    expect(notices).toEqual([expect.stringMatching(/pretend network "Home, upstairs" and got IP 10\.0\.2\.15/)]);
+  });
+
   it('passes Serial both ways', async () => {
     const { runner, fake } = await booted();
     let text = '';

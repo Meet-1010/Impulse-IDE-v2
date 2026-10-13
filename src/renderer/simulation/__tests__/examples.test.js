@@ -113,6 +113,14 @@ const CHECKS = {
       expect(r.serial).toContain('Blink 2');
     },
   },
+  'esp32-wifi': {
+    run: 2,
+    check: (r) => {
+      expect(r.serial).toMatch(/2 networks:\s+Impulse-WiFi/);
+      expect(r.serial).toContain('Connected, IP 10.0.2.15');
+      expect(r.trace(4).map(e => e.high)).toEqual([true]);
+    },
+  },
   'esp32-dimmer': {
     run: 1,
     check: (r) => {

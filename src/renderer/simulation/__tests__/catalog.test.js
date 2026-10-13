@@ -77,7 +77,16 @@ describe('part search', () => {
   it('points unsimulated boards at the ones it runs', () => {
     expect(adviceFor('attiny85')).toBeNull();
     expect(adviceFor('attiny84')?.parts.map(p => p.type)).toContain('impulse-attiny85');
-    expect(adviceFor('esp32')?.text).toMatch(/Raspberry Pi Pico and the ATtiny85/);
+    expect(adviceFor('esp8266')?.text).toMatch(/ESP32-S3, ESP32-C3 and Nano ESP32/);
+    expect(adviceFor('esp32-c6')?.parts.map(p => p.type)).toContain('wokwi-esp32-devkit-v1');
+  });
+
+  it('finds the ESP32 boards', () => {
+    expect(adviceFor('esp32')).toBeNull();
+    expect(top('esp32')[0]).toBe('wokwi-esp32-devkit-v1');
+    expect(top('esp32-s3')[0]).toBe('impulse-esp32-s3-devkitc');
+    expect(top('esp32 c3')[0]).toBe('impulse-esp32-c3-devkitm');
+    expect(top('nano esp32')[0]).toBe('impulse-nano-esp32');
   });
 
   it('tolerates typos', () => {

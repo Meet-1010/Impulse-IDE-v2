@@ -19,6 +19,7 @@
 //                R<id>,<bus>,<addr>,<n>,<t>    I2C read, answered by r
 //                X<id>,<bus>,<addr>,<hex>,<n>,<t>   I2C write then read, answered by r
 //                O<count>                      messages dropped (the sketch outran the bridge)
+//                Fjoin,<ssid> / Fap            joined the pretend Wi-Fi network / started an access point
 //   from Impulse: G                 go: the circuit's starting state has been sent
 //                I<pin>,<level>   input level (-1 = nothing drives it)
 //                A<pin>,<mV>       analog voltage
@@ -32,6 +33,12 @@
 #include <Arduino.h>
 #include "driver/uart.h"
 #include "esp_timer.h"
+#include "esp_wifi.h"
+#include "esp_netif.h"
+#include "esp_event.h"
+#if __has_include("esp_mac.h")
+#include "esp_mac.h"
+#endif
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
@@ -678,6 +685,265 @@ esp_err_t __wrap_i2cWriteReadNonStop(uint8_t num, uint16_t addr, const uint8_t *
   esp_err_t err = simI2cRead(msg, n, id, rbuf, rsize, count);
   xSemaphoreGive(simReplyLock);
   return err;
+}
+
+// ── Wi-Fi: a pretend network ──
+// The emulator has no radio: starting it would touch hardware QEMU doesn't
+// model and crash the chip. So the Wi-Fi driver's API answers here instead:
+// WiFi.begin() joins a pretend network after a moment and gets 10.0.2.15,
+// scans find two networks, and a soft AP starts. Nothing goes on air, so
+// requests to the internet don't get answers (the network interface stays
+// down, and connecting fails the way it does with no route).
+
+static wifi_mode_t simWifiMode = WIFI_MODE_NULL;
+static bool simWifiStarted = false;
+static bool simStaConnected = false;
+static wifi_config_t simStaConfig;
+static wifi_config_t simApConfig;
+static esp_netif_t *simStaNetif = NULL;
+static esp_netif_t *simApNetif = NULL;
+static esp_netif_ip_info_t simStaIp;
+static esp_timer_handle_t simJoinTimer = NULL;
+static const uint8_t SIM_BSSID[6] = {0x02, 0x49, 0x4d, 0x50, 0x4c, 0x53};
+static const char *const SIM_NETWORKS[] = {"Impulse-WiFi", "Impulse-Guest"};
+
+static void simPost(esp_event_base_t base, int32_t id, const void *data, size_t size) {
+  esp_event_post(base, id, (void *)data, size, pdMS_TO_TICKS(100));  // IDF 4.4 takes a non-const pointer
+}
+
+static void simJoined(void *) {
+  if (!simWifiStarted || simStaConnected) return;
+  wifi_event_sta_connected_t c = {};
+  memcpy(c.ssid, simStaConfig.sta.ssid, sizeof c.ssid);
+  c.ssid_len = strnlen((const char *)simStaConfig.sta.ssid, sizeof simStaConfig.sta.ssid);
+  memcpy(c.bssid, SIM_BSSID, 6);
+  c.channel = 6;
+  c.authmode = simStaConfig.sta.password[0] ? WIFI_AUTH_WPA2_PSK : WIFI_AUTH_OPEN;
+  simStaConnected = true;
+  simPost(WIFI_EVENT, WIFI_EVENT_STA_CONNECTED, &c, sizeof c);
+  ip_event_got_ip_t got = {};
+  got.esp_netif = simStaNetif;
+  got.ip_info.ip.addr = ESP_IP4TOADDR(10, 0, 2, 15);
+  got.ip_info.netmask.addr = ESP_IP4TOADDR(255, 255, 255, 0);
+  got.ip_info.gw.addr = ESP_IP4TOADDR(10, 0, 2, 2);
+  got.ip_changed = true;
+  simStaIp = got.ip_info;
+  simPost(IP_EVENT, IP_EVENT_STA_GOT_IP, &got, sizeof got);
+  char msg[64];
+  int n = snprintf(msg, sizeof msg, "Fjoin,%.32s\n", (const char *)simStaConfig.sta.ssid);
+  simPut(msg, n);
+}
+
+static void simLeave(uint8_t reason) {
+  if (!simStaConnected) return;
+  simStaConnected = false;
+  wifi_event_sta_disconnected_t d = {};
+  memcpy(d.ssid, simStaConfig.sta.ssid, sizeof d.ssid);
+  d.ssid_len = strnlen((const char *)simStaConfig.sta.ssid, sizeof simStaConfig.sta.ssid);
+  memcpy(d.bssid, SIM_BSSID, 6);
+  d.reason = reason;
+  simPost(WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED, &d, sizeof d);
+}
+
+esp_err_t __wrap_esp_wifi_init(const wifi_init_config_t *config) { (void)config; return ESP_OK; }
+esp_err_t __wrap_esp_wifi_deinit(void) { simWifiStarted = false; simStaConnected = false; return ESP_OK; }
+esp_err_t __wrap_esp_wifi_set_mode(wifi_mode_t mode) { simWifiMode = mode; return ESP_OK; }
+esp_err_t __wrap_esp_wifi_get_mode(wifi_mode_t *mode) { if (mode) *mode = simWifiMode; return ESP_OK; }
+
+esp_err_t __wrap_esp_wifi_start(void) {
+  if (simWifiStarted) return ESP_OK;
+  simWifiStarted = true;
+  if (simWifiMode == WIFI_MODE_STA || simWifiMode == WIFI_MODE_APSTA) simPost(WIFI_EVENT, WIFI_EVENT_STA_START, NULL, 0);
+  if (simWifiMode == WIFI_MODE_AP || simWifiMode == WIFI_MODE_APSTA) {
+    simPost(WIFI_EVENT, WIFI_EVENT_AP_START, NULL, 0);
+    simPut("Fap\n", 4);
+  }
+  return ESP_OK;
+}
+
+esp_err_t __wrap_esp_wifi_stop(void) {
+  if (!simWifiStarted) return ESP_OK;
+  simLeave(WIFI_REASON_ASSOC_LEAVE);
+  simWifiStarted = false;
+  if (simWifiMode == WIFI_MODE_STA || simWifiMode == WIFI_MODE_APSTA) simPost(WIFI_EVENT, WIFI_EVENT_STA_STOP, NULL, 0);
+  if (simWifiMode == WIFI_MODE_AP || simWifiMode == WIFI_MODE_APSTA) simPost(WIFI_EVENT, WIFI_EVENT_AP_STOP, NULL, 0);
+  return ESP_OK;
+}
+
+esp_err_t __wrap_esp_wifi_restore(void) {
+  memset(&simStaConfig, 0, sizeof simStaConfig);
+  memset(&simApConfig, 0, sizeof simApConfig);
+  return ESP_OK;
+}
+
+esp_err_t __wrap_esp_wifi_set_config(wifi_interface_t iface, wifi_config_t *conf) {
+  if (!conf) return ESP_ERR_INVALID_ARG;
+  if (iface == WIFI_IF_STA) simStaConfig = *conf;
+  else simApConfig = *conf;
+  return ESP_OK;
+}
+
+esp_err_t __wrap_esp_wifi_get_config(wifi_interface_t iface, wifi_config_t *conf) {
+  if (!conf) return ESP_ERR_INVALID_ARG;
+  *conf = iface == WIFI_IF_STA ? simStaConfig : simApConfig;
+  return ESP_OK;
+}
+
+esp_err_t __wrap_esp_wifi_connect(void) {
+  if (!simWifiStarted) return ESP_ERR_WIFI_NOT_STARTED;
+  if (!simJoinTimer) {
+    esp_timer_create_args_t args = {};
+    args.callback = simJoined;
+    args.name = "impulse-wifi";
+    esp_timer_create(&args, &simJoinTimer);
+  }
+  esp_timer_stop(simJoinTimer);
+  esp_timer_start_once(simJoinTimer, 400000);  // a real join takes a moment
+  return ESP_OK;
+}
+
+esp_err_t __wrap_esp_wifi_disconnect(void) {
+  if (simJoinTimer) esp_timer_stop(simJoinTimer);
+  simLeave(WIFI_REASON_ASSOC_LEAVE);
+  return ESP_OK;
+}
+
+static uint16_t simScanCount = 0;
+static esp_timer_handle_t simScanTimer = NULL;
+
+static void simScanned(void *) {
+  simScanCount = 2;
+  wifi_event_sta_scan_done_t done = {};
+  done.status = 0;
+  done.number = simScanCount;
+  simPost(WIFI_EVENT, WIFI_EVENT_SCAN_DONE, &done, sizeof done);
+}
+
+// Like a real scan, it ends a moment later (Arduino's scanNetworks() clears
+// its "done" flag after starting the scan, so an instant answer would be lost).
+esp_err_t __wrap_esp_wifi_scan_start(const wifi_scan_config_t *config, bool block) {
+  (void)config;
+  if (block) {
+    simScanCount = 2;
+    return ESP_OK;
+  }
+  if (!simScanTimer) {
+    esp_timer_create_args_t args = {};
+    args.callback = simScanned;
+    args.name = "impulse-scan";
+    esp_timer_create(&args, &simScanTimer);
+  }
+  esp_timer_stop(simScanTimer);
+  esp_timer_start_once(simScanTimer, 300000);
+  return ESP_OK;
+}
+
+esp_err_t __wrap_esp_wifi_scan_stop(void) { return ESP_OK; }
+esp_err_t __wrap_esp_wifi_scan_get_ap_num(uint16_t *number) { if (number) *number = simScanCount; return ESP_OK; }
+
+esp_err_t __wrap_esp_wifi_scan_get_ap_records(uint16_t *number, wifi_ap_record_t *records) {
+  if (!number || !records) return ESP_ERR_INVALID_ARG;
+  uint16_t n = *number < simScanCount ? *number : simScanCount;
+  for (uint16_t i = 0; i < n; i++) {
+    memset(&records[i], 0, sizeof records[i]);
+    strncpy((char *)records[i].ssid, SIM_NETWORKS[i], sizeof records[i].ssid - 1);
+    memcpy(records[i].bssid, SIM_BSSID, 6);
+    records[i].bssid[5] += i;
+    records[i].primary = i ? 11 : 6;
+    records[i].rssi = i ? -71 : -48;
+    records[i].authmode = i ? WIFI_AUTH_OPEN : WIFI_AUTH_WPA2_PSK;
+  }
+  *number = n;
+  simScanCount = 0;
+  return ESP_OK;
+}
+
+esp_err_t __wrap_esp_wifi_sta_get_ap_info(wifi_ap_record_t *ap) {
+  if (!simStaConnected) return ESP_ERR_WIFI_NOT_CONNECT;
+  if (!ap) return ESP_ERR_INVALID_ARG;
+  memset(ap, 0, sizeof *ap);
+  memcpy(ap->ssid, simStaConfig.sta.ssid, sizeof ap->ssid);
+  memcpy(ap->bssid, SIM_BSSID, 6);
+  ap->primary = 6;
+  ap->rssi = -48;
+  ap->authmode = simStaConfig.sta.password[0] ? WIFI_AUTH_WPA2_PSK : WIFI_AUTH_OPEN;
+  return ESP_OK;
+}
+
+// The emulated chip's eFuses are blank, so its MAC would read 00:00:00:00:00:00:
+// use a fixed one with Espressif's prefix (the access point's is one higher).
+esp_err_t __wrap_esp_wifi_get_mac(wifi_interface_t iface, uint8_t mac[6]) {
+  if (!mac) return ESP_ERR_INVALID_ARG;
+  esp_read_mac(mac, iface == WIFI_IF_STA ? ESP_MAC_WIFI_STA : ESP_MAC_WIFI_SOFTAP);
+  bool blank = true;
+  for (int i = 0; i < 6; i++) if (mac[i]) blank = false;
+  if (blank) {
+    static const uint8_t sim[6] = {0x24, 0x0a, 0xc4, 0x1d, 0x5e, 0x10};
+    memcpy(mac, sim, 6);
+    if (iface != WIFI_IF_STA) mac[5] += 1;
+  }
+  return ESP_OK;
+}
+
+esp_err_t __wrap_esp_wifi_get_channel(uint8_t *primary, wifi_second_chan_t *second) {
+  if (primary) *primary = 6;
+  if (second) *second = WIFI_SECOND_CHAN_NONE;
+  return ESP_OK;
+}
+
+esp_err_t __wrap_esp_wifi_set_channel(uint8_t primary, wifi_second_chan_t second) { (void)primary; (void)second; return ESP_OK; }
+esp_err_t __wrap_esp_wifi_set_ps(wifi_ps_type_t type) { (void)type; return ESP_OK; }
+esp_err_t __wrap_esp_wifi_set_storage(wifi_storage_t storage) { (void)storage; return ESP_OK; }
+esp_err_t __wrap_esp_wifi_set_protocol(wifi_interface_t iface, uint8_t protocols) { (void)iface; (void)protocols; return ESP_OK; }
+esp_err_t __wrap_esp_wifi_get_protocol(wifi_interface_t iface, uint8_t *protocols) {
+  (void)iface;
+  if (protocols) *protocols = WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N;
+  return ESP_OK;
+}
+esp_err_t __wrap_esp_wifi_set_bandwidth(wifi_interface_t iface, wifi_bandwidth_t bw) { (void)iface; (void)bw; return ESP_OK; }
+esp_err_t __wrap_esp_wifi_set_max_tx_power(int8_t power) { (void)power; return ESP_OK; }
+esp_err_t __wrap_esp_wifi_get_max_tx_power(int8_t *power) { if (power) *power = 80; return ESP_OK; }
+
+esp_err_t __wrap_esp_wifi_ap_get_sta_list(wifi_sta_list_t *sta) {
+  if (sta) memset(sta, 0, sizeof *sta);
+  return ESP_OK;
+}
+
+// The interfaces exist (sketches read their MAC, hostname and IP), with no radio driver behind them.
+static esp_netif_t *simNetif(const esp_netif_config_t *cfg, wifi_interface_t iface) {
+  esp_netif_t *netif = esp_netif_new(cfg);
+  uint8_t mac[6];
+  if (netif && __wrap_esp_wifi_get_mac(iface, mac) == ESP_OK) esp_netif_set_mac(netif, mac);  // core 3.x reads it here
+  return netif;
+}
+
+esp_netif_t *__wrap_esp_netif_create_default_wifi_sta(void) {
+  esp_netif_config_t cfg = ESP_NETIF_DEFAULT_WIFI_STA();
+  simStaNetif = simNetif(&cfg, WIFI_IF_STA);
+  return simStaNetif;
+}
+
+esp_netif_t *__wrap_esp_netif_create_default_wifi_ap(void) {
+  esp_netif_config_t cfg = ESP_NETIF_DEFAULT_WIFI_AP();
+  simApNetif = simNetif(&cfg, WIFI_IF_AP);
+  return simApNetif;
+}
+
+esp_err_t __real_esp_netif_get_ip_info(esp_netif_t *netif, esp_netif_ip_info_t *ip);
+esp_err_t __wrap_esp_netif_get_ip_info(esp_netif_t *netif, esp_netif_ip_info_t *ip) {
+  if (netif && netif == simStaNetif && ip) {
+    if (simStaConnected) *ip = simStaIp;
+    else memset(ip, 0, sizeof *ip);
+    return ESP_OK;
+  }
+  return __real_esp_netif_get_ip_info(netif, ip);
+}
+
+bool __real_esp_netif_is_netif_up(esp_netif_t *netif);
+bool __wrap_esp_netif_is_netif_up(esp_netif_t *netif) {
+  if (netif && netif == simStaNetif) return simStaConnected;
+  if (netif && netif == simApNetif) return simWifiStarted;
+  return __real_esp_netif_is_netif_up(netif);
 }
 
 // ── Arduino Nano ESP32: no double-tap detection ──

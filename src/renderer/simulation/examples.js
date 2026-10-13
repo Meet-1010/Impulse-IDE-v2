@@ -2181,6 +2181,52 @@ void loop() {
 `,
   }),
   ex({
+    id: 'esp32-wifi', title: 'ESP32: Wi-Fi status light', category: 'Boards', board: 'esp32', level: 'Beginner',
+    summary: 'Scans for networks, joins one and lights an LED while connected (a pretend network: the simulator has no radio).',
+    tags: ['ESP32', 'Wi-Fi', 'WiFi.begin', 'scan'],
+    circuit: circuits.esp32Blink,
+    code: `// ESP32: Wi-Fi status light
+// Scans for networks, joins one, and keeps the LED on GPIO4 on while it's
+// connected. The simulator has no radio: it shows two pretend networks and
+// joins any network you name, with IP 10.0.2.15. Requests to the internet
+// get no answer there; on a real board, put your network's name and password.
+// @run 2s
+// @expect serial contains "Connected, IP 10.0.2.15"
+// @expect pin 4 high
+
+#include <WiFi.h>
+
+const char *SSID = "Impulse-WiFi";
+const char *PASSWORD = "password";
+const int LED = 4;
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(LED, OUTPUT);
+
+  int found = WiFi.scanNetworks();
+  Serial.printf("%d networks:\\n", found);
+  for (int i = 0; i < found; i++) {
+    Serial.printf("  %s (%d dBm)\\n", WiFi.SSID(i).c_str(), WiFi.RSSI(i));
+  }
+
+  WiFi.begin(SSID, PASSWORD);
+  Serial.print("Connecting");
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(100);
+    Serial.print(".");
+  }
+  Serial.print("\\nConnected, IP ");
+  Serial.println(WiFi.localIP());
+}
+
+void loop() {
+  digitalWrite(LED, WiFi.status() == WL_CONNECTED ? HIGH : LOW);
+  delay(100);
+}
+`,
+  }),
+  ex({
     id: 'esp32-dimmer', title: 'ESP32: dimmer', category: 'Boards', board: 'esp32', level: 'Beginner',
     summary: 'A potentiometer on GPIO34 sets the brightness of an LED on GPIO18 with PWM.',
     tags: ['ESP32', 'analogRead', 'PWM', 'potentiometer'],

@@ -335,6 +335,13 @@ export class Esp32Runner {
         this._advance(timeOf(f[5]));
         this._send(this._i2cRead(f[0], Number(f[2]), unhex(f[3]), Number(f[4])));
         return;
+      case 'F': // the sketch used Wi-Fi: say what the pretend network is, once
+        if (this._wifiNoted) return;
+        this._wifiNoted = true;
+        this.onNotice?.(line.startsWith('Fjoin,')
+          ? `Wi-Fi isn't simulated: the sketch joined a pretend network "${line.slice(6)}" and got IP 10.0.2.15. Requests to the internet won't get answers.`
+          : 'Wi-Fi isn\'t simulated: the sketch started an access point that nothing can join.');
+        return;
       case 'O':
         this.onNotice?.(`The sketch changed pins faster than the simulator can follow (${f[0]} changes dropped). Add a short delay() in the loop.`);
         return;
