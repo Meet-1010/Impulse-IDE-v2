@@ -101,6 +101,7 @@ export class Esp32Runner {
     this._pulseWaits = [];
     this._ready = false;
     this._awaitingBoot = true;  // messages from before a reset are stale
+    this._setupAt = null;       // firmware time when setup() started
   }
 
   /** Simulated time in 16 MHz cycles (the unit the circuit engine uses). */
@@ -168,10 +169,15 @@ export class Esp32Runner {
     throw new Error('The ESP32 runs in real time in its emulator; it can\'t be stepped.');
   }
 
+  /** Seconds the sketch has run since setup() started (the chip boots first, sometimes slowly). */
+  get sketchTime() {
+    return this._setupAt === null ? 0 : Math.max(0, this._now - this._setupAt);
+  }
+
   /**
-   * Resolves once `seconds` of the firmware's time have passed (headless
-   * runs). Fails when the firmware's clock stops moving for `stallMs` (a
-   * crash loop, a hang before the bridge starts).
+   * Resolves once the sketch has run `seconds` from setup() (headless runs:
+   * the emulated chip's boot isn't counted). Fails when the firmware's clock
+   * stops moving for `stallMs` (a crash loop, a hang before the bridge starts).
    */
   waitUntil(seconds, { signal, stallMs = 30000 } = {}) {
     return new Promise((resolve, reject) => {
@@ -180,7 +186,7 @@ export class Esp32Runner {
       const check = () => {
         if (signal?.aborted) return reject(new Error('Simulation cancelled'));
         if (this._failed) return reject(new Error(this._failed));
-        if (this._now >= seconds) return resolve();
+        if (this._setupAt !== null && this.sketchTime >= seconds) return resolve();
         if (this._now !== last) {
           last = this._now;
           lastWall = Date.now();
@@ -275,6 +281,10 @@ export class Esp32Runner {
         return;
       case 'H':
         this._advance(timeOf(f[0]));
+        return;
+      case 'S':
+        this._advance(timeOf(f[0]));
+        this._setupAt = timeOf(f[0]);
         return;
       case 'M': {
         this._advance(timeOf(f[2]));

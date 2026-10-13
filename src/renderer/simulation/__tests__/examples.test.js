@@ -7,7 +7,7 @@ import { parseExpectations, evaluateExpectations } from '../expectations.js';
 import { BOARDS } from '../boards.js';
 import { partDef } from '../parts/catalog.js';
 import { Bench } from './bench.js';
-import { compileSketch, describeWithCli, installedLibraries, PICO, ATTINY, ESP32, compileEsp32, stopEsp32 } from './cli.js';
+import { compileSketch, describeWithCli, installedLibraries, PICO, ATTINY, ESP32, compileEsp32, stopEsp32, hasEsp32Core } from './cli.js';
 import { F_CPU } from '../avr-runner.js';
 
 const LIBS = installedLibraries();
@@ -341,7 +341,7 @@ describeWithCli('example hardware tests pass in the headless runner', () => {
 (ESP32 ? describe : describe.skip)('ESP32 examples run in the emulator (IMPULSE_ESP32_TESTS=1)', () => {
   afterAll(() => stopEsp32());
   for (const ex of EXAMPLES.filter(isEsp32)) {
-    it(`${ex.id}: ${ex.title}`, async () => {
+    (hasEsp32Core(BOARDS[ex.board].fqbn) ? it : it.skip)(`${ex.id}: ${ex.title}`, async () => {
       const { runHeadless } = await import('../headless.js');
       const program = await compileEsp32(ex.code, BOARDS[ex.board].fqbn, ex.id.replace(/-/g, '_'));
       const spec = CHECKS[ex.id];

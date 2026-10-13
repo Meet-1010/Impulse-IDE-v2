@@ -18,14 +18,16 @@ const path = require('path');
 const crypto = require('crypto');
 const { buildFlashImage } = require('./image');
 
-const BRIDGE_SOURCE = path.join(__dirname, 'impulse_sim.cpp');
 const BRIDGE_FILE = 'zz_impulse_simulator.cpp';
 
 /* global __IMPULSE_BRIDGE_SOURCE__ */
-/** The bridge's source: next to this file, or built into the bundled command-line runner. */
+/**
+ * The bridge's source: built into the bundled command-line runner (an ES
+ * module, with no __dirname), else the file next to this one.
+ */
 function bridgeSource() {
   if (typeof __IMPULSE_BRIDGE_SOURCE__ === 'string') return Buffer.from(__IMPULSE_BRIDGE_SOURCE__);
-  return fs.readFileSync(BRIDGE_SOURCE);
+  return fs.readFileSync(path.join(__dirname, 'impulse_sim.cpp'));
 }
 
 /** Functions the bridge takes over at link time (the rest are weak in the core). */

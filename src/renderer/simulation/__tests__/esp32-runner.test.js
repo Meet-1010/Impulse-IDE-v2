@@ -70,6 +70,19 @@ describe('ESP32 runner', () => {
     expect(runner.time).toBeCloseTo(0.1);
   });
 
+  it('counts a headless run from setup(), not from power-on', async () => {
+    const { runner, fake } = await booted();
+    let done = false;
+    runner.waitUntil(0.5).then(() => { done = true; });
+    fake.say('Besp32,120000', 'H1600000', 'S1650000', 'H2000000');
+    await new Promise(r => setTimeout(r, 50));
+    expect(done).toBe(false);
+    expect(runner.sketchTime).toBeCloseTo(0.35);
+    fake.say('H2200000');
+    await new Promise(r => setTimeout(r, 50));
+    expect(done).toBe(true);
+  });
+
   it('runs parts\' timers at the firmware\'s time, in order', async () => {
     const { runner, fake } = await booted();
     fake.say('Besp32', 'H100000');

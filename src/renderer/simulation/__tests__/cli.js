@@ -125,13 +125,20 @@ export const describeWithCli = CLI ? describe : describe.skip;
 // from a checkout's build/qemu-<arch> (scripts/qemu-mac-pack.mjs) or is
 // downloaded into IMPULSE_EMULATOR_DIR (default: a temporary folder).
 const ESP32_CONFIG = process.env.IMPULSE_ESP32_CLI_CONFIG ? ['--config-file', process.env.IMPULSE_ESP32_CLI_CONFIG] : [];
-export const ESP32 = process.env.IMPULSE_ESP32_TESTS === '1' && !!CLI && (() => {
-  try {
-    return execFileSync(CLI, [...ESP32_CONFIG, 'core', 'list'], { stdio: 'pipe' }).toString().includes('esp32:esp32');
-  } catch {
-    return false;
-  }
-})();
+let esp32Cores = '';
+const ESP32_CLI = process.env.IMPULSE_ESP32_TESTS !== '1' ? null
+  : ['/opt/homebrew/bin/arduino-cli', '/usr/local/bin/arduino-cli', 'arduino-cli'].find((candidate) => {
+    try {
+      esp32Cores = execFileSync(candidate, [...ESP32_CONFIG, 'core', 'list'], { stdio: 'pipe' }).toString();
+      return esp32Cores.includes('esp32:esp32');
+    } catch {
+      return false;
+    }
+  }) || null;
+export const ESP32 = !!ESP32_CLI;
+
+/** Whether the core an ESP32-family FQBN needs is installed (the Nano ESP32's is Arduino's). */
+export const hasEsp32Core = (fqbn) => esp32Cores.includes(String(fqbn).split(':').slice(0, 2).join(':'));
 
 let esp32 = null;
 
@@ -142,7 +149,7 @@ export async function compileEsp32(code, fqbn, name) {
   if (!esp32) {
     esp32 = new Esp32Simulator({
       runCli: (args, o = {}) => new Promise((resolve) => {
-        execFile(CLI, [...ESP32_CONFIG, ...args], { cwd: o.cwd, timeout: o.timeout, maxBuffer: 64 * 1024 * 1024 }, (err, stdout, stderr) => {
+        execFile(ESP32_CLI, [...ESP32_CONFIG, ...args], { cwd: o.cwd, timeout: o.timeout, maxBuffer: 64 * 1024 * 1024 }, (err, stdout, stderr) => {
           resolve({ success: !err, stdout: String(stdout), stderr: String(stderr) });
         });
       }),

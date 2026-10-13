@@ -102,7 +102,7 @@ export async function runHeadless(hex, options = {}) {
     engine?.stop();
     const board = runner.board;
     const finalStates = Array.from({ length: board.pinCount }, (_, pin) => runner.getPinState(pin));
-    return { serial, trace, finalStates, simSeconds: runner.time, truncated, board: board.id, shorts };
+    return { serial, trace, finalStates, simSeconds: runner.sketchTime, truncated, board: board.id, shorts };
   }
 
   const target = Math.round(seconds * F_CPU);

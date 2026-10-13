@@ -8,7 +8,8 @@
 // spare UART, and input levels, analog voltages and I2C replies come back.
 //
 // Messages are ASCII lines; times are microseconds since boot.
-//   to Impulse:  B<chip>                       bridge ready
+//   to Impulse:  B<chip>,<t>                   bridge ready
+//                S<t>                          setup() starts
 //                H<t>                          heartbeat (time passes)
 //                M<pin>,<mode>,<t>             pinMode
 //                W<pin>,<level>,<t>            digitalWrite
@@ -255,15 +256,20 @@ static void simStart() {
   cfg.flow_ctrl = UART_HW_FLOWCTRL_DISABLE;
   if (uart_driver_install(SIM_UART, 2048, 4096, 0, NULL, 0) != ESP_OK) return;
   uart_param_config(SIM_UART, &cfg);
+  // Every byte raises the receive interrupt: messages are short, and the
+  // emulator doesn't time out a part-filled FIFO promptly.
+  uart_set_rx_full_threshold(SIM_UART, 1);
+  uart_set_rx_timeout(SIM_UART, 1);
   simGo = xSemaphoreCreateBinary();
   simReplyLock = xSemaphoreCreateMutex();
   simReplyDone = xSemaphoreCreateBinary();
   simReady = true;
   xTaskCreatePinnedToCore(simTxTask, "impulse-tx", 3072, NULL, 5, &simTx, 0);
   xTaskCreatePinnedToCore(simRxTask, "impulse-rx", 4096, NULL, 6, NULL, 0);
-  simSendf("B%s\n", SIM_CHIP);
+  simSendf("B%s,%lu\n", SIM_CHIP, simNow());
   // setup() starts once Impulse has sent the circuit's input levels and I2C devices.
   xSemaphoreTake(simGo, pdMS_TO_TICKS(3000));
+  simSendf("S%lu\n", simNow());
 }
 
 // ── Arduino: start the bridge before setup() ──
