@@ -1,6 +1,7 @@
 // The empty-state background: a field of firmware hex (Intel HEX records,
 // what gets flashed to a board) lit by slowly drifting light, with a signal
-// pulse sweeping across now and then. It only runs before the first message.
+// pulse sweeping across now and then, and a ripple of glow that runs out from
+// wherever you click. It only runs before the first message.
 //
 // WebGL2, two passes so it stays cheap at full resolution: pass 1 works out
 // each character cell's brightness and glyph into a small texture (one texel
@@ -12,6 +13,9 @@ const GLYPHS = '0123456789ABCDEF:';
 const FONT_PX = 12.5;
 const LINE_PX = 15;
 const FRAME_MS = 1000 / 30;
+/** Ripples drawn at once, and how long one lives (seconds). */
+const MAX_RIPPLES = 6;
+const RIPPLE_LIFE_S = 5;
 
 const VERT = `#version 300 es
 in vec2 a_pos;
@@ -27,6 +31,8 @@ uniform vec2 u_mouse;
 uniform vec2 u_focus;
 uniform vec2 u_focusR;
 uniform float u_dpr;
+// Click ripples: x, y in GL pixels and the age in seconds (negative: unused).
+uniform vec3 u_ripple[6];
 out vec4 o;
 
 float h21(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
@@ -77,7 +83,7 @@ void main() {
   vec2 d1 = (uv - l1) * aspect;
   vec2 d2 = (uv - l2) * aspect;
   float light = max(exp(-dot(d1, d1) / 0.11), 0.85 * exp(-dot(d2, d2) / 0.08));
-  float b = light * smoothstep(0.40, 0.60, n);
+  float b = 0.6 * light * smoothstep(0.40, 0.60, n);
 
   // The impulse: every 16 s a narrow band sweeps across in about 3 s.
   float ph = mod(u_time, 16.0);
@@ -90,13 +96,42 @@ void main() {
 
   // A little light follows the pointer.
   if (u_mouse.x >= 0.0) {
-    vec2 dm = (c - u_mouse) / (150.0 * u_dpr);
-    b += 0.3 * exp(-dot(dm, dm));
+    vec2 dm = (c - u_mouse) / (170.0 * u_dpr);
+    b += 0.32 * exp(-dot(dm, dm));
   }
 
   // Calm behind the headline and cards so text stays readable.
   vec2 fd = (c - u_focus) / max(u_focusR, vec2(1.0));
-  b *= mix(0.2, 1.0, smoothstep(0.78, 1.3, length(fd)));
+  float calm = smoothstep(0.78, 1.3, length(fd));
+  b *= mix(0.2, 1.0, calm);
+
+  // Click ripples: a ring of lit characters runs out from the click, grainy
+  // character by character, with a glow that trails behind the front and
+  // keeps flowing for a few seconds before it fades.
+  float grain = 0.7 + 0.6 * h21(cell + 5.7);
+  float rb = 0.0;
+  for (int i = 0; i < 6; i++) {
+    float age = u_ripple[i].z;
+    if (age < 0.0) continue;
+    vec2 dr = (c - u_ripple[i].xy) / u_dpr;
+    float dist = length(dr);
+    // The front wobbles so it reads as flowing light, not a compass circle.
+    float wob = (fbm(vec3(dr / 240.0, age * 0.8 + float(i) * 7.3)) - 0.5) * 200.0;
+    // Fast at first, then slowing as it nears the edges, so the light lingers.
+    float R = 1100.0 * (1.0 - exp(-age / 0.9));
+    float W = 110.0 + 70.0 * age;
+    float d = dist + wob;
+    // The wave: a bright front, and a band of light behind it that widens as
+    // it ages and ends, so the field flows rather than fills.
+    float front = exp(-pow((d - R) / W, 2.0));
+    float L = 260.0 + 220.0 * age;
+    float tail = smoothstep(R + W, R - W, d) * exp(-pow(max(0.0, R - d) / L, 2.0));
+    float cloud = 0.55 + 0.7 * smoothstep(0.35, 0.65, fbm(vec3(dr / 380.0 + float(i), age * 0.5)));
+    float life = 1.0 - smoothstep(3.0, 5.0, age);
+    rb = max(rb, (front * 1.7 + tail * 1.0) * cloud * life);
+  }
+  // Ripples pass behind the text dimmed, not hidden.
+  b = max(b, rb * grain * mix(0.6, 1.0, calm));
 
   o = vec4(clamp(b, 0.0, 1.0), (glyph + 0.5) / 32.0, visible, 1.0);
 }`;
@@ -174,6 +209,9 @@ export class CharField {
     this.t0 = performance.now();
     this.pointer = null;
     this.focus = null;
+    /** Live click ripples: { x, y } in CSS pixels, t0 in performance.now() ms. */
+    this.ripples = [];
+    this.rippleData = new Float32Array(MAX_RIPPLES * 3);
     this.reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
     this.loop = this.loop.bind(this);
     this.onVisibility = () => (document.hidden ? this.pause() : this.resume());
@@ -235,8 +273,8 @@ export class CharField {
       base: rgb(css.getPropertyValue('--v-field-base'), [0.59, 0.64, 0.7]),
       lit: rgb(css.getPropertyValue('--v-field-lit'), [0.3, 0.5, 0.73]),
       peak: rgb(css.getPropertyValue('--v-field-peak'), [0.55, 0.73, 0.93]),
-      baseAlpha: light ? 0.08 : 0.06,
-      litAlpha: light ? 0.5 : 0.58,
+      baseAlpha: light ? 0.07 : 0.04,
+      litAlpha: light ? 0.6 : 0.78,
     };
     if (this.fallback) this.drawFallback();
   }
@@ -301,6 +339,14 @@ export class CharField {
     this.pointer = x === null ? null : [x, y];
   }
 
+  /** A click at (x, y) in CSS pixels relative to the canvas: light runs out from there. */
+  ripple(x, y) {
+    if (this.reduced || this.stopped) return;
+    this.ripples.push({ x, y, t0: performance.now() });
+    if (this.ripples.length > MAX_RIPPLES) this.ripples.splice(0, this.ripples.length - MAX_RIPPLES);
+    this.resume();
+  }
+
   frame(now, force = false) {
     const gl = this.gl;
     if (!gl) return;
@@ -327,6 +373,16 @@ export class CharField {
     const focus = this.focus || { x: w / dpr / 2, y: h / dpr / 2, rx: 0, ry: 0 };
     gl.uniform2f(f.u.u_focus, focus.x * dpr, h - focus.y * dpr);
     gl.uniform2f(f.u.u_focusR, focus.rx * dpr, focus.ry * dpr);
+    // Ripples: position in GL pixels (origin bottom-left) and age; finished ones go.
+    this.ripples = this.ripples.filter((r) => now - r.t0 < RIPPLE_LIFE_S * 1000);
+    const data = this.rippleData;
+    for (let i = 0; i < MAX_RIPPLES; i++) {
+      const r = this.ripples[i];
+      data[i * 3] = r ? r.x * dpr : 0;
+      data[i * 3 + 1] = r ? h - r.y * dpr : 0;
+      data[i * 3 + 2] = r ? (now - r.t0) / 1000 : -1;
+    }
+    gl.uniform3fv(f.u['u_ripple[0]'], data);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);

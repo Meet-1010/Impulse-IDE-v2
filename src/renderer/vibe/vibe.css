@@ -35,8 +35,8 @@
     --v-shadow: 0 12px 32px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.04);
     /* character field */
     --v-field-base: 150, 162, 178;
-    --v-field-lit: 76, 128, 186;
-    --v-field-peak: 140, 186, 238;
+    --v-field-lit: 64, 124, 204;
+    --v-field-peak: 150, 198, 246;
 }
 
 :root[data-theme="light"] {

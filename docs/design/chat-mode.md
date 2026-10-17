@@ -61,7 +61,7 @@ one primary reference with explicit rejects, below.
 | Mono silkscreen labels: 10.5px caps, +0.08em | Oxide mono, Factory labels | labels and readouts only, never prose | PCB silkscreen voice |
 | Chat prose Inter 14.5/1.6 | craft rule (readability) | — | Long answers must read easily |
 | Empty-state headline Inter 28px, -0.022em, weight 480 | Elektron display tracking | one per screen | Calm, engineered |
-| Character field of firmware hex, lit by drifting light | Owner's recording + Midjourney ASCII hero | only before the first message | The "you're in a lab" moment; hex is what gets flashed to a board |
+| Character field of firmware hex, lit by drifting light; a click sends a ripple of light out across it (a fast front that slows near the edges, a band that lingers and drifts behind it, grainy per character, gone in about five seconds) | Owner's recording (the Claude desktop empty state) + Midjourney ASCII hero | only before the first message; the ripple is the one "big" motion and only on click | The "you're in a lab" moment; hex is what gets flashed to a board; the click answers the owner's ask for a flowing glow |
 | Board chip top-left, Chat/IDE switch, Serial, Simulator top-right | Owner's sketch | — | Their layout |
 | Folder chip above the composer | Owner's sketch | — | Where the code goes |
 | Center: what's on the bench (board LED), recent builds, starters | Owner's question + Claude desktop card stack + Factory context line | interactive rows only | Answers "what goes here" with live hardware context |

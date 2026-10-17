@@ -241,6 +241,16 @@ function updateFieldFocus() {
   });
 }
 
+/** The field greets an empty chat with one ripple from behind the headline. */
+function greet() {
+  setTimeout(() => {
+    if (!charField || emptyState.hidden) return;
+    const canvas = field.getBoundingClientRect();
+    const head = emptyState.querySelector('.v-empty-head')?.getBoundingClientRect();
+    charField.ripple(canvas.width / 2, head ? head.top + head.height / 2 - canvas.top : canvas.height * 0.4);
+  }, 450);
+}
+
 function setEmpty(isEmpty) {
   emptyState.hidden = !isEmpty;
   thread.hidden = isEmpty;
@@ -249,6 +259,7 @@ function setEmpty(isEmpty) {
     field.removeAttribute('data-leaving');
     charField.restart();
     requestAnimationFrame(() => field.setAttribute('data-on', ''));
+    greet();
   } else if (field.hasAttribute('data-on')) {
     // The field only greets an empty chat: fade it out and stop it.
     field.setAttribute('data-leaving', '');
@@ -1126,6 +1137,12 @@ function wire() {
     charField.setPointer(e.clientX - r.left, e.clientY - r.top);
   });
   stage.addEventListener('pointerleave', () => charField?.setPointer(null));
+  // A click anywhere on the empty screen sends a ripple of light out from it.
+  stage.addEventListener('pointerdown', (e) => {
+    if (!charField || emptyState.hidden || e.button !== 0) return;
+    const r = field.getBoundingClientRect();
+    charField.ripple(e.clientX - r.left, e.clientY - r.top);
+  });
   new ResizeObserver(() => updateFieldFocus()).observe(stage);
 
   // Keyboard: ⌘K search, ⌘⇧I the IDE, ⌘N a new chat (in chat mode).
@@ -1241,5 +1258,6 @@ export async function startChatMode() {
       field.setAttribute('data-on', '');
       updateFieldFocus();
     });
+    greet();
   }
 }
