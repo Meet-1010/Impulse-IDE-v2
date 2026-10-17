@@ -13,6 +13,8 @@ const MODEL_RULES = {
   'claude-opus-5-5': { effort: true, sampling: false, fallbacks: true },
   'claude-sonnet-5-5': { effort: true, sampling: false, fallbacks: true },
   'claude-fable-5-1': { effort: true, sampling: false, fallbacks: true },
+  // No server-side refusal fallback exists for Haiku 5.5.
+  'claude-haiku-5-5': { effort: true, sampling: false, fallbacks: false },
   'claude-haiku-4-5': { effort: false, sampling: true, fallbacks: false },
 };
 
@@ -136,7 +138,10 @@ class ClaudeProvider extends BaseProvider {
     const request = {
       model: this.model,
       max_tokens: rules.effort ? Math.max(requested, MIN_THINKING_MAX_TOKENS) : Math.min(requested, 64000),
-      messages: claudeMessages
+      messages: claudeMessages,
+      // The agent resends the whole conversation on every tool step: cache it
+      // (reads cost a tenth or less of fresh input).
+      cache_control: { type: 'ephemeral' }
     };
     if (system) request.system = system;
     if (useTools) request.tools = this.formatTools(tools);
@@ -159,7 +164,7 @@ class ClaudeProvider extends BaseProvider {
         : this.client.messages.stream(request, requestOptions);
       response = await stream.finalMessage();
     } catch (error) {
-      throw new Error(ClaudeProvider.describeError(error));
+      throw new Error(ClaudeProvider.describeError(error), { cause: error });
     }
 
     let text = '';

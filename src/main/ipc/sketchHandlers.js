@@ -63,6 +63,25 @@ function register(ipcMain, ctx) {
     }
   }));
 
+  // Chat mode: a new chat's project, in the sketchbook's "Impulse Projects".
+  ipcMain.handle('sketch:create-project', withDebugLog('sketch:create-project', async (event, spec) => {
+    const parsed = parseOrDefault(schemas.projectCreate, spec ?? {}, defaultFail);
+    if (!parsed.ok) return { success: false, error: parsed.error };
+    try {
+      const base = path.join(await sketchbookDir(), 'Impulse Projects');
+      await fsp.mkdir(base, { recursive: true });
+      const folder = await freeFolder(base, parsed.data.name);
+      await fsp.mkdir(folder, { recursive: true });
+      const filePath = path.join(folder, `${path.basename(folder)}.ino`);
+      await fsp.writeFile(filePath, 'void setup() {\n}\n\nvoid loop() {\n}\n', 'utf8');
+      approveDirectory(folder);
+      if (workspace) workspace.addRecent(folder);
+      return { success: true, folderPath: folder, filePath, name: path.basename(folder) };
+    } catch (error) {
+      return { success: false, error: error?.message ?? 'Could not create the project' };
+    }
+  }));
+
   ipcMain.handle('dialog:open-diagram', withDebugLog('dialog:open-diagram', async () => {
     try {
       const result = await dialog.showOpenDialog(win(), {

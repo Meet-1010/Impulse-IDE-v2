@@ -65,6 +65,18 @@ module.exports = {
       globals: { WebSocket: 'readonly', fetch: 'readonly' }
     },
     {
+      // Impulse Cloud server, scripts and tests: Node ES modules
+      files: ['cloud/src/**/*.js', 'cloud/scripts/**/*.js', 'cloud/test/**/*.js'],
+      parserOptions: { sourceType: 'module', ecmaVersion: 2024 },
+      env: { node: true, browser: false }
+    },
+    {
+      // Impulse Cloud web pages (sign-in, admin)
+      files: ['cloud/public/**/*.js'],
+      parserOptions: { sourceType: 'module', ecmaVersion: 2024 },
+      env: { node: false, browser: true }
+    },
+    {
       // Test files
       files: ['**/*.test.js', '**/*.spec.js', '**/__tests__/**/*.js'],
       parserOptions: { sourceType: 'module' },

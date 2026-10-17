@@ -1,7 +1,8 @@
 module.exports = {
   testEnvironment: 'node',
   testMatch: ['**/__tests__/**/*.test.js', '**/*.test.js'],
-  testPathIgnorePatterns: ['/node_modules/', '/dist/', '/dist-renderer/'],
+  // Impulse Cloud has its own runner (node --test, against Postgres): cd cloud && npm test.
+  testPathIgnorePatterns: ['/node_modules/', '/dist/', '/dist-renderer/', '<rootDir>/cloud/'],
   moduleNameMapper: {
     '^@wokwi/elements$': '<rootDir>/test/stubs/empty.js',
     // Single files (the LCD font) from the CommonJS build Jest can load.

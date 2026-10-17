@@ -37,34 +37,51 @@ Impulse is an **AI-assisted IDE for Arduino development with a built-in circuit 
 ```
 src/
 ├── main/                           # Electron Main Process
-│   ├── main.js                     # Entry point, IPC handlers
+│   ├── main.js                     # Entry point, window, menu, services
 │   ├── preload.js                  # Secure bridge to renderer
+│   ├── ipc/                        # IPC handlers (arduino, serial, ai, cloud, chats, sketch, git, esp32sim…)
 │   └── services/
 │       ├── arduinoService.js       # Arduino CLI operations
 │       ├── serialMonitor.js        # Serial port communication
 │       ├── errorMemory.js          # Legacy error tracking
+│       ├── chatStore.js            # Saved chats (chat mode)
+│       ├── cloud/
+│       │   ├── account.js          # The signed-in Impulse account (token in safeStorage)
+│       │   ├── loopback.js         # Browser sign-in → app (RFC 8252 loopback + PKCE)
+│       │   └── config.js           # Where Impulse Cloud is (package.json impulse.cloudUrl / IMPULSE_CLOUD_URL)
+│       ├── esp32sim/               # ESP32 boards in Espressif's QEMU
 │       └── ai/
 │           ├── agent.js            # AI orchestrator
 │           ├── providers/          # LLM adapters
 │           │   ├── baseProvider.js
-│           │   ├── openaiProvider.js
-│           │   ├── geminiProvider.js
-│           │   └── claudeProvider.js
+│           │   ├── claudeProvider.js   # Anthropic Messages API (what the gateway speaks)
+│           │   ├── impulseProvider.js  # Claude through Impulse Cloud with the account's session
+│           │   └── ollamaProvider.js   # Free local models
 │           ├── tools/              # Tool system
-│           │   ├── toolSchema.js   # Tool definitions
+│           │   ├── toolSchema.js   # Tool definitions (agent, plan and debug sets)
 │           │   └── toolExecutor.js # Tool execution
+│           ├── knowledge/          # Board facts, chip-family and component guides
 │           ├── memory/
 │           │   └── simpleMemory.js # JSON-based memory
 │           ├── prompts/
-│           │   └── systemPrompt.js
+│           │   └── systemPrompt.js # Agent, plan and debug prompts
 │           └── config/
-│               └── apiKeyManager.js
+│               └── modelPreferences.js
 │
 └── renderer/                       # Electron Renderer (UI)
-    ├── index.html                  # Main HTML
-    ├── styles.css                  # CSS styles
-    ├── morph-orb/                  # AI chat: the pill composer, thinking orb and answer card
-    └── renderer.js                 # UI logic
+    ├── index.html                  # The IDE's HTML
+    ├── styles.css, design-system.css
+    ├── vibe/                       # Chat mode, the default view (index.js, char-field.js, bench.js, account.js, chats.js…)
+    ├── morph-orb/                  # The IDE's AI chat: the pill composer, thinking orb and answer card
+    ├── simulation/                 # The simulator (see below)
+    └── renderer.js                 # IDE logic, and the window.impulse bridge chat mode drives it through
+
+cloud/                              # Impulse Cloud (Hono + Postgres, deployed on Vercel)
+├── src/                            # auth, credits, pricing, gateway, account API, admin API, desktop hand-off, settings
+├── public/                         # /sign-in/, /admin/, /desktop/done/
+├── migrations/                     # App tables (Better Auth creates its own)
+├── scripts/                        # serve, migrate, seed-demo, fake-anthropic
+└── test/                           # node --test against a scratch Postgres
 ```
 
 ## Core Components
@@ -102,7 +119,7 @@ send(data)               // Send data
 Orchestrates AI interactions:
 
 ```javascript
-setProvider(name, apiKey, model)  // Configure LLM
+setProvider(name, credential, model) // 'impulse' (the account's session token) or 'ollama' (local, keyless)
 processQuery(query, context)       // Process user input
 analyzeError(error, context)       // Analyze errors
 ```
@@ -145,12 +162,21 @@ JSON-based persistence (no SQLite dependency):
 
 Stored at: `<userData>/memory.json` (`Impulse IDE`, or `arduino-ide-cursor` for data from pre-2.0 development builds)
 
-### 6. API Key Manager (`ai/config/apiKeyManager.js`)
+### 6. Impulse account (`cloud/account.js`) and saved chats (`chatStore.js`)
 
-Secure API key storage using `electron-store`:
-- Encrypted storage
-- Per-provider keys
-- Format validation
+`services/cloud/account.js` holds the signed-in Impulse account: sign-in with
+email + password (verified by an emailed 6-digit code) or with Google/GitHub
+through the browser (RFC 8252 loopback + PKCE, `services/cloud/loopback.js`),
+the session token (encrypted with Electron `safeStorage`; the renderer only
+ever sees `status()`), and the account's plan and credits from Impulse Cloud
+(see below). Nobody brings an API key: `ImpulseProvider` sends the agent's
+requests to the cloud's AI gateway with that token, and the gateway adds
+Impulse's own Anthropic key and charges the account's credits. Ollama stays
+as the free, keyless, local alternative.
+
+`services/chatStore.js` keeps chat mode's conversations in `<userData>/chats`:
+an index (title, project folder, times) plus one file per chat with the
+messages shown and the agent's history, so reopening a chat continues it.
 
 ## Simulator (`src/renderer/simulation/`)
 
@@ -188,6 +214,31 @@ PlatformIO projects (`src/main/services/platformio.js`): `ArduinoService` hands 
 `src/cli/impulse-test.js` (`bin/impulse-test.mjs`) runs the same headless simulator from the command line for CI; see docs/TESTING.md.
 
 Circuits are saved as `diagram.json` beside the sketch. Opening an example writes the sketch and its diagram to `<sketchbook>/Impulse Examples/<name>/`.
+
+## Impulse Cloud (`cloud/`)
+
+A Hono app (deployed on Vercel with zero configuration from `src/index.js`;
+`npm run dev` locally) on Postgres:
+
+- Accounts with Better Auth (`src/auth.js`): Google, GitHub, email + password
+  with a 6-digit emailed code; sessions double as bearer tokens for the app;
+  roles and suspensions for the admin console.
+- Credits (`src/credits.js`): an append-only ledger in millicredits with a
+  plan bucket (the monthly allowance, refilled each period) and a bonus bucket
+  (welcome, granted and bought credits that never expire); `src/pricing.js`
+  turns Anthropic's reported usage into credits (list price × markup).
+- The AI gateway (`src/gateway.js`): an Anthropic-compatible
+  `POST /ai/v1/messages`. Each request is checked (signed in, verified, not
+  suspended, model on the plan, credits left, per-minute rate, daily budget),
+  sanitised (known fields only, server-side tools refused, `max_tokens`
+  capped), forwarded with Impulse's key, streamed back unchanged and charged
+  from the usage in the stream; a stopped stream is charged for what it used.
+- The account API (`/v1/*`), the admin API and console (`/admin/`, with an
+  audit log), the desktop sign-in hand-off (`src/desktop.js`, PKCE) and the
+  web pages (`public/`). Business settings (plans, prices, limits, maintenance,
+  announcement) live in the database and change from the console.
+
+See `cloud/README.md` for running and deploying it.
 
 ## Data Flow
 
@@ -266,12 +317,32 @@ card unfolds into the real message's box and hands over to it at 700 ms.
 - `ai:verify-execution` - Judge a simulated run (board, wiring, serial, pins) and propose a fix
 
 ### AI
-- `ai:set-provider` - Configure AI
-- `ai:process-query` - Send query
+- `ai:process-query` - Send query (modes: agent, plan, debug)
+- `ai:set-model` - Choose a model (`impulse:…` needs a signed-in account, `ollama:…` runs locally)
 - `ai:analyze-error` - Analyze error
-- `api-keys:set/get/has` - Key management
+- `ai:get-history` / `ai:set-history` - The agent's conversation, saved with each chat
+
+### Account and chats
+- `cloud:status` / `cloud:refresh`, `cloud:status` (event) - The signed-in account, its plan and credits
+- `cloud:sign-in-email` / `cloud:sign-up-email` / `cloud:verify-email` / `cloud:resend-code` / `cloud:request-password-reset` / `cloud:reset-password` - Email accounts
+- `cloud:sign-in-provider` / `cloud:cancel-sign-in` - Google or GitHub through the browser
+- `cloud:sign-out` / `cloud:usage` / `cloud:plans` / `cloud:models` / `cloud:request-upgrade` / `cloud:open-admin`
+- `chats:list` / `chats:get` / `chats:save` / `chats:rename` / `chats:delete` - Saved chats
+- `sketch:create-project` - A new chat's project folder in the sketchbook's "Impulse Projects"
 
 ## UI Components
+
+### Chat mode (`src/renderer/vibe/`)
+
+The default view (the Chat | IDE switch, ⌘E): one conversation with the
+agent (Agent, Plan and Debug), the board chip, a side panel with the simulator,
+the serial monitor and the code (the same live circuit and the same editor
+document as the IDE), saved chats with the project folders they build, and
+the account (sign-in, credits, plans). `vibe/index.js` drives the IDE through
+`window.impulse` (defined at the end of `renderer.js`), so both views always
+show the same state; the IDE's chat panel shows the same conversation.
+`char-field.js` draws the empty state's field of firmware hex (WebGL2, 30 fps)
+and runs only before the first message. Design decisions: `docs/design/chat-mode.md`.
 
 ### Sidebar
 - File selection
@@ -334,7 +405,7 @@ card unfolds into the real message's box and hands over to it at 700 ms.
 - Context isolation enabled
 - No direct Node.js in renderer
 - Preload bridge for IPC
-- Encrypted API key storage
+- The Impulse session token is encrypted with the OS credential store; the AI key exists only on Impulse Cloud
 - No shell injection (validated inputs)
 
 ## Getting Started

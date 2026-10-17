@@ -103,9 +103,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     saveDiagram: (content, suggestedName) => ipcRenderer.invoke('dialog:save-diagram', content, suggestedName)
   },
 
-  // Simulator projects
+  // Simulator examples and chat-mode projects
   sketch: {
-    createExample: (spec) => ipcRenderer.invoke('sketch:create-example', spec)
+    createExample: (spec) => ipcRenderer.invoke('sketch:create-example', spec),
+    createProject: (spec) => ipcRenderer.invoke('sketch:create-project', spec)
   },
 
   // Shell (e.g. show in folder)
@@ -139,15 +140,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   
   // AI Agent methods
   ai: {
-    setProvider: (providerName, apiKey, model) => ipcRenderer.invoke('ai:set-provider', providerName, apiKey, model),
     processQuery: (query, context, mode) => ipcRenderer.invoke('ai:process-query', query, context, mode),
     cancel: () => ipcRenderer.invoke('ai:cancel'),
     generateCircuit: (sketchCode, options) => ipcRenderer.invoke('ai:generate-circuit', sketchCode, options),
     verifyExecution: (obs) => ipcRenderer.invoke('ai:verify-execution', obs),
     setModel: (modelId, manual) => ipcRenderer.invoke('ai:set-model', modelId, manual),
     getModelSuggestion: () => ipcRenderer.invoke('ai:get-model-suggestion'),
-    pinModel: (modelId) => ipcRenderer.invoke('ai:pin-model', modelId),
-    setAutoUpgrade: (enabled) => ipcRenderer.invoke('ai:set-auto-upgrade', enabled),
     analyzeError: (errorMessage, context) => ipcRenderer.invoke('ai:analyze-error', errorMessage, context),
     analyzeSerial: (serialOutput, lines) => ipcRenderer.invoke('ai:analyze-serial', serialOutput, lines),
     getProviders: () => ipcRenderer.invoke('ai:get-providers'),
@@ -162,6 +160,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
     summarizeHistory: () => ipcRenderer.invoke('ai:summarize-history'),
     clearHistory: () => ipcRenderer.invoke('ai:clear-history'),
+    getHistory: () => ipcRenderer.invoke('ai:get-history'),
+    setHistory: (history) => ipcRenderer.invoke('ai:set-history', history),
     getMemoryStats: () => ipcRenderer.invoke('ai:get-memory-stats'),
     executeTool: (toolName, args) => ipcRenderer.invoke('ai:execute-tool', toolName, args),
     onStep: (callback) => {
@@ -171,13 +171,38 @@ contextBridge.exposeInMainWorld('electronAPI', {
     }
   },
   
-  // API Key Management methods
-  apiKeys: {
-    set: (provider, apiKey) => ipcRenderer.invoke('api-keys:set', provider, apiKey),
-    get: (provider) => ipcRenderer.invoke('api-keys:get', provider),
-    has: (provider) => ipcRenderer.invoke('api-keys:has', provider),
-    remove: (provider) => ipcRenderer.invoke('api-keys:remove', provider),
-    list: () => ipcRenderer.invoke('api-keys:list')
+  // The Impulse account: sign-in, credits, plans. The session token stays in the main process.
+  cloud: {
+    status: () => ipcRenderer.invoke('cloud:status'),
+    refresh: () => ipcRenderer.invoke('cloud:refresh'),
+    signInEmail: (email, password) => ipcRenderer.invoke('cloud:sign-in-email', { email, password }),
+    signUpEmail: (name, email, password) => ipcRenderer.invoke('cloud:sign-up-email', { name, email, password }),
+    verifyEmail: (email, otp) => ipcRenderer.invoke('cloud:verify-email', { email, otp }),
+    resendCode: (email) => ipcRenderer.invoke('cloud:resend-code', { email }),
+    requestPasswordReset: (email) => ipcRenderer.invoke('cloud:request-password-reset', { email }),
+    resetPassword: (email, otp, password) => ipcRenderer.invoke('cloud:reset-password', { email, otp, password }),
+    signInWithProvider: (provider) => ipcRenderer.invoke('cloud:sign-in-provider', { provider }),
+    cancelSignIn: () => ipcRenderer.invoke('cloud:cancel-sign-in'),
+    signOut: () => ipcRenderer.invoke('cloud:sign-out'),
+    usage: (days) => ipcRenderer.invoke('cloud:usage', { days }),
+    plans: () => ipcRenderer.invoke('cloud:plans'),
+    models: () => ipcRenderer.invoke('cloud:models'),
+    requestUpgrade: (plan, note) => ipcRenderer.invoke('cloud:request-upgrade', { plan, note }),
+    openAdmin: () => ipcRenderer.invoke('cloud:open-admin'),
+    onStatus: (callback) => {
+      const handler = (event, status) => callback(status);
+      ipcRenderer.on('cloud:status', handler);
+      return () => ipcRenderer.removeListener('cloud:status', handler);
+    }
+  },
+
+  // Saved chats (chat mode)
+  chats: {
+    list: () => ipcRenderer.invoke('chats:list'),
+    get: (id) => ipcRenderer.invoke('chats:get', id),
+    save: (chat) => ipcRenderer.invoke('chats:save', chat),
+    rename: (id, title) => ipcRenderer.invoke('chats:rename', id, title),
+    remove: (id) => ipcRenderer.invoke('chats:delete', id)
   },
   
   // Auto-updater
@@ -261,6 +286,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     updateState: (key, value) => ipcRenderer.send('ui:update-state', key, value),
     updateEditorCode: (code) => ipcRenderer.send('ui:update-editor-code', code),
     updateSketchPath: (path) => ipcRenderer.send('ui:update-sketch-path', path),
+    setShellMode: (mode) => ipcRenderer.send('ui:shell-mode', mode),
     updateBaudRate: (baudRate) => ipcRenderer.send('ui:update-baud-rate', baudRate),
     updateBoard: (board) => ipcRenderer.send('ui:update-board', board),
     updatePort: (port) => ipcRenderer.send('ui:update-port', port),

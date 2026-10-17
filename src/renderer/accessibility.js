@@ -126,8 +126,6 @@ class AccessibilityManager {
     // Modals
     const modals = [
       { id: 'boardPortModal', label: 'Select Board and Port' },
-      { id: 'apiKeyModal', label: 'API Key' },
-      { id: 'userKeysModal', label: 'API Keys Management' },
       { id: 'examplesDropdown', label: 'Examples' }
     ];
     modals.forEach(({ id, label }) => {

@@ -439,6 +439,12 @@ const TOOL_SCHEMA = {
 
 const DEBUG_TOOL_NAMES = ['analyze_error', 'search_memory', 'record_fix'];
 
+/** Plan mode reads the project and the hardware but changes nothing. */
+const PLAN_TOOL_NAMES = [
+  'get_editor_code', 'get_current_sketch_path', 'search_code', 'get_current_state', 'list_boards', 'list_ports',
+  'get_board_info', 'get_mcu_guide', 'get_component_guide', 'search_boards', 'search_memory',
+];
+
 /**
  * Get all available tools as an array
  */
@@ -451,6 +457,13 @@ function getAllTools() {
  */
 function getDebugTools() {
   return Object.values(TOOL_SCHEMA).filter(t => DEBUG_TOOL_NAMES.includes(t.name));
+}
+
+/**
+ * Get tools for plan mode (read-only)
+ */
+function getPlanTools() {
+  return Object.values(TOOL_SCHEMA).filter(t => PLAN_TOOL_NAMES.includes(t.name));
 }
 
 /**
@@ -518,6 +531,7 @@ module.exports = {
   TOOL_SCHEMA,
   getAllTools,
   getDebugTools,
+  getPlanTools,
   getTool,
   validateToolCall
 };

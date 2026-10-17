@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Impulse now opens in **chat mode**: one conversation to plan, build and debug, with the IDE one click away (the Chat | IDE switch, ⌘E). Say what the board should do; the agent writes the sketch into a project of its own (the sketchbook's "Impulse Projects" folder), wires and runs it in the simulator, and shows the result as a card under the answer with "Watch it run" or "Fix it". Three modes: Agent builds, Plan lays out parts, wiring and steps without changing anything, Debug finds out why something fails. A side panel shows the simulator, the serial monitor and the code (the same live circuit and the same editor document as the IDE); the board chip, Verify and Upload are in the top bar and the "+" menu; chats are saved with the projects they build (rename, delete with Undo, ⌘K search, "pick up where you left off"); and the IDE's chat panel shows the same conversation. Before the first message the screen is a field of firmware hex lit by slowly drifting light; it goes once the conversation starts.
+- **Impulse accounts and credits** take the place of API keys. Sign in with Google, GitHub or email + password (verified with a 6-digit code) and the AI runs on Impulse's own key: new accounts get 200 free credits, the Free plan adds 100 every month, and Pro and Max add more (until online payment arrives, upgrades are requests the Impulse team approves). The remaining credits are a ring under the chat box, each answer shows its model, time and cost, and running out points to the plans or to a free local model. Email accounts sign in inside the app; Google and GitHub sign in in the browser, which hands the session back to the app on this computer only. Free local models through Ollama keep working without an account.
+- **Impulse Cloud** (`cloud/`), the server behind the accounts: Better Auth, the credit ledger, an Anthropic-compatible AI gateway that checks the account, plan, credits, request rate and the day's budget before paying for a request and charges what the answer actually cost, and an admin console (`/admin/`) with sign-ups, usage and cost, each user's ledger, credit grants, plan changes, upgrade requests, suspensions, an audit log, and prices, limits, models, maintenance mode and an in-app announcement that change without a deploy. It runs on Vercel and Postgres; `cloud/README.md` has the runbook, and CI runs its tests against a real Postgres.
+- AI answers are rendered as Markdown (headings, lists, tables, quotes, links, code blocks with Copy) in chat mode and in the IDE's chat.
+- ESP32 simulator: SPI is bridged, so `SPI.transfer()` reaches the circuit's parts; QEMU images are built for dual I/O flash, so boards whose core names quad or octal flash start instead of asserting. `impulse-test` shows the last serial lines when a sketch crashes or hangs, not only when a check fails.
 - Every board in the board menu now runs in the simulator (242 boards from the installed cores, 253 with their CPU options; each one is compiled and run in a check).
 - ATmega32U4 boards run in the simulator: the Leonardo (new drawing), Micro, Leonardo ETH, Esplora, Yún, Yún Mini, Linino One, Chiwawa, Robot Control, Robot Motor, LilyPad USB and Circuit Playground Classic. Their Serial is the chip's own USB port, so the simulator emulates the 32U4's USB controller and a computer that enumerates it and opens the port (`while (!Serial)` works, and typed text arrives); Serial1 is the UART on pins 0/1. analogWrite works on all seven PWM pins, including 6 and 13 on Timer4.
 - Also new: the Arduino NG with an ATmega8 (its own register map), the Gemma (an ATtiny85 on Arduino's core) and the Uno WiFi (its ATmega328P). Boards that run at 8 MHz (LilyPad USB, Circuit Playground Classic, Gemma) are compiled for the simulator's 16 MHz, so their timing is right.
@@ -28,7 +33,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The model menu lists Impulse Cloud's models (Opus 5.5, Sonnet 5.5 and Haiku 5.5; Fable 5.1 on Pro and Max) with their cost relative to the default, then the free local models. The chat's "Ask" mode became "Plan", which reads the project and the board's facts and answers with parts, wiring, steps and the checks the simulator will run.
+- The welcome tour is the IDE's: in chat mode it waits until the IDE is first opened.
 - Free local models: the model menu offers the ones worth downloading for Impulse that fit the computer's memory, best first, each with what it's good at: Qwen3-Coder 30B and Devstral Small 2 (32 GB and up), Qwen3 14B (24 GB), Qwen3 8B and the code-tuned Rnj-1 8B (16 GB), Qwen3 4B (smaller computers). All of them call tools, which the agent needs.
+
+### Removed
+
+- Your own API keys for Claude, OpenAI and Gemini: the AI runs through your Impulse account, or locally through Ollama. The key dialogs, the key store, model pinning and auto-upgrade are gone; keys saved by earlier versions are no longer read.
 
 ## [2.0.0-beta.2] - 2026-10-12
 

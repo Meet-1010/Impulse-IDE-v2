@@ -1,5 +1,6 @@
-// Smoke test: launch the built app, open every panel, and fail on any
-// uncaught exception or console error. Requires `npm run build:renderer`.
+// Smoke test: launch the built app, open chat mode's menus and side panel,
+// then every IDE panel and the simulator, and fail on any uncaught exception
+// or console error. Requires `npm run build:renderer`.
 // Linux CI: run under xvfb (`xvfb-run -a node scripts/smoke.mjs`).
 
 import { spawn } from 'node:child_process';
@@ -80,6 +81,42 @@ try {
   await sleep(1500);
   if (!ready) problems.push('UI did not finish initialising (status bar / AI panel missing)');
 
+  // Chat mode is the default view: its empty state, every menu, the account
+  // (this build has no cloud address, so it explains local mode), the side
+  // panel's three tabs, then the switch to the IDE for the rest.
+  const esc = `document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); !document.querySelector('.v-pop, .v-overlay')`;
+  const chatSteps = [
+    [`document.documentElement.dataset.shell`, 'vibe'],
+    [`!document.querySelector('.v-empty').hidden && document.querySelectorAll('.v-launch-row').length >= 3 && !!document.querySelector('.v-field')`, true],
+    [`document.querySelector('.v-chip[title=Model]').click(); !!document.querySelector('.v-pop [role=menu] .v-item')`, true],
+    [esc, true],
+    [`document.querySelector('.v-chip[title=Mode]').click(); document.querySelectorAll('.v-pop [role=menuitemradio]').length`, 3],
+    [esc, true],
+    [`document.querySelector('.v-icon-btn[aria-label="More tools"]').click(); !!document.querySelector('.v-pop [role=menu]')`, true],
+    [esc, true],
+    [`document.querySelector('.v-board-chip').click(); !!document.querySelector('.v-pop [role=menu]')`, true],
+    [esc, true],
+    [`document.querySelector('.v-folder-chip').click(); !!document.querySelector('.v-pop [role=menu]')`, true],
+    [esc, true],
+    [`document.querySelector('.v-icon-btn[aria-label=Settings]').click(); !!document.querySelector('.v-pop [role=menu]')`, true],
+    [esc, true],
+    [`document.querySelectorAll('.v-side-action')[1].click(); !!document.querySelector('.v-pop input')`, true],
+    [esc, true],
+    [`document.querySelector('.v-me').click(); !!document.querySelector('.v-pop .v-item')`, true],
+    [`document.querySelector('.v-pop .v-item').click(); !!document.querySelector('.v-dialog')`, true],
+    [esc, true],
+    [`document.querySelector('.v-icon-btn[aria-label=Simulator]').click(); !document.querySelector('.v-bench').hidden && !!document.querySelector('#vPane-sim #simPanel')`, true],
+    [`document.getElementById('vTab-serial').click(); !document.getElementById('vPane-serial').hidden`, true],
+    [`document.getElementById('vTab-code').click(); !document.getElementById('vPane-code').hidden`, true],
+    [`document.querySelector('.v-bench-head .v-icon-btn[aria-label="Close the panel"]').click(); document.querySelector('.v-bench').hidden && !!document.querySelector('#simView #simPanel')`, true],
+    [`window.impulse.shell.setMode('ide'); document.documentElement.dataset.shell`, 'ide'],
+  ];
+  for (const [step, expected] of chatSteps) {
+    const got = await evaluate(step);
+    if (got !== expected) problems.push(`chat mode step returned ${JSON.stringify(got)} (expected ${JSON.stringify(expected)}): ${step.slice(0, 120)}`);
+    await sleep(300);
+  }
+
   const steps = [
     ...['explorer', 'boards', 'libraries', 'debug', 'search', 'serial', 'simulate', 'explorer']
       .map(p => `document.querySelector('.activity-icon[data-panel="${p}"]')?.click()`),
@@ -123,6 +160,9 @@ try {
     if (got !== expected) problems.push(`simulator step returned ${JSON.stringify(got)} (expected ${JSON.stringify(expected)}): ${step.slice(0, 120)}`);
     await sleep(350);
   }
+  // And back to chat mode, with the simulator returned to the IDE.
+  const back = await evaluate(`window.impulse.shell.setMode('vibe'); document.documentElement.dataset.shell === 'vibe' && !document.querySelector('.v-empty').hidden && !!document.querySelector('#simView #simPanel')`);
+  if (back !== true) problems.push('switching back to chat mode did not show the empty state with the simulator back in the IDE');
   ws.close();
   if (/Uncaught|TypeError|ReferenceError/.test(mainOutput)) problems.push(`main process: ${mainOutput.split('\n').find(l => /Uncaught|TypeError|ReferenceError/.test(l))}`);
   exitCode = problems.length ? 1 : 0;

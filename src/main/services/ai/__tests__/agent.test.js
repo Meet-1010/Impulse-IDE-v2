@@ -52,16 +52,17 @@ describe('AIAgent', () => {
   });
 
   describe('getProviderFromModel (static)', () => {
-    it('should detect Claude models', () => {
-      expect(AIAgent.getProviderFromModel('claude-3-5-sonnet-20241022')).toBe('claude');
+    it('should detect Impulse Cloud models', () => {
+      expect(AIAgent.getProviderFromModel('impulse:claude-opus-5-5')).toBe('impulse');
     });
 
-    it('should detect OpenAI models', () => {
-      expect(AIAgent.getProviderFromModel('gpt-4o')).toBe('openai');
+    it('should detect local (Ollama) models', () => {
+      expect(AIAgent.getProviderFromModel('ollama:qwen2.5-coder:7b')).toBe('ollama');
     });
 
-    it('should detect Gemini models', () => {
-      expect(AIAgent.getProviderFromModel('gemini-3.8-flash')).toBe('gemini');
+    it('should not take bare provider model ids (no API keys of your own)', () => {
+      expect(AIAgent.getProviderFromModel('claude-opus-5-5')).toBeNull();
+      expect(AIAgent.getProviderFromModel('gpt-4o')).toBeNull();
     });
 
     it('should return null for unknown models', () => {

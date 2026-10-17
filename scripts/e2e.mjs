@@ -1,5 +1,6 @@
-// End-to-end test of the main flows in the built app, plus an accessibility
-// audit (axe-core) of the main screens in both themes. Runs with a throwaway
+// End-to-end test of the main flows in the built app (chat mode first, then
+// the IDE), plus an accessibility audit (axe-core) of the main screens in both
+// themes. Runs with a throwaway
 // profile and sketchbook. Requires `npm run build:renderer`; the compile and
 // run steps need arduino-cli with the AVR core (they are skipped without it).
 // Linux CI: run under xvfb (`xvfb-run -a node scripts/e2e.mjs`).
@@ -140,6 +141,58 @@ try {
   // A machine without the Arduino tools sees the setup dialog first.
   if (await evaluate(`!!document.querySelector('.setup-dialog')`)) await evaluate(`document.querySelector('.setup-dialog [data-act=later]').click()`);
   await sleep(1500);
+
+  // Chat mode is the default view. Audit it and what it opens, then move to
+  // the IDE for the rest (the welcome tour is the IDE's).
+  await waitFor(`document.documentElement.dataset.shell === 'vibe' && !!document.querySelector('.v-empty .v-launch-row')`, 10000, 'chat mode');
+  await step('chat mode is accessible (dark)', () => audit('chat mode'));
+
+  await step('chat mode menus open, close and are accessible', async () => {
+    const esc = () => evaluate(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); !document.querySelector('.v-pop, .v-overlay')`);
+    for (const [sel, what] of [['.v-chip[title=Model]', 'model'], ['.v-chip[title=Mode]', 'mode'], ['.v-icon-btn[aria-label="More tools"]', 'tools'], ['.v-board-chip', 'board'], ['.v-folder-chip', 'folder'], ['.v-icon-btn[aria-label=Settings]', 'settings']]) {
+      await evaluate(`document.querySelector(${JSON.stringify(sel)}).click()`);
+      await waitFor(`!!document.querySelector('.v-pop [role=menu] .v-item')`, 2000, `the ${what} menu`);
+      await audit(`the ${what} menu`);
+      if (!await esc()) throw new Error(`Escape didn't close the ${what} menu`);
+    }
+  });
+
+  await step('the sign-in dialog of a build without a cloud address is accessible', async () => {
+    await evaluate(`document.querySelector('.v-me').click()`);
+    await waitFor(`!!document.querySelector('.v-pop .v-item')`, 2000, 'the account menu');
+    await evaluate(`document.querySelector('.v-pop .v-item').click()`);
+    await waitFor(`!!document.querySelector('.v-dialog')`, 2000, 'the sign-in dialog');
+    if (!/isn't connected/.test(await evaluate(`document.querySelector('.v-dialog').textContent`))) throw new Error('the dialog should say Impulse Cloud is not connected in this build');
+    await audit('the sign-in dialog');
+    await evaluate(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+    await waitFor(`!document.querySelector('.v-overlay')`, 2000, 'the dialog to close');
+  });
+
+  await step('the side panel shows the simulator, the serial monitor and the code', async () => {
+    await evaluate(`document.querySelector('.v-icon-btn[aria-label=Simulator]').click()`);
+    await waitFor(`!document.querySelector('.v-bench').hidden && !!document.querySelector('#vPane-sim #simPanel') && window.simManager.visible`, 3000, 'the simulator in the side panel');
+    await audit('the side panel with the simulator');
+    await evaluate(`document.getElementById('vTab-serial').click()`);
+    await waitFor(`!document.getElementById('vPane-serial').hidden`, 2000, 'the serial pane');
+    await audit('the side panel with the serial monitor');
+    await evaluate(`document.getElementById('vTab-code').click()`);
+    await waitFor(`!document.getElementById('vPane-code').hidden`, 2000, 'the code pane');
+    await evaluate(`document.querySelector('.v-bench-head .v-icon-btn[aria-label="Close the panel"]').click()`);
+    await waitFor(`document.querySelector('.v-bench').hidden && !!document.querySelector('#simView #simPanel')`, 2000, 'the simulator back in the IDE');
+  });
+
+  await step('chat mode in the light theme is accessible', async () => {
+    await evaluate(`window.impulse.theme.toggle()`);
+    await waitFor(`document.documentElement.dataset.theme === 'light'`, 2000, 'the light theme');
+    await sleep(300);
+    await audit('chat mode (light)');
+    await evaluate(`window.impulse.theme.toggle()`);
+    await waitFor(`document.documentElement.dataset.theme === 'dark'`, 2000, 'the dark theme');
+  });
+
+  await evaluate(`window.impulse.shell.setMode('ide')`);
+  await waitFor(`document.documentElement.dataset.shell === 'ide'`, 2000, 'the IDE');
+  await sleep(500);
 
   await step('main window is accessible (dark)', () => audit('the main window'));
 
@@ -381,7 +434,7 @@ try {
     if (!/^Pin 13 blinks every 500 ms\./.test(await evaluate(`window.electronAPI.clipboard.readText()`))) throw new Error('Copy didn\'t put the answer on the clipboard');
     await evaluate(`[...document.querySelectorAll('#aiMessages .code-copy-btn')].pop().click()`);
     await sleep(150);
-    if (await evaluate(`window.electronAPI.clipboard.readText()`) !== 'void loop() {}\n') throw new Error('Copy on the code block didn\'t copy the code');
+    if ((await evaluate(`window.electronAPI.clipboard.readText()`)).trim() !== 'void loop() {}') throw new Error('Copy on the code block didn\'t copy the code');
 
     // Stop: a turn that would never finish ends at once, and its late result is dropped.
     await evaluate(`window.__orbRelease = null; window.impulse.askWith('Count to a million', (step) => new Promise((resolve) => {

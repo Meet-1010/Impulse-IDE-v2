@@ -15,6 +15,9 @@
         .ai-panel-overlay:not(.open) { width: 0 !important; overflow: hidden; }
         .ai-resize-handle { width: 4px; }
         .updater-banner.hidden { display: none !important; }
+        /* The view (chat mode or the IDE) is set by shell-boot.js before anything shows. */
+        :root:not([data-shell]) .app-container { visibility: hidden; }
+        :root[data-shell="vibe"] .app-container { display: none; }
     </style>
 </head>
 
@@ -60,6 +63,11 @@
                 </div>
             </div>
             <div class="top-row-right">
+                <div class="shell-switch" role="group" aria-label="View">
+                    <button type="button" id="shellChatBtn" aria-pressed="false" title="Chat mode (⌘E)">Chat</button>
+                    <button type="button" id="shellIdeBtn" aria-pressed="true" title="The IDE (⌘E)">IDE</button>
+                </div>
+                <span class="toolbar-divider" aria-hidden="true"></span>
                 <button id="serialMonitorBtn" class="action-btn serial-monitor" title="Serial Monitor (Ctrl+Shift+M)">
                     <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
                         <rect x="3" y="3" width="18" height="18" rx="2" />
@@ -687,60 +695,16 @@
                             </svg>
                             <select id="aiModeSelect" class="ai-mode-select" title="Mode" aria-label="AI mode">
                                 <option value="agent">Agent</option>
-                                <option value="ask">Ask</option>
+                                <option value="plan">Plan</option>
                                 <option value="debug">Debug</option>
                             </select>
                         </span>
                         <select id="aiModelSelect" class="ai-model-select" title="Model" aria-label="AI model">
                             <option value="">Model…</option>
                         </select>
-                        <button id="aiPinModelBtn" type="button" class="ai-ico"
-                            title="Pin this model (stops auto-upgrade for it)" aria-pressed="false">
-                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
-                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <path d="M12 17v5" />
-                                <path d="M9 10.76V4a1 1 0 011-1h4a1 1 0 011 1v6.76a2 2 0 00.55 1.38l1.9 2.02A1 1 0 0116.62 16H7.38a1 1 0 01-.73-1.68l1.9-2.02A2 2 0 009 10.76z" />
-                            </svg>
-                        </button>
-                        <div class="ai-composer-actions">
-                            <button id="aiSettingsBtn" class="ai-ico" title="API key"><svg viewBox="0 0 24 24"
-                                    width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-                                    <path d="M12 15a3 3 0 100-6 3 3 0 000 6z" />
-                                    <path
-                                        d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-1.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h1.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v1.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-1.09a1.65 1.65 0 00-1.51 1z" />
-                                </svg></button>
-                            <button type="button" class="ai-ico" title="Image" disabled aria-hidden="true"><svg
-                                    viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
-                                    stroke-width="2">
-                                    <rect x="3" y="3" width="18" height="18" rx="2" />
-                                    <circle cx="8.5" cy="8.5" r="1.5" />
-                                    <path d="M21 15l-5-5L5 21" />
-                                </svg></button>
-                            <button type="button" class="ai-ico" title="Voice" disabled aria-hidden="true"><svg
-                                    viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
-                                    stroke-width="2">
-                                    <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" />
-                                    <path d="M19 10v2a7 7 0 01-14 0v-2M12 19v4M8 23h8" />
-                                </svg></button>
-                        </div>
                     </div>
                 </div>
                 <div id="aiStatus" class="ai-status" aria-live="polite"></div>
-            </div>
-        </div>
-
-        <!-- API Key Modal -->
-        <div id="apiKeyModal" class="api-key-modal" aria-hidden="true">
-            <div class="api-key-modal-content">
-                <h3 class="api-key-modal-title">API Key</h3>
-                <p id="apiKeyModalDescription" class="api-key-modal-description">Enter your API key for this provider.
-                </p>
-                <input type="password" id="apiKeyInput" class="api-key-input" placeholder="Paste your API key here"
-                    autocomplete="off" />
-                <div class="api-key-modal-actions">
-                    <button type="button" id="apiKeyCancel" class="api-key-modal-btn cancel">Cancel</button>
-                    <button type="button" id="apiKeySave" class="api-key-modal-btn ok">Save</button>
-                </div>
             </div>
         </div>
 
@@ -757,31 +721,6 @@
             <div id="examplesDropdownList" class="examples-dropdown-list"></div>
         </div>
 
-        <!-- User API Keys Modal -->
-        <div id="userKeysModal" class="user-keys-modal" aria-hidden="true">
-            <div class="user-keys-modal-content">
-                <div class="user-keys-modal-header">
-                    <h3 class="user-keys-modal-title">
-                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
-                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 11-7.78 7.78 5.5 5.5 0 017.78-7.78zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4" />
-                        </svg>
-                        API Keys
-                    </h3>
-                    <button type="button" id="userKeysModalClose" class="user-keys-modal-close" title="Close">
-                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
-                            stroke-width="2">
-                            <path d="M18 6L6 18M6 6l12 12" />
-                        </svg>
-                    </button>
-                </div>
-                <p class="user-keys-description">Your keys are stored encrypted on this machine and persist across sessions.</p>
-                <div id="userKeysList" class="user-keys-list">
-                    <!-- Key rows are rendered dynamically -->
-                </div>
-                <p id="userKeysStatus" class="user-keys-status"></p>
-            </div>
-        </div>
 
         <!-- Footer -->
         <footer class="app-footer">

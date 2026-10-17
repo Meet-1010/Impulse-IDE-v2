@@ -19,6 +19,9 @@
   "bugs": {
     "url": "https://github.com/Meet-1010/Impulse-IDE-v2/issues"
   },
+  "impulse": {
+    "cloudUrl": null
+  },
   "license": "MIT",
   "engines": {
     "node": ">=22"
@@ -36,8 +39,8 @@
     "build:all": "npm run build:renderer && electron-builder --win --mac --linux",
     "install:mac": "node scripts/install-mac.mjs",
     "test": "jest",
-    "lint": "eslint src/ scripts/ test/ bin/ --ext .js,.mjs",
-    "lint:fix": "eslint src/ scripts/ test/ bin/ --ext .js,.mjs --fix",
+    "lint": "eslint src/ scripts/ test/ bin/ cloud/src/ cloud/scripts/ cloud/test/ cloud/public/ --ext .js,.mjs",
+    "lint:fix": "eslint src/ scripts/ test/ bin/ cloud/src/ cloud/scripts/ cloud/test/ cloud/public/ --ext .js,.mjs --fix",
     "audit": "npm audit --omit=dev",
     "test:smoke": "node scripts/smoke.mjs",
     "notices": "node scripts/third-party-notices.mjs",
@@ -71,14 +74,12 @@
     "@anthropic-ai/sdk": "^0.131.0",
     "@fontsource-variable/inter": "^5.3.0",
     "@fontsource-variable/jetbrains-mono": "^5.3.0",
-    "@google/generative-ai": "^0.24.1",
     "@serialport/parser-readline": "^12.0.0",
     "@wokwi/elements": "^1.9.2",
     "avr8js": "^0.21.0",
     "codemirror": "^5.65.18",
     "electron-store": "^8.1.0",
     "electron-updater": "^6.7.3",
-    "openai": "^4.20.0",
     "rp2040js": "1.4.0",
     "serialport": "^12.0.0",
     "zod": "^3.23.8"

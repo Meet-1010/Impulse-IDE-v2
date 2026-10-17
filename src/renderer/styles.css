@@ -3920,7 +3920,8 @@ body.resizing-row * {
 
 .notification-container {
     position: fixed;
-    top: 20px;
+    /* Below the top bar, so the Chat | IDE switch and the toolbar stay usable. */
+    top: 60px;
     right: 20px;
     z-index: 10000;
     pointer-events: none;

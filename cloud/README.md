@@ -1,0 +1,127 @@
+# Impulse Cloud
+
+The server behind Impulse's accounts and credits: sign-in (Google, GitHub,
+email + password with an emailed code), the credit ledger and plans, the AI
+gateway that pays for every user's Claude requests from Impulse's own key, the
+admin console, and the hand-off that signs the desktop app in through the
+browser. One [Hono](https://hono.dev) app (`src/app.js`) on Postgres, deployed
+on Vercel with zero configuration from `src/index.js`; `public/` is served as
+static files.
+
+| Path | What |
+|---|---|
+| `/sign-in/` | The web sign-in page (also used by the desktop app for Google and GitHub) |
+| `/admin/` | The admin console: overview, users, upgrade requests, settings, audit log |
+| `/api/auth/*` | Better Auth (sign-in, sign-up, codes, sessions) |
+| `/ai/v1/messages` | The AI gateway: Anthropic's Messages API, authenticated with an Impulse session, charged in credits |
+| `/v1/config`, `/v1/me`, `/v1/models`, `/v1/usage`, `/v1/plans`, `/v1/upgrade-request` | What the app reads about the account |
+| `/desktop/complete`, `/desktop/token` | Browser sign-in → desktop app (one-time code + PKCE) |
+| `/admin/api/*` | The console's API (admins only, audited) |
+
+## Run it on your computer
+
+You need Node 22+ and a Postgres (Homebrew: `brew install postgresql@16`, or
+Docker: `docker run -p 55432:5432 -e POSTGRES_USER=impulse -e POSTGRES_HOST_AUTH_METHOD=trust postgres:16`).
+
+```bash
+cd cloud
+npm install
+cp .env.example .env          # set DATABASE_URL and BETTER_AUTH_SECRET at least
+npm run dev                   # migrates, then serves http://localhost:8787
+```
+
+Without `RESEND_API_KEY`, email codes are printed to the server log, which is
+fine for development. Without an Anthropic key you can still exercise the
+whole flow with the stand-in API:
+
+```bash
+node scripts/fake-anthropic.js          # http://127.0.0.1:8799
+# .env: ANTHROPIC_BASE_URL=http://127.0.0.1:8799  ANTHROPIC_API_KEY=anything
+node --env-file=.env scripts/seed-demo.js   # demo users and usage for the console (local databases only)
+```
+
+Point the desktop app at it from the repository root:
+
+```bash
+IMPULSE_CLOUD_URL=http://localhost:8787 npm run dev
+```
+
+The first address in `ADMIN_EMAILS` becomes an admin once it signs in with a
+verified email; the console is at `/admin/`.
+
+## Tests
+
+```bash
+cd cloud && npm test
+```
+
+`test/` runs against a scratch database (`TEST_DATABASE_URL`, default
+`postgres://impulse@127.0.0.1:55432/impulse_test`), **dropping and recreating
+its `public` schema** each run, with a fake Anthropic API on a local port. CI
+runs the same suite against a Postgres service (job "Impulse Cloud").
+
+## Deploy (first time)
+
+1. **Database**: a Neon project (or any Postgres). Use the pooled connection
+   string with `sslmode=require` as `DATABASE_URL`.
+2. **Vercel project** with the root directory `cloud` (framework detected as
+   Hono, Node 22). Environment variables, all from `.env.example`:
+   - `DATABASE_URL`, `BETTER_AUTH_SECRET` (`openssl rand -base64 32`)
+   - `IMPULSE_CLOUD_URL` — the public URL of this deployment (OAuth redirects
+     and sign-in links use it)
+   - `ANTHROPIC_API_KEY` — Impulse's own key; every user's requests are paid
+     from it (set a spending limit in the Anthropic console too; the gateway's
+     daily budget is a second guard)
+   - `ADMIN_EMAILS` — comma-separated addresses that become admins
+   - `RESEND_API_KEY` and `EMAIL_FROM` — codes by email (verify the sending
+     domain in Resend first)
+   - `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` — a "Web application" OAuth
+     client whose authorized redirect URI is
+     `<IMPULSE_CLOUD_URL>/api/auth/callback/google`
+   - `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` — an OAuth App whose callback
+     URL is `<IMPULSE_CLOUD_URL>/api/auth/callback/github`
+   - `IMPULSE_WEBSITE_URL` — where `/` redirects
+   Sign-in methods without credentials are simply not offered.
+3. **Migrate**: the Vercel function never changes the schema. From your
+   computer, against the production database:
+   ```bash
+   DATABASE_URL='postgres://…' BETTER_AUTH_SECRET='…' npm run migrate
+   ```
+   (`migrate` creates Better Auth's tables, then applies `migrations/*.sql`
+   once each; it is safe to run again.)
+4. **Streaming**: long answers stream for minutes. In the Vercel project
+   settings, raise the function maximum duration (300 s is a good value).
+5. **Point the app at it**: set `"impulse": { "cloudUrl": "https://…" }` in the
+   repository's `package.json` and ship a release. Builds with `cloudUrl: null`
+   run in local mode (free Ollama models, no accounts); `IMPULSE_CLOUD_URL`
+   overrides the build's value for development.
+6. Sign in on `/sign-in/` with an admin address, open `/admin/`, and check
+   "This server" on the Settings page: it lists what is configured.
+
+## How credits work
+
+- 1 credit = 1 cent of Anthropic's list price for the request (input, output,
+  cache reads and cache writes), multiplied by the **markup** setting; every
+  charge rounds up to at least a thousandth of a credit, so no request is free.
+- New accounts get **welcome credits** (200) once their email is verified
+  (Google and GitHub addresses arrive verified). Plans: Free 100 credits a
+  month, Pro 1,500 ($20), Max 6,000 ($60); Fable 5.1 needs Pro or Max. All of
+  it is editable in the console's Settings without a deploy.
+- Plan credits are spent first and refill each monthly period (unused ones
+  don't roll over); bonus credits (welcome, granted, bought) never expire. A
+  request that costs more than what is left runs the plan a little negative,
+  repaid at the next refill.
+- Upgrades are **requests** the team approves in the console until a payment
+  provider is connected; approving one moves the account to the plan with a
+  fresh month.
+
+## Guards
+
+Sessions are bearer tokens (the app stores its token encrypted with the OS
+credential store). Browser sign-in for the app uses a one-time code bound to a
+PKCE challenge, redeemed only on `127.0.0.1`. Admin writes need an
+`x-impulse-admin` header and a same-origin `Origin`, and every change is in the
+audit log. The gateway forwards known request fields only, refuses server-side
+tools, caps `max_tokens`, limits requests to 6 MB and 40 a minute per user,
+pauses for everyone when the day's upstream spend reaches the daily budget,
+and never shows users an error about Impulse's own key.

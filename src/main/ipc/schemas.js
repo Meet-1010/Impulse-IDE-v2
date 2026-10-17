@@ -33,20 +33,15 @@ const schemas = {
   shellOpenExternal: z.object({ url: z.string().refine(u => u.startsWith('http://') || u.startsWith('https://'), 'Invalid URL') }),
   shellShowItem: z.object({ fullPath: pathSchema }),
   errorsAddFix: z.object({ errorId: safeString, fix: z.record(z.unknown()).optional() }),
-  aiSetProvider: z.object({ providerName: requiredString, apiKey: z.string().optional().nullable(), model: safeString }),
   aiProcessQuery: z.object({
     query: requiredString,
     context: z.record(z.unknown()).optional().default({}),
-    mode: z.enum(['agent', 'ask', 'debug']).optional().default('agent')
+    mode: z.enum(['agent', 'plan', 'ask', 'debug']).optional().default('agent')
   }),
   aiAnalyzeError: z.object({ errorMessage: requiredString, context: z.record(z.unknown()).optional() }),
   aiAnalyzeSerial: z.object({ serialOutput: z.string().optional().default(''), lines: z.array(z.string()).optional().default([]) }),
   aiSetModel: z.object({ modelId: requiredString, manual: z.boolean().optional() }),
-  aiPinModel: z.object({ modelId: z.string().optional().nullable() }),
-  aiSetAutoUpgrade: z.object({ enabled: z.boolean() }),
   aiExecuteTool: z.object({ toolName: requiredString, args: z.record(z.unknown()).optional().default({}) }),
-  apiKeysSet: z.object({ provider: requiredString, apiKey: requiredString }),
-  apiKeysProvider: z.object({ provider: requiredString }),
   problemDetails: z.object({ crashId: z.string().max(120).regex(/^[\w-]+$/).optional().nullable() }),
   problemReport: z.object({
     title: z.string().trim().min(1).max(200),
@@ -55,6 +50,8 @@ const schemas = {
     crashId: z.string().max(120).regex(/^[\w-]+$/).optional().nullable()
   }),
   partRequest: z.object({ query: z.string().trim().min(1).max(120) }),
+  // Arduino sketch folder names: a letter or digit, then letters, digits and _ (max 63).
+  projectCreate: z.object({ name: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_]{0,50}$/, 'Project names are letters, digits and underscores') }),
   exampleCreate: z.object({
     name: z.string().regex(/^[a-z0-9][a-z0-9-]{0,60}$/, 'Example names are lower-case letters, digits and dashes'),
     code: z.string().min(1).max(512 * 1024),

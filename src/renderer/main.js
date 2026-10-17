@@ -5,6 +5,8 @@
 
 // Must run first so errors thrown while later modules load are captured.
 import './error-capture.js';
+// Theme and view before the first paint.
+import './shell-boot.js';
 
 // --- CodeMirror CSS (bundled locally, no CDN) ---
 import 'codemirror/lib/codemirror.css';
@@ -48,3 +50,13 @@ import './onboarding.js';
 import './accessibility.js';
 import './renderer.js';
 import './ui-shell.js';
+import { startChatMode } from './vibe/index.js';
+
+// Chat mode: the default view (the IDE is behind its Chat | IDE switch).
+document.addEventListener('DOMContentLoaded', () => {
+    if (typeof window.electronAPI === 'undefined' || !document.querySelector('.app-container')) return;
+    startChatMode().catch((err) => {
+        console.error('Chat mode failed to start', err);
+        document.documentElement.dataset.shell = 'ide';
+    });
+});

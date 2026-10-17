@@ -18,6 +18,7 @@ import { runHeadless } from './simulation/headless.js';
 import { programOf } from './simulation/runners.js';
 import { createChatOrb, COPY as ORB_COPY } from './morph-orb/morph-orb.js';
 import { pickDetectedBoard } from './board-detect.js';
+import { renderMarkdown } from './markdown.js';
 
 // UI State — exposed on window so other modules (validation.js, etc.) can access it
 // without relying on bundler scope-hoisting accidents.
@@ -91,6 +92,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         return;
     }
     try {
+        // Chat mode hides the IDE, so the board picker lives outside it.
+        const boardModal = document.getElementById('boardPortModal');
+        if (boardModal) document.body.appendChild(boardModal);
+        setupShellSwitch();
+        // Theme and account wiring needs nothing loaded: usable while the boards load.
+        setupFooterThemeToggle();
+        setupAccountButton();
         initializeCodeMirror();
         restoreEditorPrefs();
         attachPinInsights(state.editor, {
@@ -112,8 +120,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         await loadPorts();
         await loadAIUnifiedModels();
         await restoreAIPreferences();
-        await applyModelAutoUpgrade();
         await ensureAIModel({ quiet: true });
+        window.electronAPI.cloud.onStatus(followAccount);
         await restoreSession();
 
         setupNativeMenuListener();
@@ -125,8 +133,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         setupUIStateSync();
         setupOutputTabs();
         setupKeyboardShortcuts();
-        setupFooterThemeToggle();
-        setupUserApiKeys();
         syncDropdowns();
         setupAIPanelOverlay();
         setupAIPanelResize();
@@ -326,9 +332,9 @@ async function editClipboardAction(kind) {
             const end = field.selectionEnd ?? field.value.length;
             field.setRangeText(text, start, end, 'end');
             field.dispatchEvent(new Event('input', { bubbles: true }));
-        } else if (state.editor) {
-            state.editor.replaceSelection(text);
-            state.editor.focus();
+        } else if (activeEditor()) {
+            activeEditor().replaceSelection(text);
+            activeEditor().focus();
         }
         return;
     }
@@ -348,14 +354,74 @@ async function editClipboardAction(kind) {
         }
     } else if (pageText && !editorFocused) {
         selected = pageText;
-    } else if (state.editor) {
-        selected = state.editor.getSelection();
-        if (kind === 'cut' && selected) state.editor.replaceSelection('');
+    } else if (activeEditor()) {
+        const ed = activeEditor();
+        selected = ed.getSelection();
+        if (kind === 'cut' && selected) ed.replaceSelection('');
     }
     if (selected) await window.electronAPI.clipboard.writeText(selected);
 }
 
+// Menu actions that need the IDE's panels: in chat mode they open the IDE first.
+const IDE_MENU_ACTIONS = new Set([
+    'file-open', 'file-examples', 'file-save-as', 'view-scm', 'view-explorer', 'view-boards',
+    'sketch-upload-programmer', 'sketch-run-tests', 'sketch-compare-board', 'sketch-export-binary',
+    'sketch-include-library', 'sketch-add-tab', 'sketch-add-file', 'tools-archive', 'tools-manage-libs',
+    'tools-serial-plotter', 'tools-get-board-info', 'tools-pio-env', 'debug-start', 'debug-step-over',
+    'debug-step-into', 'debug-step-out', 'debug-run-to-cursor', 'debug-toggle-breakpoint',
+    'debug-clear-breakpoints'
+]);
+
+/** Chat mode's version of a menu action. Returns true when it was handled. */
+function chatModeMenuAction(action, payload) {
+    const shell = window.impulse.shell;
+    if (!shell) return false;
+    switch (action) {
+        case 'file-new':
+            shell.newChat();
+            return true;
+        case 'file-open-folder':
+        case 'file-sketchbook':
+            shell.openFolder();
+            return true;
+        case 'file-open-recent':
+            if (typeof payload === 'string') shell.openFolder(payload);
+            return true;
+        case 'file-close':
+            shell.closeBench();
+            return true;
+        case 'view-ai':
+            shell.focusComposer();
+            return true;
+        case 'view-simulator':
+            shell.toggleBench('sim');
+            return true;
+        case 'tools-serial-monitor':
+            shell.openBench('serial');
+            return true;
+        case 'sketch-verify':
+            shell.boardAction('verify');
+            return true;
+        case 'sketch-upload':
+            shell.boardAction('upload');
+            return true;
+        case 'tools-board':
+        case 'tools-port':
+            openBoardPortModal();
+            return true;
+        default:
+            if (!IDE_MENU_ACTIONS.has(action)) return false;
+            shell.setMode('ide');
+            return false;
+    }
+}
+
 async function handleMenuAction(action, payload) {
+    if (action === 'view-toggle-shell') {
+        window.impulse.shell?.setMode(inChatMode() ? 'ide' : 'vibe');
+        return;
+    }
+    if (inChatMode() && chatModeMenuAction(action, payload)) return;
     switch (action) {
         // File
         case 'file-new':
@@ -399,12 +465,12 @@ async function handleMenuAction(action, payload) {
         case 'edit-undo':
             if (window.simManager?.handleEditAction('undo')) break;
             if (focusedTextField()) document.execCommand('undo');
-            else if (state.editor) state.editor.undo();
+            else activeEditor()?.undo();
             break;
         case 'edit-redo':
             if (window.simManager?.handleEditAction('redo')) break;
             if (focusedTextField()) document.execCommand('redo');
-            else if (state.editor) state.editor.redo();
+            else activeEditor()?.redo();
             break;
         case 'edit-cut':
             if (window.simManager?.handleEditAction('cut')) break;
@@ -422,35 +488,36 @@ async function handleMenuAction(action, payload) {
             if (window.simManager?.handleEditAction('select-all')) break;
             const field = focusedTextField();
             if (field) field.select();
-            else if (state.editor) state.editor.execCommand('selectAll');
+            else if (activeEditor()) activeEditor().execCommand('selectAll');
+            else if (inChatMode()) document.execCommand('selectAll');
             break;
         }
         case 'edit-goto-line':
             gotoLine();
             break;
         case 'edit-comment':
-            if (state.editor) toggleComment();
+            toggleComment();
             break;
         case 'edit-increase-indent':
-            if (state.editor) state.editor.indentSelection('add');
+            activeEditor()?.indentSelection('add');
             break;
         case 'edit-decrease-indent':
-            if (state.editor) state.editor.indentSelection('subtract');
+            activeEditor()?.indentSelection('subtract');
             break;
         case 'edit-format':
-            if (state.editor) autoFormat();
+            autoFormat();
             break;
         case 'edit-find':
-            if (state.editor) findInEditor();
+            findInEditor();
             break;
         case 'edit-find-next':
-            if (state.editor) findNext();
+            findNext();
             break;
         case 'edit-find-prev':
-            if (state.editor) findPrev();
+            findPrev();
             break;
         case 'edit-replace':
-            if (state.editor) state.editor.execCommand('replace');
+            activeEditor()?.execCommand('replace');
             break;
         // View
         case 'view-scm':
@@ -542,7 +609,7 @@ async function handleMenuAction(action, payload) {
             break;
         // Tools
         case 'tools-format':
-            if (state.editor) autoFormat();
+            autoFormat();
             break;
         case 'tools-archive':
             archiveSketch();
@@ -859,26 +926,28 @@ function closeCurrentTab() {
 }
 
 function gotoLine() {
-    if (!state.editor) return;
-    state.editor.focus();
-    state.editor.execCommand('jumpToLine');
+    const ed = activeEditor();
+    if (!ed) return;
+    ed.focus();
+    ed.execCommand('jumpToLine');
 }
 
 function toggleComment() {
-    if (!state.editor) return;
-    const range = { from: state.editor.getCursor('from'), to: state.editor.getCursor('to') };
+    const ed = activeEditor();
+    if (!ed) return;
+    const range = { from: ed.getCursor('from'), to: ed.getCursor('to') };
     const lineFrom = range.from.line;
     const lineTo = range.to.line;
-    const lineText = state.editor.getLine(lineFrom);
+    const lineText = ed.getLine(lineFrom);
     const isComment = /^\s*\/\//.test(lineText);
-    state.editor.operation(() => {
+    ed.operation(() => {
         for (let i = lineFrom; i <= lineTo; i++) {
-            const text = state.editor.getLine(i);
+            const text = ed.getLine(i);
             if (isComment) {
                 const newText = text.replace(/^\s*\/\/\s?/, '');
-                state.editor.replaceRange(newText, { line: i, ch: 0 }, { line: i, ch: text.length });
+                ed.replaceRange(newText, { line: i, ch: 0 }, { line: i, ch: text.length });
             } else {
-                state.editor.replaceRange('// ' + text, { line: i, ch: 0 }, { line: i, ch: 0 });
+                ed.replaceRange('// ' + text, { line: i, ch: 0 }, { line: i, ch: 0 });
             }
         }
     });
@@ -887,7 +956,7 @@ function toggleComment() {
 // Re-indent every line from the C/C++ mode's own rules (CodeMirror 5 has no
 // full formatter). Idempotent: pressing it twice changes nothing.
 function autoFormat() {
-    const ed = state.editor;
+    const ed = activeEditor();
     if (!ed) return;
     const cursor = ed.getCursor();
     ed.operation(() => {
@@ -897,24 +966,27 @@ function autoFormat() {
 }
 
 function findInEditor() {
-    if (!state.editor) return;
-    state.editor.focus();
-    state.editor.execCommand('find');
+    const ed = activeEditor();
+    if (!ed) return;
+    ed.focus();
+    ed.execCommand('find');
 }
 
 function findNext() {
-    if (state.editor) state.editor.execCommand('findNext');
+    activeEditor()?.execCommand('findNext');
 }
 
 function findPrev() {
-    if (state.editor) state.editor.execCommand('findPrev');
+    activeEditor()?.execCommand('findPrev');
 }
 
 let editorFontSize = 13;
 function setEditorFontSize(px) {
     editorFontSize = Math.max(10, Math.min(24, Math.round(px) || 13));
-    document.querySelector('.CodeMirror')?.style.setProperty('font-size', `${editorFontSize}px`);
-    state.editor?.refresh();
+    for (const ed of [state.editor, linkedEditor]) {
+        ed?.getWrapperElement().style.setProperty('font-size', `${editorFontSize}px`);
+        ed?.refresh();
+    }
     try {
         const prefs = JSON.parse(localStorage.getItem('impulse-editor-prefs') || '{}');
         localStorage.setItem('impulse-editor-prefs', JSON.stringify({ ...prefs, fontSize: editorFontSize }));
@@ -1281,20 +1353,17 @@ function openFindInReference() {
 // ============================================
 // Footer & theme toggle (dark/light)
 // ============================================
+/** The theme, for both views (icons follow CSS [data-theme]). */
+function setTheme(dark) {
+    state.darkMode = dark;
+    document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+    localStorage.setItem('arduino-ide-theme', dark ? 'dark' : 'light');
+}
+
 function setupFooterThemeToggle() {
-    const btn = document.getElementById('themeToggleBtn');
-    if (!btn) return;
-
-    // Restore saved theme (icons toggled via CSS [data-theme])
-    const saved = localStorage.getItem('arduino-ide-theme');
-    state.darkMode = saved !== 'light';
-    document.documentElement.setAttribute('data-theme', state.darkMode ? 'dark' : 'light');
-
-    btn.addEventListener('click', () => {
-        state.darkMode = !state.darkMode;
-        document.documentElement.setAttribute('data-theme', state.darkMode ? 'dark' : 'light');
-        localStorage.setItem('arduino-ide-theme', state.darkMode ? 'dark' : 'light');
-    });
+    // Restore saved theme (shell-boot.js applied it before the first paint)
+    state.darkMode = localStorage.getItem('arduino-ide-theme') !== 'light';
+    document.getElementById('themeToggleBtn')?.addEventListener('click', () => setTheme(!state.darkMode));
 }
 
 // ============================================
@@ -1327,6 +1396,8 @@ function setupUpdater() {
     }
 
     window.electronAPI.updater.onStatus((status, data) => {
+        // Chat mode shows its own update notice.
+        window.dispatchEvent(new CustomEvent('impulse:update-status', { detail: { status, data: data || null } }));
         if (status === 'available') {
             const version = data?.version ? ` (${data.version})` : '';
             showBanner(`Update available${version}.`, true, false);
@@ -1351,201 +1422,39 @@ function setupUpdater() {
     dismissBtn?.addEventListener('click', hideBanner);
 }
 
+/** The Chat | IDE switch in the IDE's top row. */
+function setupShellSwitch() {
+    const chat = document.getElementById('shellChatBtn');
+    const ide = document.getElementById('shellIdeBtn');
+    chat?.addEventListener('click', () => window.impulse.shell?.setMode('vibe'));
+    ide?.addEventListener('click', () => window.impulse.shell?.setMode('ide'));
+    const sync = () => {
+        const vibe = inChatMode();
+        chat?.setAttribute('aria-pressed', String(vibe));
+        ide?.setAttribute('aria-pressed', String(!vibe));
+    };
+    window.addEventListener('impulse:shell-changed', sync);
+    sync();
+}
+
 // ============================================
-// User API Keys Management
+// Account (Impulse Cloud)
 // ============================================
-function setupUserApiKeys() {
+/** The person icon in the IDE's activity bar: the same account menu as chat mode. */
+function setupAccountButton() {
     const userBtn = document.getElementById('userBtn');
-    const modal = document.getElementById('userKeysModal');
-    const modalClose = document.getElementById('userKeysModalClose');
-    const keysList = document.getElementById('userKeysList');
-    const statusEl = document.getElementById('userKeysStatus');
-
-    if (!userBtn || !modal) return;
-
-    // Provider definitions
-    const providers = [
-        { id: 'gemini',  label: 'Google Gemini',  placeholder: 'AIza...' },
-        { id: 'openai',  label: 'OpenAI',         placeholder: 'sk-...' },
-        { id: 'claude',  label: 'Anthropic Claude', placeholder: 'sk-ant-...' }
-    ];
-
-    // --- Helpers ---
-    function openModal() {
-        modal.classList.add('open');
-        modal.setAttribute('aria-hidden', 'false');
-        renderKeys();
-    }
-
-    function closeModal() {
-        modal.classList.remove('open');
-        modal.setAttribute('aria-hidden', 'true');
-        clearStatus();
-    }
-
-    function showStatus(msg, type) {
-        statusEl.textContent = msg;
-        statusEl.className = 'user-keys-status ' + (type || '');
-        if (type === 'success') {
-            setTimeout(() => {
-                if (statusEl.textContent === msg) clearStatus();
-            }, 3000);
-        }
-    }
-
-    function clearStatus() {
-        statusEl.textContent = '';
-        statusEl.className = 'user-keys-status';
-    }
-
-    function updateUserButton(hasAnyKey) {
-        if (hasAnyKey) {
-            userBtn.classList.add('has-keys');
-            userBtn.title = 'API Keys (configured)';
-        } else {
-            userBtn.classList.remove('has-keys');
-            userBtn.title = 'API Keys';
-        }
-    }
-
-    // --- Render key rows ---
-    async function renderKeys() {
-        keysList.innerHTML = '';
-        let hasAny = false;
-
-        // Fetch saved keys status
-        let savedKeys = {};
-        try {
-            const result = await window.electronAPI.apiKeys.list();
-            if (result.success) savedKeys = result.data || {};
-        } catch (_) { /* ignore */ }
-
-        for (const prov of providers) {
-            const isSaved = !!(savedKeys[prov.id] && savedKeys[prov.id].hasKey);
-            const maskedKey = isSaved ? savedKeys[prov.id].key : '';
-            if (isSaved) hasAny = true;
-
-            const row = document.createElement('div');
-            row.className = 'user-key-row';
-
-            // Label + badge
-            const labelRow = document.createElement('div');
-            labelRow.className = 'user-key-label';
-
-            const labelText = document.createElement('span');
-            labelText.className = 'user-key-label-text';
-            labelText.textContent = prov.label;
-
-            const badge = document.createElement('span');
-            badge.className = 'user-key-badge ' + (isSaved ? 'saved' : 'empty');
-            badge.textContent = isSaved ? maskedKey : 'NOT SET';
-
-            labelRow.appendChild(labelText);
-            labelRow.appendChild(badge);
-
-            // Input + buttons
-            const inputRow = document.createElement('div');
-            inputRow.className = 'user-key-input-row';
-
-            const input = document.createElement('input');
-            input.type = 'password';
-            input.className = 'user-key-input';
-            input.placeholder = isSaved ? 'Enter new key to replace' : prov.placeholder;
-            input.autocomplete = 'off';
-            input.dataset.provider = prov.id;
-
-            const saveBtn = document.createElement('button');
-            saveBtn.className = 'user-key-save-btn';
-            saveBtn.textContent = 'Save';
-            saveBtn.addEventListener('click', () => saveKey(prov.id, input));
-
-            input.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter') saveBtn.click();
-            });
-
-            inputRow.appendChild(input);
-            inputRow.appendChild(saveBtn);
-
-            if (isSaved) {
-                const removeBtn = document.createElement('button');
-                removeBtn.className = 'user-key-remove-btn';
-                removeBtn.title = 'Remove key';
-                removeBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>';
-                removeBtn.addEventListener('click', () => removeKey(prov.id));
-                inputRow.appendChild(removeBtn);
-            }
-
-            row.appendChild(labelRow);
-            row.appendChild(inputRow);
-            keysList.appendChild(row);
-        }
-
-        updateUserButton(hasAny);
-    }
-
-    // --- Save a key ---
-    async function saveKey(providerId, inputEl) {
-        const key = inputEl.value.trim();
-        if (!key) {
-            showStatus('Enter a key first.', 'error');
-            return;
-        }
-        clearStatus();
-        try {
-            const result = await window.electronAPI.apiKeys.set(providerId, key);
-            if (result.success) {
-                inputEl.value = '';
-                showStatus(`${providerId} key saved.`, 'success');
-                renderKeys(); // refresh badges
-                // The chat can use it straight away.
-                await useKeyFor(providerId);
-            } else {
-                showStatus(result.error || 'Failed to save key.', 'error');
-            }
-        } catch (err) {
-            showStatus(err.message || 'Save error.', 'error');
-        }
-    }
-
-    // --- Remove a key ---
-    async function removeKey(providerId) {
-        clearStatus();
-        try {
-            const result = await window.electronAPI.apiKeys.remove(providerId);
-            if (result.success) {
-                showStatus(`${providerId} key removed.`, 'success');
-                renderKeys();
-                if (state.aiModelId && providerOfModel(state.aiModelId) === providerId) state.aiProviderConfigured = false;
-                await loadAIUnifiedModels();
-                refreshAIStatus();
-            } else {
-                showStatus(result.error || 'Failed to remove key.', 'error');
-            }
-        } catch (err) {
-            showStatus(err.message || 'Remove error.', 'error');
-        }
-    }
-
-    // --- Check for keys on load (for the green dot) ---
-    async function checkKeysOnLoad() {
-        try {
-            const result = await window.electronAPI.apiKeys.list();
-            if (result.success) {
-                const hasAny = Object.values(result.data || {}).some(v => v.hasKey);
-                updateUserButton(hasAny);
-            }
-        } catch (_) { /* ignore */ }
-    }
-
-    // --- Event Listeners ---
-    userBtn.addEventListener('click', openModal);
-    modalClose.addEventListener('click', closeModal);
-    modal.addEventListener('click', (e) => {
-        if (e.target === modal) closeModal();
-    });
-
-    // Check on startup
-    checkKeysOnLoad();
+    const dot = document.getElementById('userStatusDot');
+    if (!userBtn) return;
+    userBtn.setAttribute('aria-haspopup', 'menu');
+    userBtn.setAttribute('aria-expanded', 'false');
+    userBtn.addEventListener('click', () => window.impulse.account?.accountMenu(userBtn));
+    const sync = (status) => {
+        userBtn.title = status?.signedIn ? `${status.user?.email || 'Account'} · credits and plan` : 'Sign in to Impulse';
+        userBtn.setAttribute('aria-label', userBtn.title);
+        if (dot) dot.classList.toggle('active', !!status?.signedIn);
+    };
+    window.electronAPI.cloud.onStatus(sync);
+    window.electronAPI.cloud.status().then(sync).catch(() => {});
 }
 
 // ============================================
@@ -1900,7 +1809,6 @@ function setupAIListeners() {
         saveAIPreferences();
     });
     document.getElementById('aiModelSelect')?.addEventListener('change', onAIModelChange);
-    document.getElementById('aiPinModelBtn')?.addEventListener('click', togglePinCurrentModel);
     document.getElementById('aiCompactBtn')?.addEventListener('click', compactConversation);
     // The welcome (starters) as it is before the first message, for New chat.
     state.aiWelcomeHtml = state.aiWelcomeHtml || document.querySelector('#aiMessages .ai-welcome')?.outerHTML || '';
@@ -1912,18 +1820,12 @@ function setupAIListeners() {
             stopAIMessage();
         }
     });
-    document.getElementById('aiSettingsBtn')?.addEventListener('click', openAPIKeyModalForCurrentProvider);
     document.getElementById('aiSend')?.addEventListener('click', sendAIMessage);
     document.getElementById('aiInput')?.addEventListener('keypress', (e) => {
         if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
             e.preventDefault();
             sendAIMessage();
         }
-    });
-    document.getElementById('apiKeyCancel')?.addEventListener('click', closeAPIKeyModal);
-    document.getElementById('apiKeySave')?.addEventListener('click', saveAPIKeyFromModal);
-    document.getElementById('apiKeyInput')?.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') saveAPIKeyFromModal();
     });
 }
 
@@ -2158,6 +2060,8 @@ async function refreshPortsQuiet() {
 
     added.forEach(p => logToConsole(`Detected new port: ${p.port}${p.board ? ` (${p.board})` : ''}`, 'success'));
     removed.forEach(p => logToConsole(`Port removed: ${p.port}`, 'warning'));
+    window.dispatchEvent(new CustomEvent('impulse:board-display'));
+    window.dispatchEvent(new CustomEvent('impulse:serial-state'));
 
     const pick = pickDetectedBoard({
         ports, added, isBaseline,
@@ -2925,19 +2829,19 @@ async function compileSketch() {
     if (!state.currentSketch) {
         logToConsole('Please open a sketch file first', 'warning');
         showProblem('No sketch file selected. Open a folder and select a .ino file.');
-        return;
+        return { ok: false, error: 'Open a sketch first.' };
     }
 
     const pio = inPioProject(state.currentSketch);
     if (!boardFQBN && !pio) {
         logToConsole('Please select a board', 'warning');
         showProblem('No board selected. Please select a board from the dropdown.');
-        return;
+        return { ok: false, error: 'Choose a board first.', needsBoard: true };
     }
 
     if (!await saveAllFiles()) {
         showProblem('The sketch could not be saved, so the build would use old code. Fix the save error and try again.');
-        return;
+        return { ok: false, error: 'The sketch could not be saved, so the build would use old code.' };
     }
 
     logToConsole(pio ? `Building PlatformIO environment ${state.pio.env}…` : 'Compiling...', 'info');
@@ -2972,6 +2876,7 @@ async function compileSketch() {
                     result.data.warnings.forEach(w => logToConsole(`Warning: ${w}`, 'warning'));
                 }
             }
+            return { ok: true, size: result.data?.programSize ?? null, percent: result.data?.usagePercent ?? null };
         } else {
             // Update context awareness - compilation failed
             state.context.lastCompileResult = {
@@ -2994,10 +2899,12 @@ async function compileSketch() {
             if (result.analyzedError) {
                 displayErrorAnalysis(result.analyzedError);
             }
+            return { ok: false, error: result.output || result.error || 'Compilation failed' };
         }
     } catch (error) {
         logToConsole(`Compilation error: ${error.message}`, 'error');
         showProblem(error.message);
+        return { ok: false, error: error.message };
     } finally {
         setButtonState('compileBtn', false, 'Verify');
     }
@@ -3010,25 +2917,25 @@ async function uploadSketch() {
     if (!state.currentSketch) {
         logToConsole('Please open a sketch file first', 'warning');
         showProblem('No sketch file selected. Open a folder and select a .ino file.');
-        return;
+        return { ok: false, error: 'Open a sketch first.' };
     }
 
     const pio = inPioProject(state.currentSketch);
     if (!boardFQBN && !pio) {
         logToConsole('Please select a board', 'warning');
         showProblem('No board selected. Please select a board from the dropdown.');
-        return;
+        return { ok: false, error: 'Choose a board first.', needsBoard: true };
     }
 
     if (!port) {
         logToConsole('Please select a port', 'warning');
         showProblem('No port selected. Please select a port from the dropdown.');
-        return;
+        return { ok: false, error: 'Plug in the board and choose its port first.', needsBoard: true };
     }
 
     if (!await saveAllFiles()) {
         showProblem('The sketch could not be saved, so the build would use old code. Fix the save error and try again.');
-        return;
+        return { ok: false, error: 'The sketch could not be saved, so the upload would use old code.' };
     }
 
     const reopenMonitor = state.serialConnected;
@@ -3048,6 +2955,7 @@ async function uploadSketch() {
             logToConsole('Upload successful!', 'success');
             logToConsole(`Uploaded to ${port}`, 'info');
             if (reopenMonitor) reconnectSerialAfterUpload(port);
+            return { ok: true, port };
         } else {
             logToConsole('Upload failed!', 'error');
             if (result.error) {
@@ -3057,10 +2965,12 @@ async function uploadSketch() {
             if (result.analyzedError) {
                 displayErrorAnalysis(result.analyzedError);
             }
+            return { ok: false, error: result.error || 'Upload failed', port };
         }
     } catch (error) {
         logToConsole(`Upload error: ${error.message}`, 'error');
         showProblem(error.message);
+        return { ok: false, error: error.message, port };
     } finally {
         setButtonState('uploadBtn', false, 'Upload');
     }
@@ -3152,6 +3062,7 @@ async function sendSerialData() {
 }
 
 function updateSerialUI(connected) {
+    window.dispatchEvent(new CustomEvent('impulse:serial-state'));
     const toggleBtn = document.getElementById('toggleSerial');
     const portSelectSidebar = document.getElementById('portSelectSidebar');
     const statusDot = document.getElementById('serialStatusDot');
@@ -3179,6 +3090,7 @@ function updateSerialUI(connected) {
 }
 
 function appendSerialOutput(data, timestamp, type = 'received') {
+    window.dispatchEvent(new CustomEvent('impulse:serial-line', { detail: { text: String(data), type } }));
     const outputEl = document.getElementById('serialOutput');
     if (!outputEl) return;
 
@@ -3785,195 +3697,142 @@ async function restoreAIPreferences() {
         const raw = localStorage.getItem(AI_PREFS_KEY);
         if (!raw) return;
         const prefs = JSON.parse(raw);
-        if (prefs.mode && ['agent', 'ask', 'debug'].includes(prefs.mode)) {
+        if (prefs.mode && ['agent', 'plan', 'debug'].includes(prefs.mode)) {
             state.aiMode = prefs.mode;
             const modeSelect = document.getElementById('aiModeSelect');
             if (modeSelect) modeSelect.value = prefs.mode;
         }
-        if (prefs.modelId) {
-            state.aiModelId = prefs.modelId;
-            const modelSelect = document.getElementById('aiModelSelect');
-            if (modelSelect) {
-                modelSelect.value = prefs.modelId;
-            }
-            // A local model needs Ollama running; don't claim it's ready when it isn't.
-            if (providerOfModel(prefs.modelId) === 'ollama' && !state.aiUnifiedModels.some(m => m.id === prefs.modelId)) {
-                state.aiProviderConfigured = false;
-                updateAIStatus('Ollama isn\'t running: choose "Start Ollama…" in the model menu');
-                return;
-            }
-            // Actually initialize the provider on the backend using the saved API key
-            try {
-                const result = await window.electronAPI.ai.setModel(prefs.modelId);
-                if (result.success) {
-                    state.aiProviderConfigured = true;
-                    updateAIStatus('Ready');
-                } else if (result.needsKey) {
-                    state.aiProviderConfigured = false;
-                    updateAIStatus('API key needed — click the user icon to add one');
-                } else {
-                    state.aiProviderConfigured = false;
-                    updateAIStatus(result.error || 'Could not restore model');
-                }
-            } catch (err) {
-                state.aiProviderConfigured = false;
-                updateAIStatus('Could not restore model');
-            }
+        // Models from before Impulse Cloud (your own API keys) no longer exist.
+        if (!providerOfModel(prefs.modelId)) return;
+        state.aiModelId = prefs.modelId;
+        const modelSelect = document.getElementById('aiModelSelect');
+        if (modelSelect) modelSelect.value = prefs.modelId;
+        // A local model needs Ollama running; don't claim it's ready when it isn't.
+        if (providerOfModel(prefs.modelId) === 'ollama' && !state.aiUnifiedModels.some(m => m.id === prefs.modelId)) {
+            state.aiProviderConfigured = false;
+            refreshAIStatus();
+            return;
         }
+        const result = await window.electronAPI.ai.setModel(prefs.modelId).catch(() => null);
+        state.aiProviderConfigured = !!result?.success;
+        refreshAIStatus();
     } catch (e) {
         console.warn('Could not restore AI preferences', e);
     }
 }
 
+/** The cloud model chat mode starts with. */
+const DEFAULT_CLOUD_MODEL = 'impulse:claude-opus-5-5';
+
 // Map a model id to its provider (mirrors AIAgent.getProviderFromModel).
 function providerOfModel(modelId) {
     if (!modelId || typeof modelId !== 'string') return null;
-    const id = modelId.toLowerCase();
-    if (id.startsWith('ollama:')) return 'ollama';
-    if (id.startsWith('claude-')) return 'claude';
-    if (id.startsWith('gpt-') || /^o\d/.test(id)) return 'openai';
-    if (id.startsWith('gemini-')) return 'gemini';
+    if (modelId.startsWith('ollama:')) return 'ollama';
+    if (modelId.startsWith('impulse:')) return 'impulse';
     return null;
 }
 
-// Reflect whether the currently selected model is pinned on the pin button.
-function syncPinButton() {
-    const btn = document.getElementById('aiPinModelBtn');
-    if (!btn) return;
-    const pinned = !!(state.aiModelSuggestion && state.aiModelId
-        && state.aiModelSuggestion.pinned === state.aiModelId);
-    btn.setAttribute('aria-pressed', pinned ? 'true' : 'false');
-    btn.classList.toggle('active', pinned);
-    btn.title = pinned
-        ? 'Unpin this model (re-enable auto-upgrade)'
-        : 'Pin this model (stops auto-upgrade for it)';
-}
-
-// Build a dropdown label with badges: ✦ newest of its provider, ★ most-used.
-function modelOptionLabel(m, suggestion) {
-    const label = m.displayName || m.id;
-    const badges = [];
-    if (m.latest) badges.push('✦');
-    if (suggestion && suggestion.mostUsed === m.id) badges.push('★');
-    if (suggestion && suggestion.pinned === m.id) badges.push('📌');
-    return badges.length ? `${label}  ${badges.join(' ')}` : label;
-}
-
-const PROVIDER_LABELS = { gemini: 'Google Gemini', openai: 'OpenAI', claude: 'Anthropic Claude', ollama: 'Ollama · free, on this computer' };
+const PROVIDER_LABELS = { impulse: 'Impulse Cloud · uses credits', ollama: 'On this computer · free' };
 // Menu entries that are actions, not models (Ollama isn't running or has no models).
 const OLLAMA_START = '__ollama_start__';
 const OLLAMA_PULL = '__ollama_pull__';
 
 /**
- * Providers the chat can use now: those with an API key saved, plus Ollama
- * when it's running with at least one model (no key needed), e.g. ['gemini', 'ollama'].
+ * Start Ollama from a model menu, then use its first model.
+ * @returns {Promise<{ ok: boolean, notInstalled?: boolean, error?: string }>}
  */
-async function providersWithKeys() {
-    const out = [];
-    try {
-        const res = await window.electronAPI.apiKeys.list();
-        if (res?.success) out.push(...Object.entries(res.data || {}).filter(([, v]) => v?.hasKey).map(([p]) => p));
-    } catch (_) { /* none */ }
-    if (state.aiLocal?.count > 0 && !out.includes('ollama')) out.push('ollama');
-    return out;
-}
-
-/** Start Ollama from the model menu, then use its newest model. */
 async function startLocalModels() {
     updateAIStatus('Starting Ollama…');
     const res = await window.electronAPI.ai.startLocal().catch((e) => ({ success: false, error: e?.message }));
     if (res?.notInstalled) {
-        addAIMessage('assistant', 'Ollama runs AI models on your own computer, free and without an API key. Install it from ollama.com/download, pull a model with tool support (for example `ollama pull qwen3`), then choose it in the model menu under the chat.');
         window.electronAPI.openExternal?.('https://ollama.com/download');
         await loadAIUnifiedModels();
-        return;
+        return { ok: false, notInstalled: true, error: 'Ollama runs AI models on your own computer, free and offline. Install it from ollama.com/download (now open in your browser), then choose "Start Ollama…" again.' };
     }
     if (!res?.success) {
-        updateAIStatus(res?.error || 'Could not start Ollama');
         await loadAIUnifiedModels();
-        return;
+        updateAIStatus(res?.error || 'Could not start Ollama');
+        return { ok: false, error: res?.error || 'Could not start Ollama.' };
     }
     await loadAIUnifiedModels();
-    if (!res.count) {
-        await pullLocalModel();
-        return;
-    }
-    await useKeyFor('ollama');
+    if (!res.count) return pullLocalModel();
+    const first = state.aiUnifiedModels.find(m => m.provider === 'ollama');
+    if (first && await selectModelProgrammatically(first.id)) return { ok: true };
+    return { ok: false, error: 'Ollama is running, but none of its models could be used.' };
 }
 
-/** Download a free model through Ollama (the first recommended one by default), with progress under the chat. */
+/**
+ * Download a free model through Ollama (the first recommended one by default).
+ * Progress goes to the IDE's status line and to chat mode ('impulse:local-progress').
+ * @returns {Promise<{ ok: boolean, canceled?: boolean, error?: string }>}
+ */
 async function pullLocalModel(name) {
     const downloads = state.aiLocal?.downloads || [];
     const rec = downloads.find(m => m.name === name) || downloads[0];
-    if (!rec) return;
+    if (!rec) return { ok: false, error: 'No model to download. Start Ollama first.' };
     const ok = await confirmDialog(`Download ${rec.displayName}?`,
-        `A free AI model that runs on this computer, with no API key: a one-time download of ${rec.size} through Ollama. Answers take longer than a cloud model's, and nothing leaves your computer.`,
+        `A free AI model that runs on this computer: a one-time download of ${rec.size} through Ollama. Answers take longer than a cloud model's, and nothing leaves your computer.`,
         { confirmLabel: 'Download' });
-    if (!ok) return;
+    if (!ok) return { ok: false, canceled: true };
+    const progress = (detail) => window.dispatchEvent(new CustomEvent('impulse:local-progress', { detail: { name: rec.displayName, ...detail } }));
+    progress({ percent: 0, status: 'starting' });
     const stop = window.electronAPI.ai.onLocalProgress?.((p) => {
         updateAIStatus(p.percent === null ? `${rec.displayName}: ${p.status}` : `Downloading ${rec.displayName}… ${p.percent}%`);
+        progress({ percent: p.percent, status: p.status });
     });
     const res = await window.electronAPI.ai.pullLocal(rec.name).catch((e) => ({ success: false, error: e?.message }));
     stop?.();
+    progress({ done: true, ok: !!res?.success });
     await loadAIUnifiedModels();
     if (!res?.success) {
         updateAIStatus(res?.error || 'The download failed');
-        return;
+        return { ok: false, error: res?.error || 'The download failed.' };
     }
     if (await selectModelProgrammatically(res.id)) {
-        addAIMessage('assistant', `${rec.displayName} is ready. It runs on your computer, free: ask away.`);
+        window.notifications?.info?.(`${rec.displayName} is ready. It runs on your computer, free.`);
+        return { ok: true };
     }
+    return { ok: false, error: `${rec.displayName} downloaded, but it could not be selected.` };
 }
 
 const modelName = (id) => (state.aiUnifiedModels.find(m => m.id === id) || {}).displayName || id;
 
-/** The line under the composer: which model answers, or what to do first. */
+/** The line under the IDE composer: which model answers, or what to do first. */
 function refreshAIStatus() {
     if (state.aiProviderConfigured && state.aiModelId) updateAIStatus(`Ready · ${modelName(state.aiModelId)}`);
-    else if (!state.aiKeyedProviders?.length) updateAIStatus('Add an API key (the person icon, bottom left), or pick Ollama in the model menu to run a free local model');
-    else updateAIStatus('Choose a model to start');
+    else if (providerOfModel(state.aiModelId) === 'ollama') updateAIStatus('Ollama isn\'t running: choose "Start Ollama…" in the model menu');
+    else updateAIStatus('Sign in to Impulse (the person icon), or pick a free model on this computer');
 }
 
 /**
- * A key was just saved: if the chat has no working model, start with that
- * provider's newest one. A working model of another provider stays.
+ * Before sending: make sure a model can answer. Signed in: the chosen cloud
+ * model (or the default one). Signed out: a chosen local model.
+ * @returns {Promise<{ ok: boolean, provider?: string, needsSignIn?: boolean, error?: string }>}
  */
-async function useKeyFor(provider) {
-    await loadAIUnifiedModels();
-    const current = state.aiModelId;
-    if (current && providerOfModel(current) === provider) {
-        const res = await window.electronAPI.ai.setModel(current).catch(() => null);
-        if (res?.success) state.aiProviderConfigured = true;
-    } else if (!state.aiProviderConfigured) {
-        const latest = state.aiModelSuggestion?.latestByProvider?.[provider]
-            || state.aiUnifiedModels.find(m => m.provider === provider)?.id;
-        if (latest && await selectModelProgrammatically(latest)) {
-            window.notifications?.info?.(`The AI chat now uses ${modelName(latest)}. Pick another in the model menu under the chat.`);
-        }
+async function readyAIModel() {
+    const provider = providerOfModel(state.aiModelId);
+    if (state.aiProviderConfigured && provider) return { ok: true, provider };
+    if (provider === 'ollama') {
+        if (await selectModelProgrammatically(state.aiModelId)) return { ok: true, provider };
+        return { ok: false, error: 'Ollama isn\'t running. Start it from the model menu, or sign in to use Impulse Cloud.' };
     }
-    refreshAIStatus();
+    const status = await window.electronAPI.cloud.status().catch(() => null);
+    if (!status?.configured) {
+        const local = state.aiUnifiedModels.find(m => m.provider === 'ollama');
+        if (local && await selectModelProgrammatically(local.id)) return { ok: true, provider: 'ollama' };
+        return { ok: false, error: 'Pick a free model on this computer in the model menu.' };
+    }
+    if (!status.signedIn) return { ok: false, needsSignIn: true };
+    if (await selectModelProgrammatically(provider === 'impulse' ? state.aiModelId : DEFAULT_CLOUD_MODEL)) return { ok: true, provider: 'impulse' };
+    return { ok: false, error: 'Impulse AI isn\'t available right now.' };
 }
 
-/**
- * Before sending: make sure a model with a key is active. Uses the saved
- * model if its key is there, else the newest model of a provider that has
- * one; with no keys at all it opens the key settings.
- * @param {{ quiet?: boolean }} [opts] quiet: don't prompt (at startup)
- */
-async function ensureAIModel({ quiet = false } = {}) {
-    if (state.aiProviderConfigured) return true;
-    const keyed = await providersWithKeys();
-    state.aiKeyedProviders = keyed;
-    const saved = providerOfModel(state.aiModelId);
-    const preferred = state.aiModelSuggestion?.preferredProvider;
-    const provider = keyed.includes(saved) ? saved : keyed.includes(preferred) ? preferred : keyed[0];
-    if (provider) await useKeyFor(provider);
-    if (state.aiProviderConfigured) return true;
-    refreshAIStatus();
-    if (!quiet) {
-        addAIMessage('assistant', 'Choose how the AI runs first. Add a Google Gemini, OpenAI or Anthropic key (the person icon at the bottom left), or run a free model on this computer with Ollama: pick "Ollama" in the model menu under the chat.');
-        document.getElementById('userBtn')?.click();
-    }
+/** IDE chat: like readyAIModel, but asks the person when something is missing. */
+async function ensureAIModel({ quiet = false, pendingPrompt = null } = {}) {
+    const ready = await readyAIModel();
+    if (ready.ok || quiet) return ready.ok;
+    if (ready.needsSignIn) window.impulse.account?.openSignIn({ pendingPrompt });
+    else updateAIStatus(ready.error);
     return false;
 }
 
@@ -3981,49 +3840,31 @@ async function loadAIUnifiedModels() {
     try {
         const result = await window.electronAPI.ai.getUnifiedModels();
         if (result.success) state.aiLocal = result.local || { running: false, count: 0 };
-        if (result.success && result.data && result.data.length > 0) {
-            state.aiUnifiedModels = result.data;
-
-            // Pull the auto-upgrade/most-used suggestion so we can badge options.
-            try {
-                const sugg = await window.electronAPI.ai.getModelSuggestion();
-                if (sugg && sugg.success) state.aiModelSuggestion = sugg.data;
-            } catch (_) { /* badges are optional */ }
-
-            const select = document.getElementById('aiModelSelect');
-            if (!select) return;
-            const keyed = await providersWithKeys();
-            state.aiKeyedProviders = keyed;
-            const firstOption = select.querySelector('option[value=""]');
-            select.innerHTML = firstOption ? firstOption.outerHTML : '<option value="">Select model...</option>';
-            // One group per provider; providers with a key come first.
-            const groups = new Map();
-            for (const m of result.data) {
-                if (!groups.has(m.provider)) groups.set(m.provider, []);
-                groups.get(m.provider).push(m);
-            }
-            // Ollama always gets a group: its models, or a way to start it.
-            if (!groups.has('ollama')) groups.set('ollama', []);
-            const order = [...groups.keys()].sort((a, b) => Number(keyed.includes(b)) - Number(keyed.includes(a)));
-            for (const provider of order) {
+        if (!result.success || !result.data) {
+            updateAIStatus('Could not load models');
+            return;
+        }
+        state.aiUnifiedModels = result.data;
+        const select = document.getElementById('aiModelSelect');
+        if (select) {
+            select.innerHTML = '<option value="">Model…</option>';
+            for (const provider of ['impulse', 'ollama']) {
                 const group = document.createElement('optgroup');
-                const keyless = provider === 'ollama';
-                group.label = `${PROVIDER_LABELS[provider] || provider}${keyless || keyed.includes(provider) ? '' : ' · no API key'}`;
-                for (const m of groups.get(provider)) {
+                group.label = PROVIDER_LABELS[provider];
+                for (const m of result.data.filter(x => x.provider === provider)) {
                     const opt = document.createElement('option');
                     opt.value = m.id;
-                    opt.textContent = modelOptionLabel(m, state.aiModelSuggestion);
+                    opt.textContent = m.displayName || m.id;
                     group.appendChild(opt);
                 }
-                // Ollama: free models to download that fit this computer, or a way to start it.
-                if (keyless && state.aiLocal?.running) {
+                if (provider === 'ollama' && state.aiLocal?.running) {
                     for (const rec of state.aiLocal.downloads || []) {
                         const opt = document.createElement('option');
                         opt.value = OLLAMA_PULL + rec.name;
                         opt.textContent = `Download ${rec.displayName} · ${rec.note} · ${rec.size}…`;
                         group.appendChild(opt);
                     }
-                } else if (keyless) {
+                } else if (provider === 'ollama') {
                     const opt = document.createElement('option');
                     opt.value = OLLAMA_START;
                     opt.textContent = 'Start Ollama…';
@@ -4032,19 +3873,17 @@ async function loadAIUnifiedModels() {
                 select.appendChild(group);
             }
             if (state.aiModelId) select.value = state.aiModelId;
-            syncPinButton();
-            refreshAIStatus();
-        } else {
-            updateAIStatus('No models available');
         }
+        refreshAIStatus();
+        window.dispatchEvent(new CustomEvent('impulse:models-changed'));
     } catch (error) {
         console.error('Failed to load AI models:', error);
         updateAIStatus('Could not load models');
     }
 }
 
-// Programmatically switch the active model (used by auto-upgrade / boot).
-async function selectModelProgrammatically(modelId, { announce = false, previous = null } = {}) {
+/** Switch the active model. Fails quietly (false) when it can't run yet. */
+async function selectModelProgrammatically(modelId) {
     if (!modelId) return false;
     try {
         const result = await window.electronAPI.ai.setModel(modelId, false);
@@ -4055,187 +3894,51 @@ async function selectModelProgrammatically(modelId, { announce = false, previous
         if (select) select.value = modelId;
         refreshAIStatus();
         saveAIPreferences();
-        syncPinButton();
-        if (announce) {
-            const label = (state.aiUnifiedModels.find(m => m.id === modelId) || {}).displayName || modelId;
-            const prevLabel = previous
-                ? ((state.aiUnifiedModels.find(m => m.id === previous) || {}).displayName || previous)
-                : null;
-            const msg = prevLabel
-                ? `Upgraded to ${label} (newer than ${prevLabel}). Your previous model is still in the list — pin it to keep it.`
-                : `Using the latest model: ${label}.`;
-            if (window.notifications?.info) window.notifications.info(msg);
-            logToConsole(msg, 'info');
-        }
+        window.dispatchEvent(new CustomEvent('impulse:models-changed'));
         return true;
     } catch (_) {
         return false;
     }
 }
 
-// Auto-upgrade brain (renderer side). Runs on boot after preferences restore.
-//  - No model chosen yet  → adopt the suggested latest model.
-//  - Model chosen, not pinned, auto-upgrade on → move to the newest model of
-//    the SAME provider family if a newer one exists (never silently switches
-//    provider families out from under the user).
-async function applyModelAutoUpgrade() {
-    try {
-        const res = await window.electronAPI.ai.getModelSuggestion();
-        if (!res || !res.success || !res.data) return;
-        const s = res.data;
-        state.aiModelSuggestion = s;
-
-        const saved = state.aiModelId;
-
-        // Nothing chosen yet → adopt the suggestion (latest of a keyed provider).
-        if (!saved) {
-            if (s.suggested) await selectModelProgrammatically(s.suggested, { announce: false });
-            return;
-        }
-
-        // Respect an explicit pin or a disabled auto-upgrade.
-        if (s.pinned || !s.autoUpgrade) return;
-
-        // Upgrade only within the same provider family. Local models are the
-        // ones you pulled: there's no "newer" one to move to.
-        const savedProvider = providerOfModel(saved);
-        if (savedProvider === 'ollama') return;
-        const latestForSaved = s.latestByProvider && s.latestByProvider[savedProvider];
-        if (latestForSaved && latestForSaved !== saved) {
-            await selectModelProgrammatically(latestForSaved, { announce: true, previous: saved });
-        }
-    } catch (_) { /* auto-upgrade is best-effort */ }
-}
-
-// Pin / unpin the currently selected model so auto-upgrade won't move away.
-async function togglePinCurrentModel() {
-    const modelId = state.aiModelId;
-    if (!modelId) { notifyNotYet('Select a model first, then pin it.'); return; }
-    const isPinned = state.aiModelSuggestion && state.aiModelSuggestion.pinned === modelId;
-    try {
-        const res = await window.electronAPI.ai.pinModel(isPinned ? null : modelId);
-        if (res && res.success) {
-            if (!state.aiModelSuggestion) state.aiModelSuggestion = {};
-            state.aiModelSuggestion.pinned = isPinned ? null : modelId;
-            const label = (state.aiUnifiedModels.find(m => m.id === modelId) || {}).displayName || modelId;
-            const msg = isPinned
-                ? `Unpinned ${label} — auto-upgrade re-enabled for this model.`
-                : `Pinned ${label} — it won't be auto-upgraded.`;
-            if (window.notifications?.info) window.notifications.info(msg);
-            logToConsole(msg, 'info');
-            // Refresh badges to reflect the new pin state.
-            await loadAIUnifiedModels();
-            const select = document.getElementById('aiModelSelect');
-            if (select) select.value = modelId;
-            syncPinButton();
-        }
-    } catch (_) { /* ignore */ }
+/** Signing in picks the cloud model; signing out leaves the cloud model unusable. */
+function followAccount(status) {
+    const provider = providerOfModel(state.aiModelId);
+    if (status?.signedIn && provider !== 'ollama') {
+        if (provider === 'impulse' && state.aiProviderConfigured) return;
+        selectModelProgrammatically(provider === 'impulse' ? state.aiModelId : DEFAULT_CLOUD_MODEL);
+    } else if (!status?.signedIn && provider === 'impulse' && state.aiProviderConfigured) {
+        state.aiProviderConfigured = false;
+        refreshAIStatus();
+        window.dispatchEvent(new CustomEvent('impulse:models-changed'));
+    }
 }
 
 async function onAIModelChange(e) {
     const modelId = e.target.value;
     if (modelId === OLLAMA_START || modelId.startsWith(OLLAMA_PULL)) {
         e.target.value = state.aiModelId || '';
-        if (modelId === OLLAMA_START) await startLocalModels();
-        else await pullLocalModel(modelId.slice(OLLAMA_PULL.length));
+        const res = modelId === OLLAMA_START ? await startLocalModels() : await pullLocalModel(modelId.slice(OLLAMA_PULL.length));
+        if (res.notInstalled) addAIMessage('assistant', res.error);
+        else if (!res.ok && !res.canceled) updateAIStatus(res.error);
         return;
     }
     if (!modelId) {
-        state.aiModelId = null;
-        state.aiProviderConfigured = false;
-        updateAIStatus('Select a model');
+        e.target.value = state.aiModelId || '';
+        return;
+    }
+    const result = await window.electronAPI.ai.setModel(modelId, true).catch((err) => ({ success: false, error: err?.message }));
+    if (result?.success) {
+        state.aiModelId = modelId;
+        state.aiProviderConfigured = true;
         saveAIPreferences();
+        refreshAIStatus();
+        window.dispatchEvent(new CustomEvent('impulse:models-changed'));
         return;
     }
-    state.aiModelId = modelId;
-    saveAIPreferences();
-
-    try {
-        // manual=true records this provider as the user's preferred family.
-        const result = await window.electronAPI.ai.setModel(modelId, true);
-        if (result.success) {
-            state.aiProviderConfigured = true;
-            refreshAIStatus();
-            syncPinButton();
-            addAIMessage('assistant', 'Model set. How can I help you with your Arduino project?');
-        } else if (result.needsKey && result.provider) {
-            state.apiKeyModalProvider = result.provider;
-            openAPIKeyModal(result.provider, true);
-        } else {
-            updateAIStatus(result.error || 'Error setting model');
-        }
-    } catch (error) {
-        updateAIStatus(`Error: ${error.message}`);
-    }
-}
-
-function openAPIKeyModal(provider, isFirstTime = false) {
-    state.apiKeyModalProvider = provider;
-    const modal = document.getElementById('apiKeyModal');
-    const desc = document.getElementById('apiKeyModalDescription');
-    const input = document.getElementById('apiKeyInput');
-    if (desc) desc.textContent = isFirstTime
-        ? `Enter your API key for ${provider} to use this model.`
-        : `Update API key for ${provider}.`;
-    if (input) input.value = '';
-    if (modal) {
-        modal.classList.add('open');
-        modal.setAttribute('aria-hidden', 'false');
-        setTimeout(() => input?.focus(), 50);
-    }
-}
-
-function openAPIKeyModalForCurrentProvider() {
-    const modelId = document.getElementById('aiModelSelect')?.value;
-    if (!modelId) {
-        updateAIStatus('Select a model first');
-        return;
-    }
-    let provider = null;
-    for (const m of state.aiUnifiedModels) {
-        if (m.id === modelId) {
-            provider = m.provider;
-            break;
-        }
-    }
-    if (!provider) {
-        updateAIStatus('Unknown provider for this model');
-        return;
-    }
-    openAPIKeyModal(provider, false);
-}
-
-function closeAPIKeyModal() {
-    const modal = document.getElementById('apiKeyModal');
-    if (modal) {
-        modal.classList.remove('open');
-        modal.setAttribute('aria-hidden', 'true');
-    }
-    state.apiKeyModalProvider = null;
-}
-
-async function saveAPIKeyFromModal() {
-    const provider = state.apiKeyModalProvider;
-    const input = document.getElementById('apiKeyInput');
-    const key = input?.value?.trim();
-    if (!provider || !key) {
-        closeAPIKeyModal();
-        return;
-    }
-    try {
-        const result = await window.electronAPI.ai.setProvider(provider, key, state.aiModelId || undefined);
-        closeAPIKeyModal();
-        if (result.success) {
-            state.aiProviderConfigured = true;
-            await loadAIUnifiedModels();
-            refreshAIStatus();
-            addAIMessage('assistant', 'API key saved. You can start chatting.');
-        } else {
-            updateAIStatus(`Error: ${result.error}`);
-        }
-    } catch (error) {
-        updateAIStatus(`Error: ${error.message}`);
-    }
+    e.target.value = state.aiModelId || '';
+    if (result?.needsSignIn) window.impulse.account?.openSignIn();
+    else updateAIStatus(result?.error || 'That model isn\'t available');
 }
 
 // ============================================
@@ -4270,31 +3973,42 @@ function takeCodeSnapshot(prompt) {
 }
 
 function revertToSnapshot(id) {
-    if (!id || !state.editor) return;
+    if (!id || !state.editor) return false;
 
     try {
         const existing = JSON.parse(localStorage.getItem(SNAPSHOTS_KEY) || '[]');
         const snap = existing.find(s => s.id === id);
         if (!snap) {
             logToConsole('Snapshot not found — it may have been cleared.', 'warning');
-            return;
+            window.notifications?.warning?.('That earlier version is no longer kept.');
+            return false;
         }
 
-        // Restore code into editor
-        state.editor.setValue(snap.code);
-
-        // Persist to disk if we have a file path
+        // The code goes back into the file it came from: show that file first
+        // (never write it into whichever tab happens to be open).
+        const index = snap.filePath ? state.openFiles.findIndex(f => f.path === snap.filePath) : state.activeTabIndex;
+        if (index >= 0) {
+            if (index !== state.activeTabIndex) switchToTab(index);
+            state.editor.setValue(snap.code);
+            window.electronAPI.ui.updateEditorCode(snap.code);
+        }
         if (snap.filePath && window.electronAPI?.file?.save) {
             window.electronAPI.file.save(snap.filePath, snap.code)
+                .then((res) => {
+                    const file = state.openFiles.find(f => f.path === snap.filePath);
+                    if (res?.success && file) { file.content = snap.code; file.dirty = false; }
+                })
                 .catch(e => console.warn('[Revert] File save failed:', e));
         }
 
         const timeStr = new Date(snap.timestamp).toLocaleTimeString();
         logToConsole(`✓ Reverted to snapshot from ${timeStr}`, 'info');
         addAIMessage('system', `Code reverted to state before: "${snap.prompt.slice(0, 60)}${snap.prompt.length > 60 ? '…' : ''}"`);
+        return true;
     } catch (e) {
         console.warn('[Revert] Failed:', e);
         logToConsole('Revert failed — see console for details.', 'error');
+        return false;
     }
 }
 
@@ -4379,6 +4093,7 @@ const CODE_EDIT_TOOLS = new Set(['set_editor_code', 'edit_code', 'replace_in_cod
 // trusts it. Boards the simulator can't run (ESP32, …) are skipped.
 async function verifyAiEdit() {
     const container = document.getElementById('aiMessages');
+    if (state.currentFile) await saveFile({ quiet: true });
     if (!container || !state.currentSketch || !isSimulatableBoard(state.selectedBoard)) return;
     const pending = document.createElement('div');
     pending.className = 'verify-card pending';
@@ -4472,19 +4187,51 @@ function stopAIMessage() {
     }
 }
 
+/** What the agent is told about the editor, the sketch, the board and the port. */
+function buildAIContext() {
+    const hasFileOpen = !!(state.currentFile || state.currentSketch);
+    return {
+        code: hasFileOpen && state.editor ? state.editor.getValue() : '',
+        sketchPath: state.currentSketch || null,
+        board: document.getElementById('boardSelectSidebar')?.value,
+        port: document.getElementById('portSelectSidebar')?.value,
+        hasFileOpen
+    };
+}
+
+/** Track token usage and compact the conversation when it nears the context limit. */
+function recordAIUsage(data) {
+    if (!data?.usage) return;
+    const { input: used } = extractTokens(data.usage);
+    state.aiTokensUsed += used;
+    updateTokenCounter();
+    if (state.aiTokensUsed >= AI_COMPACT_THRESHOLD && !state.aiCompacting) {
+        compactConversation();
+    }
+}
+
 /** A fresh conversation: the AI forgets this one, and the starters come back. */
 async function newChat() {
     stopAIMessage();
-    await window.electronAPI.ai.clearHistory?.().catch(() => {});
+    // Chat mode keeps the list of chats: the IDE's New chat starts a new one there too.
+    if (window.impulse.chatLog) await window.impulse.chatLog.startNew();
+    else await window.electronAPI.ai.clearHistory?.().catch(() => {});
+    clearIdeChat();
+    const input = document.getElementById('aiInput');
+    if (input) input.focus({ preventScroll: true });
+}
+
+/** Empty the IDE's chat panel: the starters come back. */
+function clearIdeChat() {
     const container = document.getElementById('aiMessages');
-    if (container) {
-        container.innerHTML = state.aiWelcomeHtml || '';
+    // The welcome (starters) as it is before the first message.
+    state.aiWelcomeHtml = state.aiWelcomeHtml || container?.querySelector('.ai-welcome')?.outerHTML || '';
+    if (container && state.aiWelcomeHtml) {
+        container.innerHTML = state.aiWelcomeHtml;
         container.scrollTop = 0;
     }
     state.aiTokensUsed = 0;
     updateTokenCounter();
-    const input = document.getElementById('aiInput');
-    if (input) input.focus({ preventScroll: true });
 }
 
 async function sendAIMessage() {
@@ -4496,24 +4243,21 @@ async function sendAIMessage() {
         chatOrb?.shake();
         return;
     }
+    if (window.impulse.chatLog?.busy) {
+        updateAIStatus('Wait for the answer in chat mode, or stop it there first.');
+        return;
+    }
 
-    if (!state.aiProviderConfigured && !await ensureAIModel()) return;
-
-    const hasFileOpen = state.currentFile || state.currentSketch;
+    if (!state.aiProviderConfigured && !await ensureAIModel({ pendingPrompt: message })) return;
 
     // --- Snapshot current code BEFORE AI edits it ---
     const snapId = takeCodeSnapshot(message);
 
     addAIMessage('user', message, false, false, snapId);
 
-    const context = {
-        code: hasFileOpen && state.editor ? state.editor.getValue() : '',
-        sketchPath: state.currentSketch || null,
-        board: document.getElementById('boardSelectSidebar')?.value,
-        port: document.getElementById('portSelectSidebar')?.value,
-        hasFileOpen: hasFileOpen
-    };
+    const context = buildAIContext();
     const mode = state.aiMode || 'agent';
+    window.impulse.chatLog?.user(message, { snapshot: snapId, mode });
 
     // Agent turns can legitimately take minutes; the orb shows each step
     // (the SDK enforces the real network timeout).
@@ -4525,7 +4269,7 @@ async function sendAIMessage() {
             if (result.success && result.data) {
                 return { ok: true, content: result.data.response || result.data.content || 'No response received', data: result.data };
             }
-            return { ok: false, content: result.error || 'Unknown error occurred' };
+            return { ok: false, content: result.error || 'Unknown error occurred', code: result.code || null };
         } catch (error) {
             return { ok: false, content: error.message || 'An unexpected error occurred' };
         } finally {
@@ -4534,6 +4278,7 @@ async function sendAIMessage() {
     };
 
     const after = (result) => {
+        window.impulse.chatLog?.assistant(result, { mode });
         if (!result.ok) {
             logToConsole(`AI Error: ${result.content}`, 'error');
             return;
@@ -4549,15 +4294,7 @@ async function sendAIMessage() {
             addAIMessage('system', `Actions performed:\n${toolSummary}`);
         }
 
-        // Track token usage and auto-compact when approaching context limits.
-        if (data.usage) {
-            const { input: used } = extractTokens(data.usage);
-            state.aiTokensUsed += used;
-            updateTokenCounter();
-            if (state.aiTokensUsed >= AI_COMPACT_THRESHOLD && !state.aiCompacting) {
-                compactConversation();
-            }
-        }
+        recordAIUsage(data);
     };
 
     if (chatOrb) {
@@ -4611,51 +4348,9 @@ function removeAIMessage(id) {
     if (el) el.remove();
 }
 
+/** AI answers are Markdown: headings, lists, tables, code blocks (markdown.js). */
 function formatAIContent(content) {
-    if (content == null) content = '';
-    const text = String(content);
-
-    // 1. Extract fenced code blocks first so later formatting (esp. \n -> <br>)
-    //    never runs inside them — otherwise <pre> code rendered double-spaced.
-    const codeBlocks = [];
-    // The newline after a closing fence goes with the block (it would be a blank line).
-    let work = text.replace(/```(\w*)\n([\s\S]*?)```\n?/g, (match, lang, code) => {
-        const language = lang || 'TEXT';
-        const escapedCode = code
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;');
-        const safeLang = escapeHtml(language);
-        const html = `<div class="code-block-wrapper">` +
-            `<div class="code-block-header">` +
-            `<span class="code-lang">${safeLang}</span>` +
-            `<span class="code-block-actions">` +
-            `<button class="code-copy-btn" type="button" title="Copy the code">Copy</button>` +
-            `<button class="code-insert-btn" type="button" title="Insert at cursor">Insert</button>` +
-            `</span>` +
-            `</div>` +
-            `<pre><code class="language-${safeLang}">${escapedCode}</code></pre>` +
-            `</div>`;
-        codeBlocks.push(html);
-        return `@@CBLOCK${codeBlocks.length - 1}ENDCB@@`;
-    });
-
-    // 2. Escape the remaining (non-code) text so stray HTML can't break layout.
-    work = work
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;');
-
-    // 3. Inline markdown (bold, inline code) and line breaks.
-    work = work
-        .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-        .replace(/`([^`]+)`/g, '<code>$1</code>')
-        .replace(/\n/g, '<br>');
-
-    // 4. Restore code blocks (newlines inside them are preserved by <pre>).
-    work = work.replace(/@@CBLOCK(\d+)ENDCB@@/g, (m, i) => codeBlocks[Number(i)] || '');
-
-    return work;
+    return renderMarkdown(content);
 }
 
 function setupCodeBlockActions() {
@@ -4683,9 +4378,10 @@ function setupCodeBlockActions() {
 }
 
 function insertCodeAtCursor(code) {
-    if (state.editor) {
-        state.editor.replaceSelection(code);
-        state.editor.focus();
+    const ed = activeEditor();
+    if (ed) {
+        ed.replaceSelection(code);
+        ed.focus();
     } else {
         // Fallback or show error
         console.warn('No active editor to insert code');
@@ -4816,12 +4512,6 @@ function updateTokenCounter() {
 // ============================================
 // Surface a "not available yet" stub action visibly (toast + console),
 // so users get feedback instead of a silent console-only line.
-function notifyNotYet(message) {
-    if (window.notifications?.info) {
-        window.notifications.info(message);
-    }
-    logToConsole(message, 'info');
-}
 
 function logToConsole(message, type = 'info') {
     const consoleEl = document.getElementById('consoleOutput');
@@ -5191,6 +4881,8 @@ function loadSavedBoardPortOptions() {
 }
 
 function updateBoardPortDisplay(boardName, port) {
+    window.dispatchEvent(new CustomEvent('impulse:board-display'));
+    window.dispatchEvent(new CustomEvent('impulse:serial-state'));
     const display = document.getElementById('boardPortDisplay');
     if (display) {
         if (boardName && port) {
@@ -5445,6 +5137,11 @@ window.impulse = {
         return true;
     },
     showSimulator() {
+        // Chat mode shows the simulator in its side panel.
+        if (inChatMode() && window.impulse.shell) {
+            window.impulse.shell.openBench('sim');
+            return;
+        }
         const view = document.getElementById('simView');
         if (simActive && view && view.style.display === 'flex') return;
         simActive = false;
@@ -5522,4 +5219,354 @@ function toggleSimView() {
     }
 }
 
+// ============================================
+// Chat mode bridge (window.impulse)
+// ============================================
+// Chat mode (src/renderer/vibe) is the default view. It drives the same
+// editor, board, serial port, simulator and agent as the IDE through these
+// calls, so both views always show the same state.
 
+function inChatMode() {
+    return document.documentElement.dataset.shell === 'vibe';
+}
+
+/** Chat mode's code panel: a second editor on the IDE editor's document. */
+let linkedEditor = null;
+
+/** The editor an edit goes to: the focused one; else the IDE's, or in chat mode the code panel's while it shows. */
+function activeEditor() {
+    const focused = document.activeElement?.closest?.('.CodeMirror')?.CodeMirror;
+    if (focused) return focused;
+    if (!inChatMode()) return state.editor;
+    return linkedEditor && linkedEditor.getWrapperElement().offsetParent !== null ? linkedEditor : null;
+}
+
+const baseName = (p) => String(p || '').split(/[/\\]/).pop();
+const parentDir = (p) => String(p || '').replace(/[/\\][^/\\]*$/, '');
+const CODE_FILE = /\.(ino|h|hpp|hh|c|cc|cpp|cxx|s)$/i;
+
+function currentBoard() {
+    const fqbn = state.selectedBoard || null;
+    const port = document.getElementById('portSelectSidebar')?.value || state.selectedPort || null;
+    const board = fqbn ? state.boards.find(b => b.fqbn === fqbn) : null;
+    return {
+        fqbn,
+        name: board?.name || (fqbn ? fqbn.split(':').pop() : null),
+        port: port || null,
+        portPresent: !!port && (state.ports || []).some(p => p.port === port),
+    };
+}
+
+/** Use a plugged-in board's port, and the board arduino-cli recognises on it. */
+function chooseBoardPort(port) {
+    const p = (state.ports || []).find(x => x.port === port);
+    const boardSel = document.getElementById('boardSelectSidebar');
+    const portSel = document.getElementById('portSelectSidebar');
+    if (!p || !portSel) return { ok: false };
+    const candidates = (p.boards || []).filter(b => b.fqbn && state.boards.some(x => x.fqbn === b.fqbn));
+    const keep = candidates.find(b => b.fqbn === baseFqbn(state.selectedBoard || ''));
+    const pick = keep || (candidates.length === 1 ? candidates[0] : null);
+    if (pick && !keep && boardSel) {
+        boardSel.value = pick.fqbn;
+        boardSel.dispatchEvent(new Event('change'));
+    }
+    portSel.value = port;
+    portSel.dispatchEvent(new Event('change'));
+    return { ok: true, board: pick?.name || null, needsBoard: !pick && !state.selectedBoard };
+}
+
+function currentProject() {
+    const file = state.currentSketch;
+    if (!file) return null;
+    const folder = parentDir(file);
+    return { name: baseName(folder), folder, file };
+}
+
+/** The sketch in a folder: <folder>/<folder>.ino, else its first .ino. */
+async function sketchIn(folder) {
+    const res = await window.electronAPI.folder.list(folder).catch(() => null);
+    const inos = (res?.entries || []).filter(e => !e.isDirectory && /\.ino$/i.test(e.name));
+    return (inos.find(e => e.name.toLowerCase() === `${baseName(folder).toLowerCase()}.ino`) || inos[0])?.path || null;
+}
+
+async function openProjectFolder(folder) {
+    const file = await sketchIn(folder);
+    if (file) {
+        if (!await window.impulse.openSketch(folder, file)) return null;
+    } else if (!await loadFolder(folder)) {
+        return null;
+    }
+    return { name: baseName(folder), folder, file };
+}
+
+/** Save everything and close the open sketch: the next chat starts clean. */
+async function closeProject() {
+    await saveAllFiles().catch(() => false);
+    state.folderRoot = null;
+    state.expandedDirs.clear();
+    const tree = document.getElementById('fileTree');
+    if (tree) tree.innerHTML = '';
+    const label = document.getElementById('folderLabel');
+    if (label) label.innerHTML = `<span class="folder-icon">${ICONS.folder}</span><span>No folder open</span>`;
+    showWelcomeState();
+    state.editor?.setValue('');
+    window.electronAPI.ui.updateSketchPath(null);
+    updateAIContext();
+    saveSession();
+}
+
+function serialState() {
+    return {
+        connected: !!state.serialConnected,
+        port: document.getElementById('portSelectSidebar')?.value || null,
+        baud: parseInt(document.getElementById('baudRate')?.value || '115200', 10) || 115200,
+    };
+}
+
+/** Run the sketch in the simulator after the AI changed it (null: nothing to check). */
+async function verifyInSimulator() {
+    if (state.currentFile && !await saveFile({ quiet: true })) return null;
+    if (!state.currentSketch || !isSimulatableBoard(state.selectedBoard) || !state.editor) return null;
+    try {
+        const result = await runSimulatorCheck({ sketchPath: state.currentSketch, code: state.editor.getValue() });
+        const report = document.getElementById('testsOutput');
+        if (report) renderTestReport(report, result, { title: 'AI edit check' });
+        return result;
+    } catch (err) {
+        logToConsole(`Simulator check failed to run: ${err.message}`, 'error');
+        return null;
+    }
+}
+
+/** Show chat mode's conversation in the IDE's chat panel. */
+function renderIdeChat(messages) {
+    const container = document.getElementById('aiMessages');
+    if (!container || chatOrb?.busy()) return;
+    if (!messages?.length) {
+        if (!container.querySelector('.ai-welcome')) clearIdeChat();
+        return;
+    }
+    container.innerHTML = '';
+    for (const m of messages) {
+        if (m.role === 'user') {
+            addAIMessage('user', m.text, false, false, m.snapshot || null);
+        } else if (m.role === 'assistant') {
+            container.appendChild(buildAnswerMessage({ ok: m.ok, stopped: m.stopped, content: m.text }));
+        } else if (m.role === 'card' && m.kind === 'verify' && m.result) {
+            container.appendChild(renderVerifyCard(m.result, {
+                onFix: (failures) => {
+                    const input = document.getElementById('aiInput');
+                    if (!input) return;
+                    input.value = `The simulator check failed:\n${failures.join('\n')}\nFix the sketch so it compiles and these checks pass.`;
+                    sendAIMessage();
+                }
+            }));
+        }
+    }
+    container.scrollTop = container.scrollHeight;
+    chatOrb?.refresh();
+}
+
+Object.assign(window.impulse, {
+    ai: {
+        info: () => ({
+            models: state.aiUnifiedModels,
+            modelId: state.aiModelId,
+            mode: state.aiMode,
+            ready: state.aiProviderConfigured,
+            local: state.aiLocal || { running: false, count: 0 },
+        }),
+        busy: () => !!chatOrb?.busy(),
+        ensureModel: readyAIModel,
+        async selectModel(modelId) {
+            const result = await window.electronAPI.ai.setModel(modelId, true).catch((err) => ({ success: false, error: err?.message }));
+            if (!result?.success) return { ok: false, needsSignIn: !!result?.needsSignIn, error: result?.error };
+            state.aiModelId = modelId;
+            state.aiProviderConfigured = true;
+            const select = document.getElementById('aiModelSelect');
+            if (select) select.value = modelId;
+            saveAIPreferences();
+            refreshAIStatus();
+            window.dispatchEvent(new CustomEvent('impulse:models-changed'));
+            return { ok: true };
+        },
+        setMode(mode) {
+            state.aiMode = ['agent', 'plan', 'debug'].includes(mode) ? mode : 'agent';
+            const select = document.getElementById('aiModeSelect');
+            if (select) select.value = state.aiMode;
+            saveAIPreferences();
+        },
+        refreshModels: loadAIUnifiedModels,
+        startLocal: startLocalModels,
+        pullLocal: pullLocalModel,
+        context: buildAIContext,
+        snapshot: takeCodeSnapshot,
+        revert: revertToSnapshot,
+        editedCode: (data) => (data?.toolResults || []).some(t => t && t.success && CODE_EDIT_TOOLS.has(t.tool)),
+        verify: verifyInSimulator,
+        recordUsage: recordAIUsage,
+        format: formatAIContent,
+        copy: copyText,
+        insert: insertCodeAtCursor,
+    },
+    board: {
+        current: currentBoard,
+        ports: () => sortPorts((state.ports || []).filter(p => p.vid)).map(p => ({
+            port: p.port,
+            label: describePort(p),
+            boardName: p.boards?.length === 1 ? p.boards[0].name : null,
+        })),
+        choosePort: chooseBoardPort,
+        openPicker: openBoardPortModal,
+        openOptions: openBoardOptions,
+        verify: compileSketch,
+        upload: uploadSketch,
+        simulatable: () => isSimulatableBoard(state.selectedBoard),
+    },
+    project: {
+        current: currentProject,
+        async create(name) {
+            const res = await window.electronAPI.sketch.createProject({ name }).catch((e) => ({ success: false, error: e?.message }));
+            if (!res?.success) {
+                logToConsole(res?.error || 'Could not create the project', 'error');
+                return null;
+            }
+            if (!await window.impulse.openSketch(res.folderPath, res.filePath)) return null;
+            return { name: res.name, folder: res.folderPath, file: res.filePath };
+        },
+        async pick() {
+            const res = await window.electronAPI.dialog.openFolder().catch(() => null);
+            if (!res?.success || !res.folderPath) return null;
+            return openProjectFolder(res.folderPath);
+        },
+        openFolder: openProjectFolder,
+        async open(project) {
+            if (!project?.folder) return false;
+            if (project.file && state.currentSketch === project.file) return true;
+            return project.file ? window.impulse.openSketch(project.folder, project.file) : loadFolder(project.folder);
+        },
+        async files(folder) {
+            const res = await window.electronAPI.folder.list(folder).catch(() => null);
+            const files = (res?.entries || []).filter(e => !e.isDirectory && CODE_FILE.test(e.name));
+            return files
+                .sort((a, b) => (b.name.endsWith('.ino') - a.name.endsWith('.ino')) || a.name.localeCompare(b.name))
+                .map(e => ({ name: e.name, path: e.path }));
+        },
+        openFile: openFileFromTree,
+        close: closeProject,
+    },
+    editor: {
+        currentFile: () => state.currentFile,
+        /** A second editor on the same document (edits and undo show in both). */
+        createLinked(host) {
+            const CodeMirror = getCodeMirror();
+            if (!CodeMirror || !state.editor) return null;
+            linkedEditor = CodeMirror(host, {
+                value: state.editor.getDoc().linkedDoc({ sharedHist: true }),
+                mode: 'text/x-arduino',
+                lineNumbers: true,
+                indentUnit: state.editor.getOption('indentUnit'),
+                tabSize: state.editor.getOption('tabSize'),
+                indentWithTabs: false,
+                autoCloseBrackets: true,
+                matchBrackets: true,
+                lineWrapping: true,
+                styleActiveLine: true,
+                extraKeys: { 'Ctrl-Space': 'autocomplete' },
+                hintOptions: { hint: CodeMirror.hint.arduino },
+            });
+            linkedEditor.getInputField().setAttribute('aria-label', 'Code editor');
+            linkedEditor.getWrapperElement().style.fontSize = `${editorFontSize}px`;
+            return linkedEditor;
+        },
+    },
+    serial: {
+        state: serialState,
+        async connect() {
+            await connectSerial();
+            return serialState();
+        },
+        disconnect: disconnectSerial,
+        async send(text) {
+            if (!state.serialConnected || !text) return false;
+            try {
+                await window.electronAPI.serial.send(`${text}\n`);
+                appendSerialOutput(`> ${text}`, new Date().toISOString(), 'sent');
+                return true;
+            } catch (error) {
+                logToConsole(`Failed to send: ${error.message}`, 'error');
+                return false;
+            }
+        },
+        setBaud(baud) {
+            const select = document.getElementById('baudRate');
+            if (!select) return;
+            select.value = String(baud);
+            select.dispatchEvent(new Event('change'));
+        },
+        onLine(fn) {
+            const port = (e) => fn({ text: e.detail.text, type: e.detail.type });
+            const sim = (e) => fn({ text: String(e.detail), type: 'received', source: 'SIM' });
+            window.addEventListener('impulse:serial-line', port);
+            window.addEventListener('impulse:sim-serial-line', sim);
+            return () => {
+                window.removeEventListener('impulse:serial-line', port);
+                window.removeEventListener('impulse:sim-serial-line', sim);
+            };
+        },
+        onState(fn) {
+            const handler = () => fn(serialState());
+            window.addEventListener('impulse:serial-state', handler);
+            return () => window.removeEventListener('impulse:serial-state', handler);
+        },
+    },
+    sim: {
+        /** Show the simulator inside chat mode's side panel. */
+        mountInto(host) {
+            const panel = document.getElementById('simPanel');
+            if (!panel || !host) return;
+            if (panel.parentElement !== host) {
+                host.append(panel);
+                requestAnimationFrame(() => simManager?.fit());
+            }
+            simManager?.onShow?.();
+        },
+        /** Put it back in the IDE. */
+        restore() {
+            const panel = document.getElementById('simPanel');
+            const view = document.getElementById('simView');
+            if (!panel || !view || panel.parentElement === view) return;
+            view.append(panel);
+            if (simActive) requestAnimationFrame(() => simManager?.fit());
+        },
+        fit: () => simManager?.fit(),
+        /** Start the simulation (compiles first); no-op while it runs. */
+        run() {
+            if (simManager && !simManager.running) simManager.run();
+        },
+        get running() { return !!simManager?.running; },
+    },
+    tools: {
+        open(name) {
+            const ide = () => window.impulse.shell?.setMode('ide');
+            const panel = (id) => {
+                ide();
+                if (state.sidebarCollapsed) toggleSidebar();
+                switchPanel(id);
+            };
+            if (name === 'libraries') panel('libraries');
+            else if (name === 'boards') panel('boards');
+            else if (name === 'examples') { ide(); setTimeout(showExamplesDropdown, 30); }
+            else if (name === 'plotter') { ide(); handleMenuAction('tools-serial-plotter'); }
+            else if (name === 'output') { ide(); showOutputTab('console'); }
+            else if (name === 'preferences') showPreferences();
+            else if (name === 'report') reportProblem();
+        },
+    },
+    theme: {
+        toggle: () => setTheme(document.documentElement.dataset.theme === 'light'),
+    },
+    ideChat: {
+        render: renderIdeChat,
+    },
+});

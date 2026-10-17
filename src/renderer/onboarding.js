@@ -328,35 +328,55 @@ window.onboarding = new OnboardingManager();
 document.addEventListener('DOMContentLoaded', () => {
   // Wait until the UI is up and any first-run setup dialog is closed.
   const whenIdle = (fn) => (document.querySelector('.setup-dialog') ? setTimeout(() => whenIdle(fn), 1000) : fn());
-  setTimeout(() => whenIdle(() => {
-    // Only show tour on first visit
-    const hasSeenOnboarding = localStorage.getItem('arduino-ide-onboarding-completed');
-    const isFirstVisit = !hasSeenOnboarding;
-    
-    if (isFirstVisit) {
-      // Show a less intrusive welcome message first
-      if (window.notifications) {
-        window.notifications.info('Welcome to Impulse! Click here to take a quick tour.', {
-          duration: 8000,
-          actions: [
-            { 
-              id: 'start-tour', 
-              label: 'Start Tour',
-              callback: () => window.onboarding.start(true)
-            },
-            { 
-              id: 'skip-tour', 
-              label: 'Skip',
-              callback: () => localStorage.setItem('arduino-ide-onboarding-completed', 'true')
-            }
-          ]
-        });
-      } else {
-        // Fallback if notifications aren't available
-        window.onboarding.start();
-      }
+  // The tour is of the IDE. In chat mode it waits until the IDE is opened, and
+  // if the person goes back to chat while the offer is up, the offer goes too
+  // (and comes back the next time the IDE opens).
+  const inIde = () => document.documentElement.dataset.shell !== 'vibe';
+  const whenIde = (fn) => {
+    if (inIde()) return fn();
+    const onShell = (e) => {
+      if (e.detail?.mode !== 'ide') return;
+      window.removeEventListener('impulse:shell-changed', onShell);
+      setTimeout(fn, 800);
+    };
+    window.addEventListener('impulse:shell-changed', onShell);
+  };
+  const offerTour = () => {
+    // Only on the first visit.
+    if (localStorage.getItem('arduino-ide-onboarding-completed')) return;
+    if (!inIde()) return whenIde(offerTour);
+    if (!window.notifications) {
+      // Fallback if notifications aren't available
+      window.onboarding.start();
+      return;
     }
-  }), 2000);
+    const id = `welcome-${Date.now()}`;
+    window.notifications.info('Welcome to Impulse! Click here to take a quick tour.', {
+      id,
+      duration: 8000,
+      actions: [
+        {
+          id: 'start-tour',
+          label: 'Start Tour',
+          callback: () => window.onboarding.start(true)
+        },
+        {
+          id: 'skip-tour',
+          label: 'Skip',
+          callback: () => localStorage.setItem('arduino-ide-onboarding-completed', 'true')
+        }
+      ]
+    });
+    const back = (e) => {
+      if (e.detail?.mode !== 'vibe') return;
+      window.removeEventListener('impulse:shell-changed', back);
+      window.notifications.dismiss(id);
+      whenIde(offerTour);
+    };
+    window.addEventListener('impulse:shell-changed', back);
+    setTimeout(() => window.removeEventListener('impulse:shell-changed', back), 8500);
+  };
+  setTimeout(() => whenIdle(offerTour), 2000);
 });
 
 // Export for module use

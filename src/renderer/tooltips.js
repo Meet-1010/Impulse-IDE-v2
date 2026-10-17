@@ -208,9 +208,8 @@ class TooltipManager {
       '#baudRate': 'Set the communication speed for the serial monitor. Must match your Arduino code.',
       '#toggleSerial': 'Connect or disconnect the serial monitor.',
       '#sendSerial': 'Send the typed message to your Arduino via serial.',
-      '#aiSettingsBtn': 'Configure AI provider API keys and settings.',
       '#aiSend': 'Send your message to the AI assistant.',
-      '#aiModeSelect': 'Choose AI mode: Agent (can execute actions), Ask (questions only), or Debug (error analysis).',
+      '#aiModeSelect': 'Agent builds and changes the project, Plan lays out parts, wiring and steps without changing anything, Debug finds out why something fails and fixes it.',
       '#aiModelSelect': 'Select the AI model to use for assistance.'
     };
 

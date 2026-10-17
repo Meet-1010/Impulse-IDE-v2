@@ -2,10 +2,8 @@ const { getSystemPrompt } = require('./prompts/systemPrompt');
 const ToolExecutor = require('./tools/toolExecutor');
 const SimpleMemory = require('./memory/simpleMemory');
 const ModelPreferences = require('./config/modelPreferences');
-const { getAllTools, getDebugTools } = require('./tools/toolSchema');
-const OpenAIProvider = require('./providers/openaiProvider');
-const GeminiProvider = require('./providers/geminiProvider');
-const ClaudeProvider = require('./providers/claudeProvider');
+const { getAllTools, getDebugTools, getPlanTools } = require('./tools/toolSchema');
+const ImpulseProvider = require('./providers/impulseProvider');
 const OllamaProvider = require('./providers/ollamaProvider');
 
 /** Providers that run locally and need no API key. */
@@ -38,6 +36,8 @@ class AIAgent {
     // Provider management
     this.providers = new Map();
     this.currentProvider = null;
+    /** Extra constructor options per provider, e.g. { impulse: { version } }. */
+    this.providerOptions = {};
     this.config = {
       maxIterations: config.maxIterations || 10,
       temperature: config.temperature || 0.7,
@@ -65,7 +65,7 @@ class AIAgent {
     }
 
     const ProviderClass = this.providers.get(providerName);
-    const provider = new ProviderClass(apiKey, model);
+    const provider = new ProviderClass(apiKey, model, this.providerOptions[providerName]);
     
     if (!provider.validateApiKey(apiKey)) {
       throw new Error(`Invalid API key for provider ${providerName}`);
@@ -76,12 +76,11 @@ class AIAgent {
   }
 
   /**
-   * Initialize default providers (without API keys)
+   * The two ways the agent runs: Impulse Cloud (the account's credits) and
+   * Ollama (free models on this computer).
    */
   initializeProviders() {
-    this.providers.set('openai', OpenAIProvider);
-    this.providers.set('gemini', GeminiProvider);
-    this.providers.set('claude', ClaudeProvider);
+    this.providers.set('impulse', ImpulseProvider);
     this.providers.set('ollama', OllamaProvider);
   }
 
@@ -127,9 +126,7 @@ class AIAgent {
     if (!modelId || typeof modelId !== 'string') return null;
     const id = modelId.toLowerCase();
     if (OllamaProvider.isModelId(id)) return 'ollama';
-    if (id.startsWith('claude-')) return 'claude';
-    if (id.startsWith('gpt-') || /^o\d/.test(id)) return 'openai';
-    if (id.startsWith('gemini-')) return 'gemini';
+    if (ImpulseProvider.isModelId(id)) return 'impulse';
     return null;
   }
 
@@ -139,35 +136,6 @@ class AIAgent {
    */
   getUnifiedModelList() {
     const list = [];
-    const displayNames = {
-      'claude-opus-5-5': 'Claude Opus 5.5',
-      'claude-sonnet-5-5': 'Claude Sonnet 5.5',
-      'claude-fable-5-1': 'Claude Fable 5.1',
-      'claude-haiku-4-5': 'Claude Haiku 4.5',
-      // OpenAI GPT-4.1
-      'gpt-4.1': 'GPT-4.1',
-      'gpt-4.1-mini': 'GPT-4.1 Mini',
-      'gpt-4.1-nano': 'GPT-4.1 Nano',
-      // OpenAI reasoning
-      'o4-mini': 'o4-mini',
-      'o3-mini': 'o3-mini',
-      // OpenAI GPT-4o
-      'gpt-4o': 'GPT-4o',
-      'gpt-4o-mini': 'GPT-4o Mini',
-      // OpenAI legacy
-      'gpt-4-turbo': 'GPT-4 Turbo',
-      'gpt-4': 'GPT-4',
-      'gpt-3.5-turbo': 'GPT-3.5 Turbo',
-      // Gemini 3 (newest first) and the 2.5 models earlier keys can still use
-      'gemini-3.8-flash': 'Gemini 3.8 Flash',
-      'gemini-3.1-pro-preview': 'Gemini 3.1 Pro (preview)',
-      'gemini-3.6-flash': 'Gemini 3.6 Flash',
-      'gemini-3.5-flash-lite': 'Gemini 3.5 Flash Lite',
-      'gemini-3-flash-preview': 'Gemini 3 Flash (preview)',
-      'gemini-3.1-flash-lite': 'Gemini 3.1 Flash Lite',
-      'gemini-2.5-pro': 'Gemini 2.5 Pro',
-      'gemini-2.5-flash': 'Gemini 2.5 Flash'
-    };
     for (const providerName of this.providers.keys()) {
       const ProviderClass = this.providers.get(providerName);
       const tempInstance = new ProviderClass('temp-key');
@@ -176,7 +144,7 @@ class AIAgent {
       models.forEach((modelId, idx) => {
         list.push({
           id: modelId,
-          displayName: displayNames[modelId] || (providerName === 'ollama' ? OllamaProvider.displayName(modelId) : modelId),
+          displayName: providerName === 'ollama' ? OllamaProvider.displayName(modelId) : ImpulseProvider.displayName(modelId),
           provider: providerName,
           latest: idx === 0
         });
@@ -284,10 +252,11 @@ class AIAgent {
 
   /**
    * Get tools array for the given mode
-   * @param {string} mode - 'agent' | 'ask' | 'debug'
+   * @param {string} mode - 'agent' | 'plan' | 'ask' | 'debug'
    */
   _getToolsForMode(mode) {
     if (mode === 'ask') return [];
+    if (mode === 'plan') return getPlanTools();
     if (mode === 'debug') return getDebugTools();
     return getAllTools();
   }
@@ -393,7 +362,7 @@ class AIAgent {
     const chatOptions = {
       temperature: this.config.temperature,
       max_tokens: this.config.max_tokens,
-      effort: mode === 'ask' ? 'medium' : 'high',
+      effort: mode === 'ask' || mode === 'plan' ? 'medium' : 'high',
       tools: toolsForMode
     };
 

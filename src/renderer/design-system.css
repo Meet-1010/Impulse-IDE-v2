@@ -299,6 +299,33 @@ body {
     margin: 0 4px;
 }
 
+/* Chat | IDE: the same switch as chat mode's top bar. */
+.shell-switch {
+    display: inline-flex;
+    gap: 2px;
+    padding: 2px;
+    border-radius: 4px;
+    border: 1px solid var(--ds-line);
+    background: var(--ds-surface-1);
+}
+.shell-switch button {
+    height: 24px;
+    padding: 0 10px;
+    border: 0;
+    border-radius: 3px;
+    background: transparent;
+    color: var(--ds-text-3);
+    font: 500 12px/1 var(--font-ui);
+    cursor: pointer;
+}
+.shell-switch button:hover { color: var(--ds-text); }
+.shell-switch button[aria-pressed="true"] {
+    background: var(--ds-surface-3);
+    color: var(--ds-text);
+    box-shadow: 0 0 0 1px var(--ds-line);
+}
+.shell-switch button:focus-visible { outline: 2px solid var(--ds-link); outline-offset: 1px; }
+
 .board-port-selector {
     margin-left: 6px;
 }
@@ -1092,6 +1119,22 @@ li.CodeMirror-hint-active {
 .ai-message a {
     color: var(--ds-link);
 }
+
+/* Answers are Markdown (markdown.js). */
+.ai-message p { margin: 0 0 8px; }
+.ai-message p:last-child, .ai-message ul:last-child, .ai-message ol:last-child { margin-bottom: 0; }
+.ai-message h3, .ai-message h4, .ai-message h5, .ai-message h6 { margin: 12px 0 6px; font-size: 13.5px; font-weight: 600; color: var(--ds-text); }
+.ai-message h3 { font-size: 15px; }
+.ai-message ul, .ai-message ol { margin: 0 0 8px; padding-left: 20px; }
+.ai-message li { margin: 2px 0; }
+.ai-message li > ul, .ai-message li > ol { margin: 2px 0 0; }
+.ai-message blockquote { margin: 0 0 8px; padding-left: 10px; border-left: 2px solid var(--ds-line-strong); color: var(--ds-text-2); }
+.ai-message hr { border: 0; height: 1px; background: var(--ds-line); margin: 12px 0; }
+.ai-message .md-table { margin: 4px 0 10px; overflow-x: auto; border: 1px solid var(--ds-line); border-radius: 8px; }
+.ai-message table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.ai-message th, .ai-message td { padding: 6px 9px; border-bottom: 1px solid var(--ds-line); text-align: left; vertical-align: top; }
+.ai-message th { color: var(--ds-text-3); font-weight: 510; background: var(--ds-surface-2); }
+.ai-message tr:last-child td { border-bottom: 0; }
 
 .code-block-wrapper {
     border: 1px solid var(--ds-line);

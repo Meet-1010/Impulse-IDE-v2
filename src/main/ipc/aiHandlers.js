@@ -14,28 +14,26 @@ const defaultFail = { success: false, error: 'Invalid input' };
 /**
  * Register AI agent IPC handlers.
  * @param {import('electron').IpcMain} ipcMain
- * @param {{ aiAgent: import('../services/ai/agent'), apiKeyManager: import('../services/ai/config/apiKeyManager'), uiState: Record<string, unknown> }} ctx
+ * @param {{ aiAgent: import('../services/ai/agent'), cloudAccount: import('../services/cloud/account').CloudAccount, uiState: Record<string, unknown> }} ctx
  */
 function register(ipcMain, ctx) {
-  const { aiAgent, apiKeyManager, uiState } = ctx;
+  const { aiAgent, cloudAccount, uiState } = ctx;
 
-  ipcMain.handle('ai:set-provider', withDebugLog('ai:set-provider', async (event, providerName, apiKey, model) => {
-    const parsed = parseOrDefault(schemas.aiSetProvider, { providerName: providerName ?? '', apiKey: apiKey ?? null, model: model ?? null }, defaultFail);
-    if (!parsed.ok) return parsed.defaultResult;
-    try {
-      if (parsed.data.apiKey && String(parsed.data.apiKey).trim().length > 0) {
-        apiKeyManager.setAPIKey(parsed.data.providerName, parsed.data.apiKey);
-      }
-      const key = parsed.data.apiKey?.trim() || apiKeyManager.getAPIKey(parsed.data.providerName);
-      if (!key || key.trim().length === 0) {
-        return { success: false, error: 'API key not found. Please provide an API key.' };
-      }
-      aiAgent.setProvider(parsed.data.providerName, key, parsed.data.model ?? undefined);
-      return { success: true, provider: parsed.data.providerName, model: parsed.data.model || 'default' };
-    } catch (error) {
-      return { success: false, error: error?.message ?? 'Set provider failed' };
+  /** What a provider runs with: the Impulse session, or nothing for local models. */
+  const credentialFor = (providerName) => (AIAgent.isKeyless(providerName) ? 'local' : cloudAccount.sessionToken());
+
+  // Signing in, out or into another account swaps the token under the cloud model.
+  cloudAccount.on('change', () => {
+    const current = aiAgent.currentProvider;
+    if (current?.name !== 'impulse') return;
+    const token = cloudAccount.sessionToken();
+    if (!token) {
+      aiAgent.currentProvider = null;
+      return;
     }
-  }));
+    // Cheap (no network): always pick up the newest session.
+    aiAgent.setProvider('impulse', token, current.appModel);
+  });
 
   ipcMain.handle('ai:generate-circuit', withDebugLog('ai:generate-circuit', async (event, sketchCode, options) => {
     const parsed = parseOrDefault(schemas.aiGenerateCircuit, {
@@ -82,14 +80,15 @@ function register(ipcMain, ctx) {
         hasFileOpen: ctx.hasFileOpen ?? false,
         lastCompileResult: uiState.lastCompileResult ?? null
       };
-      const effectiveMode = parsed.data.mode === 'ask' || parsed.data.mode === 'debug' ? parsed.data.mode : 'agent';
+      const effectiveMode = ['plan', 'ask', 'debug'].includes(parsed.data.mode) ? parsed.data.mode : 'agent';
       // Each step goes to the chat as it happens (the orb's label).
       const onStep = (step) => { if (!event.sender.isDestroyed()) event.sender.send('ai:step', step); };
       const result = await aiAgent.processQuery(parsed.data.query, enrichedContext, effectiveMode, { onStep, signal: turn.signal });
       return { success: true, data: result };
     } catch (error) {
       if (error?.stopped) return { success: false, stopped: true, error: 'Stopped' };
-      return { success: false, error: error?.message ?? 'Process query failed' };
+      if (!aiAgent.currentProvider) return { success: false, code: 'signed_out', error: 'Sign in to Impulse to use AI, or pick a model on this computer.' };
+      return { success: false, code: error?.code, error: error?.message ?? 'Process query failed' };
     } finally {
       if (running === turn) running = null;
     }
@@ -165,13 +164,9 @@ function register(ipcMain, ctx) {
     try {
       const providerName = AIAgent.getProviderFromModel(parsed.data.modelId);
       if (!providerName) return { success: false, error: 'Unknown model' };
-      const key = AIAgent.isKeyless(providerName) ? 'local' : apiKeyManager.getAPIKey(providerName);
-      if (!key || key.trim().length === 0) {
-        return { success: false, error: 'API key required', needsKey: true, provider: providerName };
-      }
-      aiAgent.setProvider(providerName, key, parsed.data.modelId);
-      // A manual selection records the user's preferred provider so future
-      // auto-upgrades stay within the family they actually chose.
+      const credential = credentialFor(providerName);
+      if (!credential) return { success: false, error: 'Sign in to use Impulse AI', needsSignIn: true, provider: providerName };
+      aiAgent.setProvider(providerName, credential, parsed.data.modelId);
       if (parsed.data.manual) {
         aiAgent.modelPrefs.setPreferredProvider(providerName).catch(() => {});
       }
@@ -183,36 +178,14 @@ function register(ipcMain, ctx) {
 
   ipcMain.handle('ai:get-model-suggestion', withDebugLog('ai:get-model-suggestion', async () => {
     try {
-      const providersWithKeys = apiKeyManager.getAllProviders();
+      const usable = cloudAccount.sessionToken() ? ['impulse'] : [];
       // Installed local models count as a provider you can use right away.
       const local = await aiAgent.refreshLocalModels();
-      if (local.models.length) providersWithKeys.push('ollama');
-      const suggestion = await aiAgent.getModelSuggestion(providersWithKeys);
+      if (local.models.length) usable.push('ollama');
+      const suggestion = await aiAgent.getModelSuggestion(usable);
       return { success: true, data: suggestion };
     } catch (error) {
       return { success: false, error: error?.message ?? 'Get suggestion failed' };
-    }
-  }));
-
-  ipcMain.handle('ai:pin-model', withDebugLog('ai:pin-model', async (event, modelId) => {
-    const parsed = parseOrDefault(schemas.aiPinModel, { modelId: modelId ?? null }, defaultFail);
-    if (!parsed.ok) return parsed.defaultResult;
-    try {
-      await aiAgent.modelPrefs.setPinned(parsed.data.modelId ?? null);
-      return { success: true, pinned: parsed.data.modelId ?? null };
-    } catch (error) {
-      return { success: false, error: error?.message ?? 'Pin model failed' };
-    }
-  }));
-
-  ipcMain.handle('ai:set-auto-upgrade', withDebugLog('ai:set-auto-upgrade', async (event, enabled) => {
-    const parsed = parseOrDefault(schemas.aiSetAutoUpgrade, { enabled: !!enabled }, defaultFail);
-    if (!parsed.ok) return parsed.defaultResult;
-    try {
-      await aiAgent.modelPrefs.setAutoUpgrade(parsed.data.enabled);
-      return { success: true, autoUpgrade: parsed.data.enabled };
-    } catch (error) {
-      return { success: false, error: error?.message ?? 'Set auto-upgrade failed' };
     }
   }));
 

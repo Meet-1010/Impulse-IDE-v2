@@ -3,7 +3,7 @@
  * Creates window, initializes services, and registers IPC handlers.
  */
 
-const { app, BrowserWindow, ipcMain, dialog, shell, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, Menu, safeStorage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const fsp = require('fs').promises;
@@ -22,7 +22,9 @@ const ArduinoService = require('./services/arduinoService');
 const SerialMonitor = require('./services/serialMonitor');
 const ErrorMemory = require('./services/errorMemory');
 const AIAgent = require('./services/ai/agent');
-const APIKeyManager = require('./services/ai/config/apiKeyManager');
+const { CloudAccount } = require('./services/cloud/account');
+const { cloudURL } = require('./services/cloud/config');
+const ChatStore = require('./services/chatStore');
 const { registerAllIpc } = require('./ipc');
 const { debug } = require('./utils/logger');
 const notifications = require('./utils/notifications');
@@ -60,9 +62,13 @@ let arduinoService;
 let serialMonitor;
 let errorMemory;
 let aiAgent;
-let apiKeyManager;
+let cloudAccount;
+let chatStore;
 let workspace;
 let esp32sim;
+
+// The view on screen (chat mode or the IDE): the menu's labels follow it.
+let shellMode = 'vibe';
 
 const uiState = {
   currentBaudRate: 115200,
@@ -80,6 +86,9 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
+    // Below this the chat, its sidebar and a side panel no longer fit side by side.
+    minWidth: 960,
+    minHeight: 600,
     show: false,
     webPreferences: {
       nodeIntegration: false,
@@ -270,7 +279,7 @@ function buildMenu() {
     {
       label: 'File',
       submenu: [
-        { label: 'New Sketch', accelerator: 'CmdOrCtrl+N', click: () => sendMenuAction('file-new') },
+        { label: shellMode === 'ide' ? 'New Sketch' : 'New Chat', accelerator: 'CmdOrCtrl+N', click: () => sendMenuAction('file-new') },
         { label: 'Open…', accelerator: 'CmdOrCtrl+O', click: () => sendMenuAction('file-open') },
         { label: 'Open Folder…', accelerator: 'CmdOrCtrl+Shift+O', click: () => sendMenuAction('file-open-folder') },
         { label: 'Open Recent', submenu: recentItems },
@@ -316,6 +325,8 @@ function buildMenu() {
     {
       label: 'View',
       submenu: [
+        { label: shellMode === 'ide' ? 'Switch to Chat' : 'Switch to IDE', accelerator: 'CmdOrCtrl+E', click: () => sendMenuAction('view-toggle-shell') },
+        { type: 'separator' },
         { label: 'Sketchbook', accelerator: 'CmdOrCtrl+Shift+E', click: () => sendMenuAction('view-explorer') },
         { label: 'Source Control', accelerator: 'CmdOrCtrl+Shift+G', click: () => sendMenuAction('view-scm') },
         { label: 'Board Manager', accelerator: 'CmdOrCtrl+Shift+B', click: () => sendMenuAction('view-boards') },
@@ -409,6 +420,13 @@ app.whenReady().then(() => {
   workspace = new WorkspaceStore();
   workspace.restore();
   workspace.on('recent-changed', () => buildMenu());
+  ipcMain.on('ui:shell-mode', (event, mode) => {
+    if (!mainWindow || event.sender !== mainWindow.webContents) return;
+    const next = mode === 'ide' ? 'ide' : 'vibe';
+    if (next === shellMode) return;
+    shellMode = next;
+    buildMenu();
+  });
   // IMPULSE_TOOLCHAIN_ISOLATED=1 ignores system installs (testing first-run setup).
   const toolchain = new Toolchain({
     managedDir: path.join(app.getPath('userData'), 'toolchain'),
@@ -423,9 +441,18 @@ app.whenReady().then(() => {
   arduinoService.esp32sim = esp32sim;
   serialMonitor = new SerialMonitor();
   errorMemory = new ErrorMemory();
-  apiKeyManager = new APIKeyManager();
+  cloudAccount = new CloudAccount({
+    baseURL: cloudURL(),
+    file: path.join(app.getPath('userData'), 'impulse-account.json'),
+    safeStorage,
+    openExternal: (url) => shell.openExternal(url),
+    version: app.getVersion(),
+  });
+  chatStore = new ChatStore(path.join(app.getPath('userData'), 'chats'));
   aiAgent = new AIAgent(arduinoService, serialMonitor, errorMemory);
   aiAgent.initializeProviders();
+  // Gateway requests say which app version sent them.
+  aiAgent.providerOptions = { impulse: { version: app.getVersion() } };
 
   if (aiAgent.toolExecutor) {
     aiAgent.toolExecutor.setUICallbacks({
@@ -542,7 +569,8 @@ app.whenReady().then(() => {
     serialMonitor,
     errorMemory,
     aiAgent,
-    apiKeyManager,
+    cloudAccount,
+    chatStore,
     uiState,
     fsp,
     path,

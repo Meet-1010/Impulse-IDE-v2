@@ -38,6 +38,12 @@ class NotificationUI {
   }
 
   show(notification) {
+    // Chat mode has its own toast: plain messages go there. Cards with
+    // actions or progress (a crash report, the tour, a download) keep this one.
+    if (document.documentElement.dataset.shell === 'vibe' && !notification.actions?.length && !notification.persistent && notification.type !== 'progress') {
+      window.dispatchEvent(new CustomEvent('impulse:notify', { detail: notification }));
+      return;
+    }
     const element = this.createElement(notification);
     this.notifications.set(notification.id, { ...notification, element });
     this.container.appendChild(element);
