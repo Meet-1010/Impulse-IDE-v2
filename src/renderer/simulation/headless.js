@@ -95,6 +95,9 @@ export async function runHeadless(hex, options = {}) {
     try {
       await runner.waitUntil(seconds, { signal: options.signal });
       options.beforeStop?.(runner, engine, { serial, trace });
+    } catch (err) {
+      err.serial = serial; // what the firmware printed before it crashed or hung
+      throw err;
     } finally {
       clearInterval(timer);
       runner.shutdown();

@@ -429,6 +429,7 @@ export async function testSketch(sketch, opts, { cli, onStage = () => {} } = {})
     return finish(entry.results.every(r => r.pass) ? 'passed' : 'failed');
   } catch (err) {
     if (err instanceof UsageError || err instanceof SetupError) throw err;
+    if (err.serial) entry.serial = err.serial;
     return finish('error', err.message);
   }
 }
@@ -506,7 +507,7 @@ export function humanSketch(e, paint = colors(false)) {
   }
   if (e.error) lines.push(...e.error.split('\n').map(l => `  ${e.status === 'skipped' ? paint.dim(l) : paint.red(l)}`));
   for (const w of e.warnings) lines.push(`  ${paint.yellow('!')} ${w}`);
-  if (e.status === 'failed' && e.serial) {
+  if ((e.status === 'failed' || e.status === 'error') && e.serial) {
     const tail = e.serial.trimEnd().split('\n').slice(-8);
     lines.push(paint.dim('  serial output (last lines):'), ...tail.map(l => paint.dim(`  │ ${l}`)));
   }

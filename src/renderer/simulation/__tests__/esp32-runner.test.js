@@ -155,6 +155,16 @@ describe('ESP32 runner', () => {
     expect(fake.sent).toContain('r6,0,'); // nothing at 0x50
   });
 
+  it('gives SPI bytes to the selected devices and returns what they answer', async () => {
+    const { runner, fake } = await booted();
+    const got = [];
+    runner.spiBus.add({ selected: () => true, transfer: (b) => { got.push(b); return b ^ 0xff; } });
+    fake.say('Besp32', 'Z2,0f00,1000', 'Y9,2,a5,2000');
+    await tick();
+    expect(got).toEqual([0x0f, 0x00, 0xa5]);
+    expect(fake.sent).toContain('y9,5a');
+  });
+
   it('says once that Wi-Fi joined a pretend network', async () => {
     const { runner, fake } = await booted();
     const notices = [];

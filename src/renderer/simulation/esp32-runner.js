@@ -352,6 +352,14 @@ export class Esp32Runner {
           ? `Wi-Fi isn't simulated: the sketch joined a pretend network "${line.slice(6)}" and got IP 10.0.2.15. Requests to the internet won't get answers.`
           : 'Wi-Fi isn\'t simulated: the sketch started an access point that nothing can join.');
         return;
+      case 'Z': // SPI bytes out
+        this._advance(timeOf(f[2]));
+        for (const b of unhex(f[1])) this.spiBus.transfer(b);
+        return;
+      case 'Y': // SPI transfer: the selected devices answer
+        this._advance(timeOf(f[3]));
+        this._send(`y${f[0]},${hex(unhex(f[2]).map(b => this.spiBus.transfer(b)))}`);
+        return;
       case 'O':
         this.onNotice?.(`The sketch changed pins faster than the simulator can follow (${f[0]} changes dropped). Add a short delay() in the loop.`);
         return;

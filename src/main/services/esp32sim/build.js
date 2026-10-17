@@ -40,6 +40,15 @@ const WRAPPED = [
   'analogWrite', 'analogWriteFrequency', 'analogWriteResolution', 'neopixelWrite', 'rgbLedWrite', 'rgbLedWriteOrdered',
   'i2cInit', 'i2cDeinit', 'i2cIsInit', 'i2cSetClock', 'i2cGetClock', 'i2cWrite', 'i2cRead', 'i2cWriteReadNonStop',
   'double_tap_init', 'double_tap_mark', 'double_tap_invalidate', 'double_tap_check_match',
+  // SPI: every driver function that takes the bus handle.
+  'spiStartBus', 'spiStopBus', 'spiAttachSCK', 'spiAttachMISO', 'spiAttachMOSI', 'spiDetachSCK', 'spiDetachMISO',
+  'spiDetachMOSI', 'spiAttachSS', 'spiDetachSS', 'spiEnableSSPins', 'spiDisableSSPins', 'spiSSEnable', 'spiSSDisable',
+  'spiSSSet', 'spiSSClear', 'spiWaitReady', 'spiGetClockDiv', 'spiGetDataMode', 'spiGetBitOrder', 'spiSetClockDiv',
+  'spiSetDataMode', 'spiSetBitOrder', 'spiTransaction', 'spiSimpleTransaction', 'spiEndTransaction',
+  'spiWrite', 'spiWriteByte', 'spiWriteWord', 'spiWriteLong', 'spiWriteNL', 'spiWriteByteNL', 'spiWriteShortNL',
+  'spiWriteLongNL', 'spiWritePixelsNL', 'spiTransfer', 'spiTransferByte', 'spiTransferWord', 'spiTransferLong',
+  'spiTransferBytes', 'spiTransferBits', 'spiTransferByteNL', 'spiTransferShortNL', 'spiTransferLongNL',
+  'spiTransferBytesNL', 'spiTransferBitsNL',
   // Wi-Fi: a pretend network (the emulator has no radio).
   'esp_wifi_init', 'esp_wifi_deinit', 'esp_wifi_set_mode', 'esp_wifi_get_mode', 'esp_wifi_start', 'esp_wifi_stop',
   'esp_wifi_restore', 'esp_wifi_set_config', 'esp_wifi_get_config', 'esp_wifi_connect', 'esp_wifi_disconnect',
@@ -85,6 +94,9 @@ function simBuildPlan(fqbn, props) {
     'build.boot_freq': '80m',
     'build.flash_mode': 'dio',
     'build.flash_freq': '80m',
+    // QEMU's flash chip stays in dual I/O: SDK builds for quad or octal flash
+    // (which some boards name outright) assert at startup.
+    'build.memory_type': 'dio_qspi',
     'build.cdc_on_boot': '0',
     'compiler.c.elf.extra_flags': `${props['compiler.c.elf.extra_flags'] || ''} -Wl,${WRAPPED.map(f => `--wrap=${f}`).join(',')}`.trim(),
   };

@@ -19,6 +19,8 @@
 //                T<bus>,<addr>,<hex>,<t>       I2C write to a device that is present
 //                R<id>,<bus>,<addr>,<n>,<t>    I2C read, answered by r
 //                X<id>,<bus>,<addr>,<hex>,<n>,<t>   I2C write then read, answered by r
+//                Z<bus>,<hex>,<t>              SPI bytes out (nothing back)
+//                Y<id>,<bus>,<hex>,<t>         SPI transfer, answered by y
 //                O<count>                      messages dropped (the sketch outran the bridge)
 //                Fjoin,<ssid> / Fap            joined the pretend Wi-Fi network / started an access point
 //   from Impulse: G                 go: the circuit's starting state has been sent
@@ -27,12 +29,14 @@
 //                D<addr>,<addr>…   I2C devices present (hex addresses)
 //                q<id>,<us>        pulseIn result
 //                r<id>,<ok>,<hex>  I2C read result
+//                y<id>,<hex>       SPI transfer result
 
 // Boards that number pins the Arduino way (Nano ESP32) remap them with macros
 // in the sketch; this file defines the functions themselves, by GPIO number.
 #define ARDUINO_CORE_BUILD
 #include <Arduino.h>
 #include "driver/uart.h"
+#include "esp32-hal-spi.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
 #include "esp_netif.h"
@@ -197,12 +201,14 @@ static void simHandle(char *line) {
       if (*s != ',') break;
       s++;
     }
-  } else if (kind == 'q' || kind == 'r') {
+  } else if (kind == 'q' || kind == 'r' || kind == 'y') {
     if ((uint32_t)a != simReplyId || *p != ',') return;
-    long v = strtol(p + 1, &p, 10);
+    long v = 1;
+    if (kind == 'y') p++;  // y<id>,<hex>
+    else v = strtol(p + 1, &p, 10);
     size_t n = 0;
-    if (kind == 'r' && *p == ',') {
-      p++;
+    if ((kind == 'r' && *p == ',') || kind == 'y') {
+      if (kind == 'r') p++;
       while (n < sizeof simReplyData && simHex(p[0]) >= 0 && simHex(p[1]) >= 0) {
         simReplyData[n++] = (uint8_t)(simHex(p[0]) << 4 | simHex(p[1]));
         p += 2;
@@ -219,7 +225,16 @@ static void simRxTask(void *) {
   size_t len = 0;
   uint8_t buf[256];
   for (;;) {
-    int n = uart_read_bytes(SIM_UART, buf, sizeof buf, pdMS_TO_TICKS(20));
+    // Wake on the first byte, then take what else has arrived: a reply is
+    // handled at once instead of when a full buffer or the timeout comes.
+    int n = uart_read_bytes(SIM_UART, buf, 1, portMAX_DELAY);
+    if (n <= 0) continue;
+    size_t more = 0;
+    uart_get_buffered_data_len(SIM_UART, &more);
+    if (more) {
+      int m = uart_read_bytes(SIM_UART, buf + 1, more < sizeof buf - 1 ? more : sizeof buf - 1, 0);
+      if (m > 0) n += m;
+    }
     for (int i = 0; i < n; i++) {
       char c = (char)buf[i];
       if (c == '\n') {
@@ -692,6 +707,169 @@ esp_err_t __wrap_i2cWriteReadNonStop(uint8_t num, uint16_t addr, const uint8_t *
   xSemaphoreGive(simReplyLock);
   return err;
 }
+
+// ── SPI ──
+// The bus handle is a stand-in (the SPI controller isn't emulated), so every
+// driver function that takes it is answered here. Bytes go to Impulse's SPI
+// devices in order with the pin changes (chip select is a digitalWrite);
+// writes don't wait, transfers wait for the bytes the devices answer.
+
+#define SIM_SPI_BUSES 4
+struct SimSpi { uint8_t num; uint32_t clockDiv; uint8_t mode; uint8_t bitOrder; };
+static SimSpi simSpi[SIM_SPI_BUSES];
+
+static SimSpi *simSpiOf(spi_t *spi) { return (SimSpi *)spi; }
+
+spi_t *__wrap_spiStartBus(uint8_t num, uint32_t clockDiv, uint8_t mode, uint8_t bitOrder) {
+  if (num >= SIM_SPI_BUSES) return NULL;
+  simSpi[num] = { num, clockDiv, mode, bitOrder };
+  return (spi_t *)&simSpi[num];
+}
+
+void __wrap_spiStopBus(spi_t *spi) { (void)spi; }
+void __wrap_spiAttachSCK(spi_t *spi, int8_t pin) { (void)spi; (void)pin; }
+void __wrap_spiAttachMISO(spi_t *spi, int8_t pin) { (void)spi; (void)pin; }
+void __wrap_spiAttachMOSI(spi_t *spi, int8_t pin) { (void)spi; (void)pin; }
+void __wrap_spiDetachSCK(spi_t *spi, int8_t pin) { (void)spi; (void)pin; }
+void __wrap_spiDetachMISO(spi_t *spi, int8_t pin) { (void)spi; (void)pin; }
+void __wrap_spiDetachMOSI(spi_t *spi, int8_t pin) { (void)spi; (void)pin; }
+void __wrap_spiAttachSS(spi_t *spi, uint8_t cs, int8_t pin) { (void)spi; (void)cs; (void)pin; }
+void __wrap_spiDetachSS(spi_t *spi, int8_t pin) { (void)spi; (void)pin; }
+void __wrap_spiEnableSSPins(spi_t *spi, uint8_t mask) { (void)spi; (void)mask; }
+void __wrap_spiDisableSSPins(spi_t *spi, uint8_t mask) { (void)spi; (void)mask; }
+void __wrap_spiSSEnable(spi_t *spi) { (void)spi; }
+void __wrap_spiSSDisable(spi_t *spi) { (void)spi; }
+void __wrap_spiSSSet(spi_t *spi) { (void)spi; }
+void __wrap_spiSSClear(spi_t *spi) { (void)spi; }
+void __wrap_spiWaitReady(spi_t *spi) { (void)spi; }
+uint32_t __wrap_spiGetClockDiv(spi_t *spi) { return spi ? simSpiOf(spi)->clockDiv : 0; }
+uint8_t __wrap_spiGetDataMode(spi_t *spi) { return spi ? simSpiOf(spi)->mode : 0; }
+uint8_t __wrap_spiGetBitOrder(spi_t *spi) { return spi ? simSpiOf(spi)->bitOrder : 0; }
+void __wrap_spiSetClockDiv(spi_t *spi, uint32_t div) { if (spi) simSpiOf(spi)->clockDiv = div; }
+void __wrap_spiSetDataMode(spi_t *spi, uint8_t mode) { if (spi) simSpiOf(spi)->mode = mode; }
+void __wrap_spiSetBitOrder(spi_t *spi, uint8_t order) { if (spi) simSpiOf(spi)->bitOrder = order; }
+void __wrap_spiTransaction(spi_t *spi, uint32_t div, uint8_t mode, uint8_t order) {
+  if (!spi) return;
+  simSpiOf(spi)->clockDiv = div;
+  simSpiOf(spi)->mode = mode;
+  simSpiOf(spi)->bitOrder = order;
+}
+void __wrap_spiSimpleTransaction(spi_t *spi) { (void)spi; }
+void __wrap_spiEndTransaction(spi_t *spi) { (void)spi; }
+
+/** Bytes out, nothing back: sent ahead in chunks. */
+static void simSpiWrite(spi_t *spi, const uint8_t *data, size_t len) {
+  if (!spi || !simReady) return;
+  size_t done = 0;
+  while (done < len) {
+    size_t part = len - done > 120 ? 120 : len - done;
+    char msg[300];
+    int n = snprintf(msg, sizeof msg, "Z%u,", simSpiOf(spi)->num);
+    n += simPutHex(msg + n, data + done, part);
+    n += snprintf(msg + n, sizeof msg - n, ",%lu\n", simNow());
+    simPut(msg, n);
+    done += part;
+  }
+}
+
+/** Bytes out and the bytes the selected devices answer (0xFF from none). */
+static void simSpiTransfer(spi_t *spi, const uint8_t *data, uint8_t *out, size_t len) {
+  if (!spi || !simReady || !simReplyLock) { if (out) memset(out, 0xff, len); return; }
+  size_t done = 0;
+  while (done < len) {
+    size_t part = len - done > 120 ? 120 : len - done;
+    xSemaphoreTake(simReplyLock, portMAX_DELAY);
+    uint32_t id = ++simNextId;
+    char msg[320];
+    int n = snprintf(msg, sizeof msg, "Y%lu,%u,", (unsigned long)id, simSpiOf(spi)->num);
+    n += simPutHex(msg + n, data + done, part);
+    n += snprintf(msg + n, sizeof msg - n, ",%lu\n", simNow());
+    bool ok = simAsk(msg, n, id, 1000);
+    if (out) {
+      for (size_t i = 0; i < part; i++) out[done + i] = ok && i < simReplyLen ? simReplyData[i] : 0xff;
+    }
+    xSemaphoreGive(simReplyLock);
+    done += part;
+  }
+}
+
+/** A 16- or 32-bit value as bytes on the wire, in the bus's bit order. */
+static size_t simSpiWord(spi_t *spi, uint32_t value, int bytes, uint8_t *buf) {
+  bool lsb = spi && simSpiOf(spi)->bitOrder == 0;  // SPI_LSBFIRST
+  for (int i = 0; i < bytes; i++) buf[i] = (uint8_t)(value >> (lsb ? 8 * i : 8 * (bytes - 1 - i)));
+  return bytes;
+}
+
+static uint32_t simSpiValue(spi_t *spi, const uint8_t *buf, int bytes) {
+  bool lsb = spi && simSpiOf(spi)->bitOrder == 0;
+  uint32_t v = 0;
+  for (int i = 0; i < bytes; i++) v |= (uint32_t)buf[i] << (lsb ? 8 * i : 8 * (bytes - 1 - i));
+  return v;
+}
+
+void __wrap_spiWriteByte(spi_t *spi, uint8_t data) { simSpiWrite(spi, &data, 1); }
+void __wrap_spiWriteByteNL(spi_t *spi, uint8_t data) { simSpiWrite(spi, &data, 1); }
+void __wrap_spiWriteWord(spi_t *spi, uint16_t data) { uint8_t b[2]; simSpiWrite(spi, b, simSpiWord(spi, data, 2, b)); }
+void __wrap_spiWriteShortNL(spi_t *spi, uint16_t data) { __wrap_spiWriteWord(spi, data); }
+void __wrap_spiWriteLong(spi_t *spi, uint32_t data) { uint8_t b[4]; simSpiWrite(spi, b, simSpiWord(spi, data, 4, b)); }
+void __wrap_spiWriteLongNL(spi_t *spi, uint32_t data) { __wrap_spiWriteLong(spi, data); }
+void __wrap_spiWriteNL(spi_t *spi, const void *data, uint32_t len) { simSpiWrite(spi, (const uint8_t *)data, len); }
+void __wrap_spiWrite(spi_t *spi, const uint32_t *data, uint8_t len) {
+  for (uint8_t i = 0; i < len; i++) __wrap_spiWriteLong(spi, data[i]);
+}
+
+// 16-bit pixels, high byte first (what displays expect).
+void __wrap_spiWritePixelsNL(spi_t *spi, const void *data, uint32_t len) {
+  const uint8_t *p = (const uint8_t *)data;
+  uint8_t buf[120];
+  size_t n = 0;
+  for (uint32_t i = 0; i + 1 < len; i += 2) {
+    buf[n++] = p[i + 1];
+    buf[n++] = p[i];
+    if (n == sizeof buf) { simSpiWrite(spi, buf, n); n = 0; }
+  }
+  if (n) simSpiWrite(spi, buf, n);
+}
+
+uint8_t __wrap_spiTransferByte(spi_t *spi, uint8_t data) { uint8_t r; simSpiTransfer(spi, &data, &r, 1); return r; }
+uint8_t __wrap_spiTransferByteNL(spi_t *spi, uint8_t data) { return __wrap_spiTransferByte(spi, data); }
+uint16_t __wrap_spiTransferWord(spi_t *spi, uint16_t data) {
+  uint8_t b[2], r[2];
+  simSpiTransfer(spi, b, r, simSpiWord(spi, data, 2, b));
+  return (uint16_t)simSpiValue(spi, r, 2);
+}
+uint16_t __wrap_spiTransferShortNL(spi_t *spi, uint16_t data) { return __wrap_spiTransferWord(spi, data); }
+uint32_t __wrap_spiTransferLong(spi_t *spi, uint32_t data) {
+  uint8_t b[4], r[4];
+  simSpiTransfer(spi, b, r, simSpiWord(spi, data, 4, b));
+  return simSpiValue(spi, r, 4);
+}
+uint32_t __wrap_spiTransferLongNL(spi_t *spi, uint32_t data) { return __wrap_spiTransferLong(spi, data); }
+void __wrap_spiTransferBytes(spi_t *spi, const uint8_t *data, uint8_t *out, uint32_t size) {
+  if (data) {
+    simSpiTransfer(spi, data, out, size);
+    return;
+  }
+  // No data: clock out 0xFF (SD cards read this way).
+  uint8_t ones[120];
+  memset(ones, 0xff, sizeof ones);
+  for (uint32_t done = 0; done < size;) {
+    uint32_t part = size - done > sizeof ones ? sizeof ones : size - done;
+    simSpiTransfer(spi, ones, out ? out + done : NULL, part);
+    done += part;
+  }
+}
+void __wrap_spiTransferBytesNL(spi_t *spi, const void *data, uint8_t *out, uint32_t size) {
+  __wrap_spiTransferBytes(spi, (const uint8_t *)data, out, size);
+}
+void __wrap_spiTransfer(spi_t *spi, uint32_t *data, uint8_t len) {
+  for (uint8_t i = 0; i < len; i++) data[i] = __wrap_spiTransferLong(spi, data[i]);
+}
+void __wrap_spiTransferBits(spi_t *spi, uint32_t data, uint32_t *out, uint8_t bits) {
+  uint32_t r = bits <= 8 ? __wrap_spiTransferByte(spi, (uint8_t)data) : bits <= 16 ? __wrap_spiTransferWord(spi, (uint16_t)data) : __wrap_spiTransferLong(spi, data);
+  if (out) *out = r;
+}
+void __wrap_spiTransferBitsNL(spi_t *spi, uint32_t data, uint32_t *out, uint8_t bits) { __wrap_spiTransferBits(spi, data, out, bits); }
 
 // ── Wi-Fi: a pretend network ──
 // The emulator has no radio: starting it would touch hardware QEMU doesn't

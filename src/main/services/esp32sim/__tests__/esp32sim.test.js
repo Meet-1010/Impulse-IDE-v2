@@ -13,7 +13,7 @@ describe('ESP32 simulator builds', () => {
   it('builds ESP32, S3 and C3 boards for themselves, with the settings QEMU needs', () => {
     const esp = simBuildPlan('esp32:esp32:esp32doit-devkit-v1', props({ 'build.mcu': 'esp32', 'build.bootloader_addr': '0x1000' }));
     expect(esp).toMatchObject({ chip: 'esp32', fqbn: 'esp32:esp32:esp32doit-devkit-v1', bootloaderAddr: 0x1000, psramMB: 0 });
-    expect(esp.properties).toMatchObject({ 'build.boot': 'dio', 'build.flash_mode': 'dio', 'build.cdc_on_boot': '0' });
+    expect(esp.properties).toMatchObject({ 'build.boot': 'dio', 'build.flash_mode': 'dio', 'build.memory_type': 'dio_qspi', 'build.cdc_on_boot': '0' });
     for (const fn of ['initArduino', 'ledcWrite', 'i2cWrite', 'pulseIn', 'neopixelWrite']) {
       expect(esp.properties['compiler.c.elf.extra_flags']).toContain(`--wrap=${fn}`);
     }
