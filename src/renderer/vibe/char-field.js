@@ -15,7 +15,7 @@ const LINE_PX = 15;
 const FRAME_MS = 1000 / 30;
 /** Ripples drawn at once, and how long one lives (seconds). */
 const MAX_RIPPLES = 6;
-const RIPPLE_LIFE_S = 5;
+const RIPPLE_LIFE_S = 2.8;
 
 const VERT = `#version 300 es
 in vec2 a_pos;
@@ -97,7 +97,7 @@ void main() {
   // A little light follows the pointer.
   if (u_mouse.x >= 0.0) {
     vec2 dm = (c - u_mouse) / (170.0 * u_dpr);
-    b += 0.32 * exp(-dot(dm, dm));
+    b += 0.25 * exp(-dot(dm, dm));
   }
 
   // Calm behind the headline and cards so text stays readable.
@@ -116,19 +116,20 @@ void main() {
     vec2 dr = (c - u_ripple[i].xy) / u_dpr;
     float dist = length(dr);
     // The front wobbles so it reads as flowing light, not a compass circle.
-    float wob = (fbm(vec3(dr / 240.0, age * 0.8 + float(i) * 7.3)) - 0.5) * 200.0;
-    // Fast at first, then slowing as it nears the edges, so the light lingers.
-    float R = 1100.0 * (1.0 - exp(-age / 0.9));
-    float W = 110.0 + 70.0 * age;
+    float wob = (fbm(vec3(dr / 200.0, age * 0.8 + float(i) * 7.3)) - 0.5) * 140.0;
+    // Fast at first, slowing to about 340 px out, so the light lingers there.
+    float R = 340.0 * (1.0 - exp(-age / 0.5));
+    float W = 60.0 + 15.0 * age;
     float d = dist + wob;
     // The wave: a bright front, and a band of light behind it that widens as
     // it ages and ends, so the field flows rather than fills.
     float front = exp(-pow((d - R) / W, 2.0));
-    float L = 260.0 + 220.0 * age;
+    float L = 110.0 + 25.0 * age;
     float tail = smoothstep(R + W, R - W, d) * exp(-pow(max(0.0, R - d) / L, 2.0));
-    float cloud = 0.55 + 0.7 * smoothstep(0.35, 0.65, fbm(vec3(dr / 380.0 + float(i), age * 0.5)));
-    float life = 1.0 - smoothstep(3.0, 5.0, age);
-    rb = max(rb, (front * 1.7 + tail * 1.0) * cloud * life);
+    // Swaths, not a full ring: about half of the band stays dark.
+    float cloud = 0.25 + 1.1 * smoothstep(0.5, 0.75, fbm(vec3(dr / 300.0 + float(i), age * 0.5)));
+    float life = 1.0 - smoothstep(1.3, 2.8, age);
+    rb = max(rb, (front * 0.8 + tail * 0.45) * cloud * life);
   }
   // Ripples pass behind the text dimmed, not hidden.
   b = max(b, rb * grain * mix(0.6, 1.0, calm));
@@ -274,7 +275,7 @@ export class CharField {
       lit: rgb(css.getPropertyValue('--v-field-lit'), [0.3, 0.5, 0.73]),
       peak: rgb(css.getPropertyValue('--v-field-peak'), [0.55, 0.73, 0.93]),
       baseAlpha: light ? 0.07 : 0.04,
-      litAlpha: light ? 0.6 : 0.78,
+      litAlpha: light ? 0.46 : 0.56,
     };
     if (this.fallback) this.drawFallback();
   }
