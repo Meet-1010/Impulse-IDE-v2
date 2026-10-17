@@ -45,7 +45,8 @@
     "test:smoke": "node scripts/smoke.mjs",
     "notices": "node scripts/third-party-notices.mjs",
     "test:e2e": "node scripts/e2e.mjs",
-    "build:cli": "node scripts/build-cli.mjs"
+    "build:cli": "node scripts/build-cli.mjs",
+    "field-lab": "node scripts/build-field-lab.mjs"
   },
   "keywords": [
     "arduino",

@@ -71,6 +71,16 @@ one primary reference with explicit rejects, below.
 | Credits card: plan, bar, remaining, Upgrade | Rork billing | — | Familiar AI-tool pattern |
 | Admin charts on a dashed graticule with one trace | Polar dashboard + oscilloscope | one trace per chart | Same instrument language as the app |
 
+## Field lab
+
+`npm run field-lab` writes `docs/design/field-lab.html`: the character field
+with its headline and card mock-up and a slider for every parameter in
+`FIELD_DEFAULTS` (`src/renderer/vibe/char-field.js`), plus colour pickers,
+"3 clicks" for overlapping ripples, and a Settings box to copy. Open the file
+in a browser (no server needed), tune, then paste the settings over
+`FIELD_DEFAULTS` and the colours into `--v-field-*` in `vibe.css`. Regenerate
+the page after changing the module so it stays the same code.
+
 ## Tokens
 
 Defined in `src/renderer/vibe/vibe.css` under `.vibe-root` (dark) and

@@ -8,14 +8,51 @@
 // per cell); pass 2 draws every pixel from that texture and a glyph atlas.
 // 30 fps, paused while the window is hidden, one still frame under reduced
 // motion, and a one-off 2D drawing where WebGL2 isn't available.
+//
+// Every number that shapes the look is a parameter (FIELD_DEFAULTS), so the
+// same code runs in docs/design/field-lab.html with sliders; what is chosen
+// there becomes the defaults here.
 
 const GLYPHS = '0123456789ABCDEF:';
 const FONT_PX = 12.5;
 const LINE_PX = 15;
 const FRAME_MS = 1000 / 30;
-/** Ripples drawn at once, and how long one lives (seconds). */
-const MAX_RIPPLES = 6;
-const RIPPLE_LIFE_S = 2.8;
+/** Ripples drawn at once (the oldest goes when there are more). */
+const MAX_RIPPLES = 8;
+
+/**
+ * The look, in CSS pixels and seconds. Alphas are for the dark theme; the
+ * light theme derives its own.
+ */
+export const FIELD_DEFAULTS = Object.freeze({
+  // Resting field
+  baseAlpha: 0.04,        // how visible unlit characters are
+  litAlpha: 0.62,         // how bright a fully lit character gets
+  ambient: 0.6,           // the drifting light's strength (0 = none)
+  ambientSpeed: 1,        // how fast it drifts
+  sweepEvery: 16,         // seconds between signal sweeps (0 = none)
+  sweepGain: 1,           // the sweep's brightness
+  pointerGlow: 0.25,      // light that follows the pointer (0 = none)
+  pointerRadius: 170,     // its size
+  calm: 0.2,              // how much of the ambient light shows behind the headline and cards
+  // Click ripple
+  rippleRadius: 340,      // how far out the front settles
+  rippleRise: 0.5,        // seconds to get most of the way there (smaller = faster)
+  rippleWidth: 60,        // the bright front's thickness
+  rippleWidthGrow: 15,    // how much thicker it gets per second
+  rippleTail: 110,        // the light trailing behind the front
+  rippleTailGrow: 25,     // how much longer the tail gets per second
+  rippleWobble: 140,      // how far the front wanders from a circle
+  rippleWobbleScale: 200, // the size of those waves
+  rippleFlow: 0.8,        // how fast the swaths drift while the ripple lives
+  rippleFront: 1,         // brightness of the front
+  rippleTailGlow: 0.55,   // brightness of the tail
+  rippleCoverage: 0.5,    // 0 = a few sparse swaths, 1 = the whole ring lights
+  rippleGrain: 0.3,       // 0 = even, 1 = every character its own brightness
+  rippleFadeStart: 1.3,   // seconds until it starts to dissolve
+  rippleFadeEnd: 2.8,     // seconds until it is gone
+  rippleCalm: 0.6,        // how much of a ripple shows behind the headline and cards
+});
 
 const VERT = `#version 300 es
 in vec2 a_pos;
@@ -31,8 +68,11 @@ uniform vec2 u_mouse;
 uniform vec2 u_focus;
 uniform vec2 u_focusR;
 uniform float u_dpr;
-// Click ripples: x, y in GL pixels and the age in seconds (negative: unused).
-uniform vec3 u_ripple[6];
+uniform float u_ambient, u_ambientSpeed, u_sweepEvery, u_sweepGain, u_pointerGlow, u_pointerRadius, u_calm;
+uniform float u_rRadius, u_rRise, u_rWidth, u_rWidthGrow, u_rTail, u_rTailGrow, u_rWobble, u_rWobbleScale, u_rFlow;
+uniform float u_rFront, u_rTailGlow, u_rCoverage, u_rGrain, u_rFadeStart, u_rFadeEnd, u_rCalm;
+// Click ripples: x, y in GL pixels, the age in seconds (negative: unused), a seed.
+uniform vec4 u_rip[8];
 out vec4 o;
 
 float h21(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
@@ -71,68 +111,75 @@ void main() {
   // Drifting light: two soft lights wander the field on slow Lissajous paths,
   // and domain-warped noise breaks what they light into swaths.
   vec2 q = c / (760.0 * u_dpr);
-  float t = u_time * 0.055;
+  float t = u_time * 0.055 * u_ambientSpeed;
   vec3 p = vec3(q, t);
   vec2 warp = vec2(fbm(p), fbm(p + vec3(5.2, 1.3, 2.8))) - 0.47;
   float n = fbm(vec3(q + 1.8 * warp, t * 1.25));
   vec2 uv = c / u_res;
   vec2 aspect = vec2(u_res.x / u_res.y, 1.0);
-  float lt = u_time * 0.07;
+  float lt = u_time * 0.07 * u_ambientSpeed;
   vec2 l1 = vec2(0.5 + 0.40 * sin(lt * 0.9), 0.5 + 0.34 * sin(lt * 1.3 + 1.0));
   vec2 l2 = vec2(0.5 + 0.42 * cos(lt * 0.7 + 2.0), 0.5 + 0.36 * sin(lt * 0.55 + 4.0));
   vec2 d1 = (uv - l1) * aspect;
   vec2 d2 = (uv - l2) * aspect;
   float light = max(exp(-dot(d1, d1) / 0.11), 0.85 * exp(-dot(d2, d2) / 0.08));
-  float b = 0.6 * light * smoothstep(0.40, 0.60, n);
+  float b = u_ambient * light * smoothstep(0.40, 0.60, n);
 
-  // The impulse: every 16 s a narrow band sweeps across in about 3 s.
-  float ph = mod(u_time, 16.0);
-  if (ph < 3.2) {
-    float s = (c.x / u_res.x) * 0.86 + (1.0 - c.y / u_res.y) * 0.14;
-    float d = (s - (ph / 3.2 * 1.4 - 0.2)) / 0.02;
-    float band = exp(-d * d) * smoothstep(0.0, 0.4, ph) * (1.0 - smoothstep(2.8, 3.2, ph));
-    b = max(b, band * (0.5 + 0.5 * h21(cell + 3.3)));
+  // The impulse: now and then a narrow band sweeps across in about 3 s.
+  if (u_sweepEvery > 0.0) {
+    float ph = mod(u_time, u_sweepEvery);
+    if (ph < 3.2) {
+      float s = (c.x / u_res.x) * 0.86 + (1.0 - c.y / u_res.y) * 0.14;
+      float d = (s - (ph / 3.2 * 1.4 - 0.2)) / 0.02;
+      float band = exp(-d * d) * smoothstep(0.0, 0.4, ph) * (1.0 - smoothstep(2.8, 3.2, ph));
+      b = max(b, u_sweepGain * band * (0.5 + 0.5 * h21(cell + 3.3)));
+    }
   }
 
   // A little light follows the pointer.
-  if (u_mouse.x >= 0.0) {
-    vec2 dm = (c - u_mouse) / (170.0 * u_dpr);
-    b += 0.25 * exp(-dot(dm, dm));
+  if (u_mouse.x >= 0.0 && u_pointerGlow > 0.0) {
+    vec2 dm = (c - u_mouse) / (u_pointerRadius * u_dpr);
+    b += u_pointerGlow * exp(-dot(dm, dm));
   }
 
   // Calm behind the headline and cards so text stays readable.
   vec2 fd = (c - u_focus) / max(u_focusR, vec2(1.0));
   float calm = smoothstep(0.78, 1.3, length(fd));
-  b *= mix(0.2, 1.0, calm);
+  b *= mix(u_calm, 1.0, calm);
 
   // Click ripples: a ring of lit characters runs out from the click, grainy
   // character by character, with a glow that trails behind the front and
-  // keeps flowing for a few seconds before it fades.
-  float grain = 0.7 + 0.6 * h21(cell + 5.7);
+  // keeps flowing for a few seconds before it dissolves. Each ripple keeps
+  // its own seed, so its swaths never jump when another one ends.
+  float grain = 1.0 - u_rGrain + 2.0 * u_rGrain * h21(cell + 5.7);
+  float lo = mix(0.75, 0.2, u_rCoverage);
   float rb = 0.0;
-  for (int i = 0; i < 6; i++) {
-    float age = u_ripple[i].z;
+  for (int i = 0; i < 8; i++) {
+    float age = u_rip[i].z;
     if (age < 0.0) continue;
-    vec2 dr = (c - u_ripple[i].xy) / u_dpr;
+    float seed = u_rip[i].w;
+    vec2 dr = (c - u_rip[i].xy) / u_dpr;
     float dist = length(dr);
     // The front wobbles so it reads as flowing light, not a compass circle.
-    float wob = (fbm(vec3(dr / 200.0, age * 0.8 + float(i) * 7.3)) - 0.5) * 140.0;
-    // Fast at first, slowing to about 340 px out, so the light lingers there.
-    float R = 340.0 * (1.0 - exp(-age / 0.5));
-    float W = 60.0 + 15.0 * age;
+    float wob = (fbm(vec3(dr / u_rWobbleScale, age * u_rFlow + seed * 7.3)) - 0.5) * u_rWobble;
+    // Fast at first, then slowing as it settles at its radius, so the light lingers there.
+    float R = u_rRadius * (1.0 - exp(-age / max(u_rRise, 0.05)));
+    float W = u_rWidth + u_rWidthGrow * age;
     float d = dist + wob;
-    // The wave: a bright front, and a band of light behind it that widens as
-    // it ages and ends, so the field flows rather than fills.
+    // The wave: a bright front, and a band of light behind it that ends, so
+    // the field flows rather than fills.
     float front = exp(-pow((d - R) / W, 2.0));
-    float L = 110.0 + 25.0 * age;
+    float L = u_rTail + u_rTailGrow * age;
     float tail = smoothstep(R + W, R - W, d) * exp(-pow(max(0.0, R - d) / L, 2.0));
-    // Swaths, not a full ring: about half of the band stays dark.
-    float cloud = 0.25 + 1.1 * smoothstep(0.5, 0.75, fbm(vec3(dr / 300.0 + float(i), age * 0.5)));
-    float life = 1.0 - smoothstep(1.3, 2.8, age);
-    rb = max(rb, (front * 0.8 + tail * 0.45) * cloud * life);
+    // Swaths, not a full ring: part of the band stays dark.
+    float cloud = 0.25 + 1.1 * smoothstep(lo, lo + 0.25, fbm(vec3(dr / 300.0 + seed, age * 0.5)));
+    float life = 1.0 - smoothstep(u_rFadeStart, max(u_rFadeEnd, u_rFadeStart + 0.05), age);
+    float ri = clamp((front * u_rFront + tail * u_rTailGlow) * cloud * life, 0.0, 1.0);
+    // Overlapping ripples reinforce each other gently and dissolve together.
+    rb = rb + ri - rb * ri;
   }
   // Ripples pass behind the text dimmed, not hidden.
-  b = max(b, rb * grain * mix(0.6, 1.0, calm));
+  b = max(b, rb * grain * mix(u_rCalm, 1.0, calm));
 
   o = vec4(clamp(b, 0.0, 1.0), (glyph + 0.5) / 32.0, visible, 1.0);
 }`;
@@ -166,6 +213,16 @@ void main() {
   o = vec4(color * alpha, alpha);
 }`;
 
+/** Parameter → uniform name in the field pass. */
+const UNIFORM_OF = {
+  ambient: 'u_ambient', ambientSpeed: 'u_ambientSpeed', sweepEvery: 'u_sweepEvery', sweepGain: 'u_sweepGain',
+  pointerGlow: 'u_pointerGlow', pointerRadius: 'u_pointerRadius', calm: 'u_calm',
+  rippleRadius: 'u_rRadius', rippleRise: 'u_rRise', rippleWidth: 'u_rWidth', rippleWidthGrow: 'u_rWidthGrow',
+  rippleTail: 'u_rTail', rippleTailGrow: 'u_rTailGrow', rippleWobble: 'u_rWobble', rippleWobbleScale: 'u_rWobbleScale',
+  rippleFlow: 'u_rFlow', rippleFront: 'u_rFront', rippleTailGlow: 'u_rTailGlow', rippleCoverage: 'u_rCoverage',
+  rippleGrain: 'u_rGrain', rippleFadeStart: 'u_rFadeStart', rippleFadeEnd: 'u_rFadeEnd', rippleCalm: 'u_rCalm',
+};
+
 function compile(gl, type, source) {
   const shader = gl.createShader(type);
   gl.shaderSource(shader, source);
@@ -194,15 +251,22 @@ function program(gl, frag) {
   return { p, u: uniforms };
 }
 
-const rgb = (value, fallback) => {
-  const parts = String(value || '').split(',').map((v) => Number(v.trim()) / 255);
+/** "150, 162, 178" or "#96a2b2" → [r, g, b] in 0..1. */
+export const rgb = (value, fallback) => {
+  const s = String(value || '').trim();
+  if (/^#[0-9a-f]{6}$/i.test(s)) return [1, 3, 5].map((i) => parseInt(s.slice(i, i + 2), 16) / 255);
+  const parts = s.split(',').map((v) => Number(v.trim()) / 255);
   return parts.length === 3 && parts.every((v) => Number.isFinite(v)) ? parts : fallback;
 };
 
 export class CharField {
-  /** @param {HTMLCanvasElement} canvas */
-  constructor(canvas) {
+  /**
+   * @param {HTMLCanvasElement} canvas
+   * @param {Partial<typeof FIELD_DEFAULTS> & { colors?: { base?: string, lit?: string, peak?: string } }} [params]
+   */
+  constructor(canvas, params = {}) {
     this.canvas = canvas;
+    this.params = { ...FIELD_DEFAULTS, ...params };
     this.gl = null;
     this.running = false;
     this.raf = 0;
@@ -210,9 +274,9 @@ export class CharField {
     this.t0 = performance.now();
     this.pointer = null;
     this.focus = null;
-    /** Live click ripples: { x, y } in CSS pixels, t0 in performance.now() ms. */
+    /** Live click ripples: { x, y } in CSS pixels, t0 in performance.now() ms, seed. */
     this.ripples = [];
-    this.rippleData = new Float32Array(MAX_RIPPLES * 3);
+    this.rippleData = new Float32Array(MAX_RIPPLES * 4);
     this.reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
     this.loop = this.loop.bind(this);
     this.onVisibility = () => (document.hidden ? this.pause() : this.resume());
@@ -230,6 +294,13 @@ export class CharField {
     document.addEventListener('visibilitychange', this.onVisibility);
     this.resizeObserver = new ResizeObserver(() => this.resize());
     this.resizeObserver.observe(canvas);
+  }
+
+  /** Change the look while it runs (the field lab's sliders). */
+  setParams(patch) {
+    this.params = { ...this.params, ...patch };
+    if (patch.colors || 'baseAlpha' in patch || 'litAlpha' in patch) this.colors();
+    if (!this.running && this.gl) this.frame(performance.now(), true);
   }
 
   async init() {
@@ -266,16 +337,17 @@ export class CharField {
     return true;
   }
 
-  /** Read the field colours from the theme tokens. */
+  /** The field colours: the theme tokens, or the colours given in params. */
   colors() {
     const css = getComputedStyle(document.documentElement);
     const light = document.documentElement.dataset.theme === 'light';
+    const given = this.params.colors || {};
     this.palette = {
-      base: rgb(css.getPropertyValue('--v-field-base'), [0.59, 0.64, 0.7]),
-      lit: rgb(css.getPropertyValue('--v-field-lit'), [0.3, 0.5, 0.73]),
-      peak: rgb(css.getPropertyValue('--v-field-peak'), [0.55, 0.73, 0.93]),
-      baseAlpha: light ? 0.07 : 0.04,
-      litAlpha: light ? 0.46 : 0.56,
+      base: rgb(given.base || css.getPropertyValue('--v-field-base'), [0.59, 0.64, 0.7]),
+      lit: rgb(given.lit || css.getPropertyValue('--v-field-lit'), [0.3, 0.5, 0.73]),
+      peak: rgb(given.peak || css.getPropertyValue('--v-field-peak'), [0.55, 0.73, 0.93]),
+      baseAlpha: light ? this.params.baseAlpha * 1.75 : this.params.baseAlpha,
+      litAlpha: light ? this.params.litAlpha * 0.82 : this.params.litAlpha,
     };
     if (this.fallback) this.drawFallback();
   }
@@ -343,7 +415,7 @@ export class CharField {
   /** A click at (x, y) in CSS pixels relative to the canvas: light runs out from there. */
   ripple(x, y) {
     if (this.reduced || this.stopped) return;
-    this.ripples.push({ x, y, t0: performance.now() });
+    this.ripples.push({ x, y, t0: performance.now(), seed: Math.random() * 100 });
     if (this.ripples.length > MAX_RIPPLES) this.ripples.splice(0, this.ripples.length - MAX_RIPPLES);
     this.resume();
   }
@@ -358,6 +430,7 @@ export class CharField {
     const w = this.canvas.width;
     const h = this.canvas.height;
     const [cw, ch] = this.cellPx;
+    const P = this.params;
 
     gl.bindVertexArray(this.vao);
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.fbo);
@@ -368,22 +441,24 @@ export class CharField {
     gl.uniform2f(f.u.u_cell, cw, ch);
     gl.uniform1f(f.u.u_time, t);
     gl.uniform1f(f.u.u_dpr, dpr);
+    for (const [key, name] of Object.entries(UNIFORM_OF)) gl.uniform1f(f.u[name], Number(P[key]) || 0);
     // Pointer and focus in GL pixels (origin bottom-left).
     if (this.pointer && !this.reduced) gl.uniform2f(f.u.u_mouse, this.pointer[0] * dpr, h - this.pointer[1] * dpr);
     else gl.uniform2f(f.u.u_mouse, -1, -1);
     const focus = this.focus || { x: w / dpr / 2, y: h / dpr / 2, rx: 0, ry: 0 };
     gl.uniform2f(f.u.u_focus, focus.x * dpr, h - focus.y * dpr);
     gl.uniform2f(f.u.u_focusR, focus.rx * dpr, focus.ry * dpr);
-    // Ripples: position in GL pixels (origin bottom-left) and age; finished ones go.
-    this.ripples = this.ripples.filter((r) => now - r.t0 < RIPPLE_LIFE_S * 1000);
+    // Ripples: position in GL pixels (origin bottom-left), age and seed; finished ones go.
+    this.ripples = this.ripples.filter((r) => now - r.t0 < P.rippleFadeEnd * 1000);
     const data = this.rippleData;
     for (let i = 0; i < MAX_RIPPLES; i++) {
       const r = this.ripples[i];
-      data[i * 3] = r ? r.x * dpr : 0;
-      data[i * 3 + 1] = r ? h - r.y * dpr : 0;
-      data[i * 3 + 2] = r ? (now - r.t0) / 1000 : -1;
+      data[i * 4] = r ? r.x * dpr : 0;
+      data[i * 4 + 1] = r ? h - r.y * dpr : 0;
+      data[i * 4 + 2] = r ? (now - r.t0) / 1000 : -1;
+      data[i * 4 + 3] = r ? r.seed : 0;
     }
-    gl.uniform3fv(f.u['u_ripple[0]'], data);
+    gl.uniform4fv(f.u['u_rip[0]'], data);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
