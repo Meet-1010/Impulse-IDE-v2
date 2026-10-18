@@ -699,7 +699,12 @@ pieces have `node --test` coverage against Postgres):
 | Token-pressure compaction with pruning (§3.4) | Partly: the renderer compacts at 70K tokens; no pruning step | `renderer.js` AI_COMPACT_THRESHOLD |
 | Harness manifest from the cloud (§3.2) | Partly: the learning manifest exists; prompt and knowledge are still bundled only | `cloud/src/learning.js` |
 | Multi-device projects (§4) | Not started | — |
-| Diagnosis algorithm L0–L3, signature library, Impulse Probe (§6) | Partly: failure codes + known fixes exist; no evidence sheet, no probe firmware | `buildOutput.js` classifyFailure |
+| Diagnosis algorithm L0–L3, signature library, Impulse Probe (§6) | Partly: failure codes, known fixes, the pin check (L2 for pins) and the simulator's evidence back to the model (L1); no evidence sheet, no probe firmware | `buildOutput.js`, `pinCheck.js`, `verify.js` |
+| Pin truth per chip, checked on every build (owner's report, 2026-10-18) | **Built** | `knowledge/pinMap.js`, `pinCheck.js`, `npm run knowledge:audit` |
+| Libraries: auto-install from a failed build, index-backed search, chat UI | **Built** | `libraryService.js`, `vibe/libraries.js` |
+| Serial: main-process line assembly, shared history, port handover on upload | **Built** | `serialMonitor.js` |
+| Official documentation the agent can read, cached | **Built** | `knowledge/docs.js` |
+| File operations (new, rename, delete to Trash) in chat mode | **Built** | `ipc/fileHandlers.js`, `vibe/bench.js` |
 | Eval set (§7 phase 0) | Not started | — |
 
 ---
