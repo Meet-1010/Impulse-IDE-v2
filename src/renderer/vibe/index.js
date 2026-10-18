@@ -372,7 +372,7 @@ function noticeCard(m) {
   if (m.prompt) {
     card.append(h('div', { class: 'v-answer-actions' },
       h('button', { type: 'button', class: 'v-btn primary', onclick: () => send(m.prompt, { mode: 'debug' }) }, icon(ICON.debug), 'Fix it'),
-      h('button', { type: 'button', class: 'v-btn', text: 'Show the full output', onclick: () => { setMode('ide'); impulse.tools.open('output'); } })));
+      h('button', { type: 'button', class: 'v-btn', text: 'Open the simulator', onclick: () => bench.open('sim') })));
   }
   return h('div', { class: 'v-msg-ai', dataset: { id: m.id } }, card);
 }
@@ -712,15 +712,22 @@ function openPlusMenu(anchor) {
     { heading: 'Add to your project' },
     { label: 'Libraries', sub: 'What this sketch needs, and anything else to add', icon: ICON.library, onSelect: () => openLibraries({ impulse }) },
     { label: 'Files', sub: 'Open, add, rename or delete the project\'s files', icon: ICON.folder, onSelect: () => bench.open('files') },
-    { label: 'Examples', sub: 'Open a ready-made sketch and circuit', icon: ICON.examples, onSelect: () => impulse.tools.open('examples') },
+    { label: 'Examples', sub: 'Open a ready-made sketch and circuit', icon: ICON.examples, onSelect: () => openExamples() },
     { label: 'Open a folder…', sub: 'Work on a sketch you already have', icon: ICON.folderPlus, onSelect: () => openExistingFolder() },
     { separator: true },
     { heading: 'Board' },
     { label: 'Verify (compile)', meta: '⌘R', icon: ICON.verify, disabled: !impulse.project.current(), onSelect: () => boardAction('verify') },
     { label: 'Upload to the board', meta: '⌘U', sub: board.portPresent ? `${board.name || 'Board'} on ${board.port}` : 'Connect a board first', icon: ICON.upload, disabled: !board.portPresent || !impulse.project.current(), onSelect: () => boardAction('upload') },
-    { label: 'Board Manager', sub: 'Install support for more boards', icon: ICON.chip, onSelect: () => impulse.tools.open('boards') },
-    { label: 'Serial plotter', icon: ICON.plotter, onSelect: () => impulse.tools.open('plotter') },
+    { label: 'Choose a board', sub: 'Impulse installs what a board needs when you pick it', icon: ICON.chip, onSelect: () => openBoardMenu(boardChip) },
+    { label: 'Serial monitor', icon: ICON.terminal, onSelect: () => bench.open('serial') },
+    { label: 'Serial plotter', sub: 'Opens the IDE view', icon: ICON.plotter, onSelect: () => impulse.tools.open('plotter') },
   ], { label: 'More tools', side: 'top' });
+}
+
+/** The simulator's gallery of ready-made sketches and circuits, in the side panel. */
+function openExamples() {
+  bench.open('sim');
+  requestAnimationFrame(() => impulse.sim.examples());
 }
 
 /* ═════════════════════════════ builds ═══════════════════════════════════ */
@@ -1248,8 +1255,9 @@ function openSearch(anchor) {
   const actions = [
     { label: 'New chat', icon: ICON.plus, run: () => newChat() },
     { label: 'Open the IDE', icon: ICON.ide, run: () => setMode('ide') },
-    { label: 'Library Manager', icon: ICON.library, run: () => impulse.tools.open('libraries') },
-    { label: 'Examples', icon: ICON.examples, run: () => impulse.tools.open('examples') },
+    { label: 'Libraries', icon: ICON.library, run: () => openLibraries({ impulse }) },
+    { label: 'Files', icon: ICON.folder, run: () => bench.open('files') },
+    { label: 'Examples', icon: ICON.examples, run: () => openExamples() },
     { label: 'Serial monitor', icon: ICON.terminal, run: () => bench.open('serial') },
     { label: 'Simulator', icon: ICON.sim, run: () => bench.open('sim') },
     { label: 'Credits and plans', icon: ICON.bolt, run: () => account.openPlans() },

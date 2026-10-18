@@ -5819,6 +5819,8 @@ Object.assign(window.impulse, {
         fit: () => simManager?.fit(),
         /** What is wired on the canvas (the same facts the agent is given). */
         facts: () => simManager?.circuitFacts?.() || null,
+        /** The gallery of ready-made sketches with their circuits. */
+        examples: () => simManager?.gallery?.open?.(),
         /** Start the simulation (compiles first); no-op while it runs. */
         run() {
             if (simManager && !simManager.running) simManager.run();

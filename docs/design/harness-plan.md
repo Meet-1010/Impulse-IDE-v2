@@ -704,6 +704,76 @@ pieces have `node --test` coverage against Postgres):
 
 ---
 
+## 12. Should Impulse be built on arduino-cli? (answer, 2026-10-18)
+
+**Keep arduino-cli, and stop paying its one real cost by running it as a
+daemon. Do not fork the Arduino IDE.**
+
+### What arduino-cli actually does for us
+
+It is not a thin wrapper around a compiler. It owns:
+
+- the package index format, and resolving a core to its exact toolchain
+  downloads (compiler, uploader, tools) per platform and version;
+- the `platform.txt` / `boards.txt` recipe language — build properties, menu
+  options, per-board overrides, pre/post hooks — which is how one command
+  compiles for 50 vendors' boards;
+- the library index, versions and dependency resolution;
+- pluggable discovery (which board is on which port) and pluggable monitors;
+- upload orchestration for avrdude, esptool, picotool, bossac, dfu-util,
+  teensy_loader, STM32CubeProgrammer and the rest, including the 1200-baud
+  touch and reset dances each board needs.
+
+Every core release can change those recipes. Rebuilding this means owning
+compatibility with every vendor core, forever, as a side quest.
+
+### The licence decides the question as much as the engineering
+
+| Project | Licence | What it means for Impulse |
+|---|---|---|
+| `arduino/arduino-cli` | GPL-3.0 | Impulse runs it as a separate executable and talks to it over a process boundary. That is aggregation: Impulse's own source stays Impulse's. The binary must be shipped with its licence and its source offer, which the app already does. |
+| `arduino/arduino-ide` (IDE 2.x) | **AGPL-3.0** | Forking its source into Impulse would make Impulse AGPL. Under §13 that reaches users over a network too. For a product with a cloud gateway, that is a decision about the business, not a detail. |
+
+So "build from scratch using the open-source Arduino IDE" is the one option
+that costs the most engineering *and* constrains the licence hardest.
+
+### Where Impulse is actually different
+
+Not in the build system: in chat-first building, the simulator, the knowledge
+layer, diagnosis and learning from fixes. Every hour spent re-implementing
+`platform.txt` is an hour not spent on those.
+
+### The real complaint, and the real fix
+
+The pain was never "arduino-cli is the wrong engine". It was that Impulse ran
+it as one short-lived process per command and showed none of it. That is now
+fixed above the boundary: build jobs stream every line, parse the memory
+summary and name failures; the monitor keeps its own history and hands the
+port over for uploads; libraries install themselves from the index.
+
+The next step, when it is worth it, is `arduino-cli daemon` (gRPC):
+
+- streaming progress for compile, upload and library install as structured
+  events rather than scraped text;
+- a board-watch stream instead of polling `board list`;
+- the pluggable monitor, so the serial port is opened by the same tool that
+  knows the board;
+- one warm process: no per-command start-up, so a compile begins immediately.
+
+It is a contained change: `arduinoService`, `libraryService` and
+`serialMonitor` already hide the CLI behind their own interfaces, so the
+transport can change without touching the UI or the agent. Treat it as an
+optimisation to measure, not a rewrite.
+
+### What Impulse should own itself (and now does)
+
+The serial monitor and the port handover, the pin truth per chip, library
+resolution as a product experience, the board knowledge and documentation
+layers, the simulator, and the agent harness. Those are the parts that decide
+whether the product is good; the build engine is not one of them.
+
+---
+
 ## 9. Sources
 
 - DeepSeek Harness: github.com/deepseek-ai/deepseek-harness (MIT; branch
