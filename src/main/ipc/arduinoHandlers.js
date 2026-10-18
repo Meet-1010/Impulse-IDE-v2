@@ -22,6 +22,25 @@ function register(ipcMain, ctx) {
     return check.valid ? null : { success: false, error: check.error };
   };
 
+  /** A failed build job, with everything the window and the agent show: code, title, hint, diagnostics, memory, output. */
+  const failed = (result, fallback) => ({
+    success: false,
+    error: result.title || result.error?.message || result.error || result.message || fallback,
+    code: result.code || result.error?.code || null,
+    title: result.title || null,
+    hint: result.hint || '',
+    excerpt: result.excerpt || '',
+    errors: Array.isArray(result.errors) ? result.errors : undefined,
+    diagnostics: Array.isArray(result.diagnostics) ? result.diagnostics : [],
+    memory: result.memory || null,
+    summary: Array.isArray(result.summary) ? result.summary : [],
+    output: typeof result.output === 'string' ? result.output : undefined,
+    busy: result.busy || null,
+  });
+
+  ipcMain.handle('arduino:cancel-build', withDebugLog('arduino:cancel-build', async () => ({ success: true, cancelled: arduinoService.jobs.cancel() })));
+  ipcMain.handle('arduino:build-status', withDebugLog('arduino:build-status', async () => ({ success: true, data: arduinoService.jobs.status() })));
+
   ipcMain.handle('arduino:compile', withDebugLog('arduino:compile', async (event, sketchPath, boardFQBN) => {
     const parsed = parseOrDefault(schemas.arduinoCompile, { sketchPath: sketchPath ?? '', boardFQBN: boardFQBN ?? '' }, defaultFail);
     if (!parsed.ok) return parsed.defaultResult;
@@ -29,9 +48,7 @@ function register(ipcMain, ctx) {
     if (blocked) return blocked;
     try {
       const result = await arduinoService.compile(parsed.data.sketchPath, parsed.data.boardFQBN);
-      if (result && result.success === false) {
-        return { success: false, error: result.error?.message || result.error || result.message || 'Compile failed' };
-      }
+      if (result && result.success === false) return failed(result, 'Compile failed');
       return { success: true, data: result };
     } catch (error) {
       const analyzedError = await errorMemory.analyzeError(error).catch(() => null);
@@ -101,9 +118,7 @@ function register(ipcMain, ctx) {
     if (blocked) return blocked;
     try {
       const result = await arduinoService.upload(parsed.data.sketchPath, parsed.data.boardFQBN, parsed.data.port);
-      if (result && result.success === false) {
-        return { success: false, error: result.error?.message || result.error || result.message || 'Upload failed' };
-      }
+      if (result && result.success === false) return failed(result, 'Upload failed');
       return { success: true, data: result };
     } catch (error) {
       const analyzedError = await errorMemory.analyzeError(error).catch(() => null);

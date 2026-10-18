@@ -9,6 +9,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     compileHex: (sketchPath, boardFQBN, options) => ipcRenderer.invoke('arduino:compile-hex', sketchPath, boardFQBN, options),
     compileDebug: (sketchPath, boardFQBN) => ipcRenderer.invoke('arduino:compile-debug', sketchPath, boardFQBN),
     upload: (sketchPath, boardFQBN, port) => ipcRenderer.invoke('arduino:upload', sketchPath, boardFQBN, port),
+    cancelBuild: () => ipcRenderer.invoke('arduino:cancel-build'),
+    buildStatus: () => ipcRenderer.invoke('arduino:build-status'),
+    // Every compile/upload as it runs: start, stage, progress, output lines, done (see main/services/buildJobs.js).
+    onBuildEvent: (callback) => {
+      const handler = (event, ev) => callback(ev);
+      ipcRenderer.on('build:event', handler);
+      return () => ipcRenderer.removeListener('build:event', handler);
+    },
     listBoards: () => ipcRenderer.invoke('arduino:list-boards'),
     listPorts: () => ipcRenderer.invoke('arduino:list-ports'),
     checkCLI: () => ipcRenderer.invoke('arduino:check-cli'),

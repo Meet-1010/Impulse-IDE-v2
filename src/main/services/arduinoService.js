@@ -2,7 +2,8 @@ const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs').promises;
 const ErrorHandler = require('../utils/errorHandler');
-const notifications = require('../utils/notifications');
+const { BuildJobs } = require('./buildJobs');
+const { parseMemory, summaryLines, parseDiagnostics, classifyFailure, firstErrorLine } = require('./buildOutput');
 const { PlatformIO, projectRoot } = require('./platformio');
 const { extraCoreFor } = require('./toolchain');
 
@@ -18,6 +19,24 @@ const { extraCoreFor } = require('./toolchain');
  * SECURITY: All CLI commands use spawn() with argument arrays.
  * Never use shell string interpolation with user-controlled input.
  */
+// A build is stopped when it prints nothing for this long (a first ESP32 build
+// can legitimately take several minutes while the core compiles) or runs past the maximum.
+const COMPILE_IDLE_MS = 180_000;
+const COMPILE_MAX_MS = 20 * 60_000;
+const UPLOAD_IDLE_MS = 90_000;
+const UPLOAD_MAX_MS = 15 * 60_000;
+// The whole output kept for parsing and the full log (the live view streams every line regardless).
+const MAX_OUTPUT_CHARS = 4 * 1024 * 1024;
+
+/** An Error with a stable code (and optionally a title and hint) for a failed job. */
+function coded(message, code, { title = null, hint = '' } = {}) {
+  const err = new Error(message);
+  err.code = code;
+  err.title = title || message;
+  err.hint = hint;
+  return err;
+}
+
 class ArduinoService {
   /**
    * @param {{ cliPath?: string|null, platformio?: PlatformIO }} [opts] the arduino-cli to run (see
@@ -27,6 +46,8 @@ class ArduinoService {
     // GUI-launched apps on macOS don't inherit the shell PATH, so the
     // toolchain service resolves an absolute path; PATH lookup is the fallback.
     this.cliPath = cliPath || 'arduino-cli';
+    /** One compile or upload at a time, watched live (see buildJobs.js). */
+    this.jobs = new BuildJobs();
     this.coreIndexed = false;
     this.platformio = platformio;
   }
@@ -462,145 +483,216 @@ class ArduinoService {
 
   // ==================== Compile/Upload Operations ====================
 
+  // ==================== Build jobs ====================
+
   /**
-   * Compile an Arduino sketch
+   * Compile an Arduino sketch as a build job: one at a time, every output
+   * line streamed to the window, the result parsed into Arduino IDE's memory
+   * summary and structured diagnostics. Resolves with the result, or with
+   * `{ success: false, code, title, hint, ... }` (never throws).
    */
   async compile(sketchPath, boardFQBN) {
+    try {
+      return await this.jobs.run({ kind: 'compile', sketchPath, fqbn: boardFQBN }, (job) => this._compileJob(job, sketchPath, boardFQBN));
+    } catch (error) {
+      return this._handled(error, 'Arduino Compile', { sketchPath, boardFQBN });
+    }
+  }
+
+  /**
+   * Spawn arduino-cli for a job and feed its output to the job line by line
+   * (stages, progress and the live view come from the lines). Resolves with
+   * the exit code and the whole output. The process is stopped when it prints
+   * nothing for `idleMs`, runs longer than `maxMs`, or the job is cancelled.
+   * @returns {Promise<{ code: number|string|null, output: string, reason: null|'IDLE'|'MAX'|'CANCELLED'|'SPAWN' }>}
+   */
+  _runStreaming(job, args, { cwd, idleMs, maxMs }) {
+    return new Promise((resolve) => {
+      let child;
+      let output = '';
+      const rest = { out: '', err: '' };
+      let reason = null;
+      let finished = false;
+      let idle = null;
+      let max = null;
+      const finish = (code) => {
+        if (finished) return;
+        finished = true;
+        clearTimeout(idle);
+        clearTimeout(max);
+        job.signal.removeEventListener('abort', onAbort);
+        for (const key of ['out', 'err']) if (rest[key]) job.line(rest[key]);
+        resolve({ code, output, reason });
+      };
+      const onAbort = () => { reason = 'CANCELLED'; try { child?.kill(); } catch { /* gone */ } };
+      const armIdle = () => {
+        clearTimeout(idle);
+        idle = setTimeout(() => { reason = reason || 'IDLE'; try { child?.kill(); } catch { /* gone */ } }, idleMs);
+      };
+      try {
+        child = spawn(this.cliPath, args, { cwd });
+      } catch (error) {
+        output = error.message;
+        reason = 'SPAWN';
+        return finish(error.code || -1);
+      }
+      job.attach(child);
+      job.signal.addEventListener('abort', onAbort, { once: true });
+      max = setTimeout(() => { reason = reason || 'MAX'; try { child.kill(); } catch { /* gone */ } }, maxMs);
+      const onData = (key) => (data) => {
+        const text = data.toString();
+        if (output.length < MAX_OUTPUT_CHARS) output += text;
+        rest[key] += text;
+        const parts = rest[key].split('\n');
+        rest[key] = parts.pop();
+        for (const line of parts) job.line(line);
+        armIdle();
+      };
+      child.stdout.on('data', onData('out'));
+      child.stderr.on('data', onData('err'));
+      child.on('close', (code) => finish(code));
+      child.on('error', (error) => {
+        output += `\n${error.message}`;
+        reason = reason || 'SPAWN';
+        finish(error.code === 'ENOENT' ? 'ENOENT' : -1);
+      });
+      armIdle();
+    });
+  }
+
+  /** The compile half of a job. Resolves with the parsed result; throws a coded Error on failure. */
+  async _compileJob(job, sketchPath, boardFQBN) {
     const pioRoot = this.platformioRoot(sketchPath);
     if (pioRoot) {
+      job.stage('compiling');
       const res = await this.platformio.build(pioRoot);
+      for (const line of String(res.output || '').split('\n')) job.line(line);
+      const memory = parseMemory(res.output || '');
       if (!res.success) {
-        const err = new Error(res.error);
-        err.errors = res.errors || [];
-        err.output = res.output;
-        throw err;
+        throw this._failure(res.output || res.error || '', 'compile', { memory, override: { code: 'COMPILE_FAILED', title: res.error || 'The PlatformIO build failed', hint: 'The output below says why.' }, errors: res.errors });
       }
-      return { success: true, output: res.output, warnings: [], programSize: res.programSize, usagePercent: res.usagePercent, message: `Built PlatformIO environment ${res.env}` };
+      const summary = summaryLines(memory);
+      return {
+        success: true, output: res.output, warnings: [], memory, summary, diagnostics: parseDiagnostics(res.output || ''),
+        programSize: res.programSize ?? memory?.flash?.used ?? null, usagePercent: res.usagePercent ?? memory?.flash?.percent ?? null,
+        message: `Built PlatformIO environment ${res.env}`,
+      };
     }
+    const validation = ErrorHandler.validateInput(
+      { sketchPath, boardFQBN },
+      { sketchPath: { required: true, type: 'string', minLength: 1 }, boardFQBN: { required: true, type: 'string', minLength: 5 } }
+    );
+    if (!validation.valid) throw coded(`Invalid input: ${validation.errors.join(', ')}`, 'INVALID');
+    if (!this.validateFQBN(boardFQBN)) throw coded(`Invalid FQBN format: "${boardFQBN}". Expected format: vendor:architecture:board (e.g., arduino:avr:uno)`, 'INVALID');
     try {
-      // Input validation with user-friendly messages
-      const validation = ErrorHandler.validateInput(
-        { sketchPath, boardFQBN },
-        {
-          sketchPath: { required: true, type: 'string', minLength: 1 },
-          boardFQBN: { required: true, type: 'string', minLength: 5 }
-        }
-      );
-
-      if (!validation.valid) {
-        throw new Error(`Invalid input: ${validation.errors.join(', ')}`);
-      }
-
-      if (!this.validateFQBN(boardFQBN)) {
-        throw new Error(`Invalid FQBN format: "${boardFQBN}". Expected format: vendor:architecture:board (e.g., arduino:avr:uno)`);
-      }
-
-      // Verify sketch exists
-      try {
-        await fs.access(sketchPath);
-      } catch (error) {
-        throw new Error(`Sketch file not found: ${sketchPath}. Please check the file path.`);
-      }
-
-      // Check if Arduino CLI is available
-      if (!await this.checkCLI()) {
-        throw new Error('Arduino CLI is not available. Please install Arduino CLI and ensure it is in your PATH.');
-      }
-
-      await this.ensureCoreIndexed();
-
-      // Show progress notification
-      const progressId = notifications.progress('Compiling sketch...', 0);
-
-      return new Promise((resolve, reject) => {
-        const args = [
-          'compile',
-          '--fqbn', boardFQBN,
-          '--verbose',
-          sketchPath
-        ];
-
-        const compileProcess = spawn(this.cliPath, args, {
-          cwd: path.dirname(sketchPath),
-          timeout: 120000 // 2 minute timeout
-        });
-
-        let stdout = '';
-        let stderr = '';
-        let progress = 10;
-
-        const updateProgress = () => {
-          progress = Math.min(progress + 10, 90);
-          notifications.updateProgress(progressId, progress);
-        };
-
-        const progressInterval = setInterval(updateProgress, 2000);
-
-        compileProcess.stdout.on('data', (data) => {
-          stdout += data.toString();
-        });
-
-        compileProcess.stderr.on('data', (data) => {
-          stderr += data.toString();
-        });
-
-        compileProcess.on('close', (code) => {
-          clearInterval(progressInterval);
-          notifications.dismiss(progressId);
-
-          // Use the output parser
-          const parsed = this.parseCompileOutput(stdout, stderr);
-          
-          if (code === 0 || parsed.success) {
-            notifications.success('Sketch compiled successfully!');
-            resolve({
-              success: true,
-              output: stdout,
-              warnings: parsed.warnings,
-              programSize: parsed.programSize,
-              usagePercent: parsed.usagePercent,
-              message: parsed.message || 'Compilation completed successfully'
-            });
-          } else {
-            const errorMessage = ArduinoService.explainToolchainError(stdout + '\n' + stderr)
-              || parsed.message || `Compilation failed with exit code ${code}`;
-            notifications.error(`Compilation failed: ${errorMessage}`);
-            const err = new Error(errorMessage);
-            // Attach parsed errors + full build output so callers (and the AI)
-            // can see the complete compilation diagnostics.
-            err.errors = parsed.errors;
-            err.output = (stdout + '\n' + stderr).trim();
-            reject(err);
-          }
-        });
-
-        compileProcess.on('error', (error) => {
-          clearInterval(progressInterval);
-          notifications.dismiss(progressId);
-          
-          const friendlyError = new Error(`Failed to start compilation: ${error.message}`);
-          notifications.error('Failed to start compilation process');
-          reject(friendlyError);
-        });
-
-        // Handle timeout
-        setTimeout(() => {
-          if (!compileProcess.killed) {
-            compileProcess.kill();
-            clearInterval(progressInterval);
-            notifications.dismiss(progressId);
-            notifications.error('Compilation timed out after 2 minutes');
-            reject(new Error('Compilation timed out. The sketch may be too complex or there may be an issue with the Arduino CLI.'));
-          }
-        }, 120000);
-      });
-
-    } catch (error) {
-      return ErrorHandler.handle(error, 'Arduino Compile', {
-        userMessage: ErrorHandler.getFriendlyMessage(error, 'compile'),
-        metadata: { sketchPath, boardFQBN }
-      });
+      await fs.access(sketchPath);
+    } catch {
+      throw coded(`Sketch file not found: ${sketchPath}. Please check the file path.`, 'SKETCH_MISSING', { hint: 'Save the sketch, then build again.' });
     }
+    if (!await this.checkCLI()) {
+      throw coded('Arduino CLI is not available. Impulse installs it on first start; open Tools › Toolchain setup to repair it.', 'TOOLCHAIN');
+    }
+    await this.ensureCoreIndexed();
+    job.stage('compiling');
+    const { code, output, reason } = await this._runStreaming(job, ['compile', '--fqbn', boardFQBN, '--verbose', sketchPath], {
+      cwd: path.dirname(sketchPath), idleMs: COMPILE_IDLE_MS, maxMs: COMPILE_MAX_MS,
+    });
+    const memory = parseMemory(output);
+    const diagnostics = parseDiagnostics(output);
+    const warnings = diagnostics.filter((d) => d.level === 'warning').map((d) => `${path.basename(d.file)}:${d.line}: ${d.message}`);
+    if (code === 0) {
+      const summary = summaryLines(memory);
+      return {
+        success: true, output, warnings, memory, summary, diagnostics,
+        programSize: memory?.flash?.used ?? null, usagePercent: memory?.flash?.percent ?? null,
+        message: summary[0] || 'Compiled.',
+      };
+    }
+    throw this._failure(output, 'compile', { reason, code, memory, diagnostics });
+  }
+
+  /** The upload half of a job (the sketch is compiled already). Throws a coded Error on failure. */
+  async _uploadJob(job, sketchPath, boardFQBN, port, compiled = null) {
+    const pioRoot = this.platformioRoot(sketchPath);
+    if (pioRoot) {
+      job.stage('uploading');
+      const res = await this.platformio.upload(pioRoot, port);
+      for (const line of String(res.output || '').split('\n')) job.line(line);
+      if (!res.success) {
+        throw this._failure(res.output || res.error || '', 'upload', { memory: compiled?.memory, override: { code: 'UPLOAD_FAILED', title: res.error || 'The PlatformIO upload failed', hint: 'The output below says why.' } });
+      }
+      return { success: true, output: res.output, port, message: `Uploaded PlatformIO environment ${res.env}`, warnings: [], memory: compiled?.memory || parseMemory(res.output || ''), summary: compiled?.summary || [] };
+    }
+    const validation = ErrorHandler.validateInput(
+      { sketchPath, boardFQBN, port },
+      { sketchPath: { required: true, type: 'string', minLength: 1 }, boardFQBN: { required: true, type: 'string', minLength: 5 }, port: { required: true, type: 'string', minLength: 1 } }
+    );
+    if (!validation.valid) throw coded(`Invalid input: ${validation.errors.join(', ')}`, 'INVALID');
+    if (!this.validateFQBN(boardFQBN)) throw coded(`Invalid FQBN format: "${boardFQBN}". Expected format: vendor:architecture:board`, 'INVALID');
+    // The port must still be there (when listing itself fails, let the upload report it precisely).
+    const availablePorts = await this.listPorts().catch(() => null);
+    if (availablePorts && !availablePorts.some((p) => p.port === port)) {
+      throw coded(`Port ${port} is not available. Please check if your device is connected.`, 'PORT_GONE', { title: 'The port is gone', hint: 'Plug the board back in, pick its port again, then upload.' });
+    }
+    job.stage('uploading');
+    const { code, output, reason } = await this._runStreaming(job, ['upload', '--fqbn', boardFQBN, '--port', port, '--verbose', sketchPath], {
+      cwd: path.dirname(sketchPath), idleMs: UPLOAD_IDLE_MS, maxMs: UPLOAD_MAX_MS,
+    });
+    if (code === 0) {
+      return {
+        success: true, output, port, message: `Uploaded to ${port}`,
+        warnings: compiled?.warnings || [], memory: compiled?.memory || null, summary: compiled?.summary || [], diagnostics: compiled?.diagnostics || [],
+      };
+    }
+    throw this._failure(output, 'upload', { reason, code, memory: compiled?.memory });
+  }
+
+  /**
+   * A coded Error for a failed job: what went wrong (title), what to do
+   * (hint), the first line worth quoting, the diagnostics and the output.
+   */
+  _failure(output, kind, { reason = null, code = null, memory = null, diagnostics = null, override = null, errors = null } = {}) {
+    let f;
+    if (reason === 'CANCELLED') f = { code: 'CANCELLED', title: 'Stopped', hint: '' };
+    else if (reason === 'IDLE') f = { code: 'TIMEOUT', title: kind === 'upload' ? 'The upload stopped responding' : 'The build stopped responding', hint: `Nothing was printed for ${Math.round((kind === 'upload' ? UPLOAD_IDLE_MS : COMPILE_IDLE_MS) / 60000)} minutes, so Impulse stopped it. Try again; if it happens again, check the cable and the port.` };
+    else if (reason === 'MAX') f = { code: 'TIMEOUT', title: kind === 'upload' ? 'The upload took too long' : 'The build took too long', hint: 'Impulse stopped it. Try again.' };
+    else if (reason === 'SPAWN' || code === 'ENOENT') f = { code: 'TOOLCHAIN', title: 'The build tools could not be started', hint: 'Impulse installs them on first start; open Tools › Toolchain setup to repair them.' };
+    else f = override || classifyFailure(output, kind, { memory });
+    const legacy = ArduinoService.explainToolchainError(output);
+    if (legacy && (f.code === 'COMPILE_FAILED' || f.code === 'UPLOAD_FAILED')) f = { ...f, title: legacy };
+    const diag = diagnostics || parseDiagnostics(output);
+    const err = new Error(f.title);
+    err.code = f.code;
+    err.title = f.title;
+    err.hint = f.hint || '';
+    err.excerpt = firstErrorLine(output);
+    err.diagnostics = diag;
+    err.errors = errors || diag.filter((d) => d.level === 'error').map((d) => `${d.file}:${d.line}:${d.col ?? 0}: error: ${d.message}`);
+    if (!err.errors.length && err.excerpt) err.errors = [err.excerpt];
+    err.output = String(output || '').trim();
+    err.memory = memory;
+    err.summary = summaryLines(memory);
+    return err;
+  }
+
+  /** The `{ success: false, ... }` object compile and upload resolve with when a job fails. */
+  _handled(error, context, metadata) {
+    if (error?.code === 'BUSY') {
+      return { success: false, code: 'BUSY', title: error.message, hint: '', error: { message: error.message, code: 'BUSY' }, busy: error.job || null };
+    }
+    const handled = ErrorHandler.handle(error, context, { userMessage: error?.title || error?.message, metadata });
+    return {
+      ...handled,
+      code: error?.code || handled?.error?.code || 'UNKNOWN',
+      title: error?.title || error?.message || 'Failed',
+      hint: error?.hint || '',
+      excerpt: error?.excerpt || '',
+      output: error?.output || '',
+      errors: Array.isArray(error?.errors) ? error.errors : [],
+      diagnostics: Array.isArray(error?.diagnostics) ? error.diagnostics : [],
+      memory: error?.memory || null,
+      summary: Array.isArray(error?.summary) ? error.summary : [],
+    };
   }
 
   /**
@@ -849,14 +941,21 @@ class ArduinoService {
   async uploadWithProgrammer(sketchPath, boardFQBN, programmerId, port) {
     if (!this.validateFQBN(boardFQBN)) return { success: false, error: 'Select a board first.' };
     const dir = this.sketchDir(sketchPath);
-    const args = ['compile', '--fqbn', boardFQBN, '--upload', '--programmer', programmerId];
+    const args = ['compile', '--fqbn', boardFQBN, '--upload', '--programmer', programmerId, '--verbose'];
     if (port) args.push('--port', port);
     args.push(dir);
-    const result = await this.runCommand(args, { cwd: dir, timeout: 240000 });
-    if (!result.success) {
-      return { success: false, error: ArduinoService.explainToolchainError(result.stderr) || result.stderr.trim() || 'Upload failed' };
+    try {
+      return await this.jobs.run({ kind: 'upload', sketchPath, fqbn: boardFQBN, port: port || null, label: `programmer ${programmerId}` }, async (job) => {
+        job.stage('compiling');
+        const { code, output, reason } = await this._runStreaming(job, args, { cwd: dir, idleMs: UPLOAD_IDLE_MS, maxMs: UPLOAD_MAX_MS });
+        const memory = parseMemory(output);
+        if (code === 0) return { success: true, output, memory, summary: summaryLines(memory), message: `Uploaded with ${programmerId}` };
+        throw this._failure(output, 'upload', { reason, code, memory });
+      });
+    } catch (error) {
+      const handled = this._handled(error, 'Arduino Upload (programmer)', { sketchPath, boardFQBN, programmerId });
+      return { success: false, error: [handled.title, handled.hint].filter(Boolean).join(' '), code: handled.code, output: handled.output };
     }
-    return { success: true, output: result.stdout };
   }
 
   /**
@@ -889,199 +988,28 @@ class ArduinoService {
   }
 
   /**
-   * Upload to Arduino board
+   * Compile and upload as one build job (a compiling stage, then an uploading
+   * stage), so nothing announces "compiled" while the upload is still to come
+   * and a second request joins the running one. Resolves with the result or
+   * with `{ success: false, code, title, hint, ... }` (never throws).
    */
   async upload(sketchPath, boardFQBN, port) {
-    const pioRoot = this.platformioRoot(sketchPath);
-    if (pioRoot) {
-      const res = await this.platformio.upload(pioRoot, port);
-      if (!res.success) throw new Error(`${res.error}${res.output ? `\n\n${res.output.trim().split('\n').slice(-20).join('\n')}` : ''}`);
-      return { success: true, output: res.output, port, message: `Uploaded PlatformIO environment ${res.env}`, warnings: [] };
-    }
     try {
-      // Input validation
-      const validation = ErrorHandler.validateInput(
-        { sketchPath, boardFQBN, port },
-        {
-          sketchPath: { required: true, type: 'string', minLength: 1 },
-          boardFQBN: { required: true, type: 'string', minLength: 5 },
-          port: { required: true, type: 'string', minLength: 1 }
-        }
-      );
-
-      if (!validation.valid) {
-        throw new Error(`Invalid input: ${validation.errors.join(', ')}`);
-      }
-
-      if (!this.validateFQBN(boardFQBN)) {
-        throw new Error(`Invalid FQBN format: "${boardFQBN}". Expected format: vendor:architecture:board`);
-      }
-
-      // Check the port is present (skip the check if listing itself fails;
-      // the upload will report a missing port precisely).
-      const availablePorts = await this.listPorts().catch(() => null);
-      if (availablePorts && !availablePorts.some(p => p.port === port)) {
-        throw new Error(`Port ${port} is not available. Please check if your device is connected.`);
-      }
-
-      // First compile
-      const compileResult = await this.compile(sketchPath, boardFQBN);
-      if (!compileResult.success) {
-        throw new Error('Compilation failed. Cannot upload without successful compilation.');
-      }
-
-      // Show upload progress
-      const progressId = notifications.progress('Uploading to board...', 0);
-
-      return new Promise((resolve, reject) => {
-        const args = [
-          'upload',
-          '--fqbn', boardFQBN,
-          '--port', port,
-          '--verbose',
-          sketchPath
-        ];
-
-        const uploadProcess = spawn(this.cliPath, args, {
-          cwd: path.dirname(sketchPath),
-          timeout: 60000 // 1 minute timeout for upload
-        });
-
-        let stdout = '';
-        let stderr = '';
-        let progress = 10;
-
-        const updateProgress = () => {
-          progress = Math.min(progress + 15, 90);
-          notifications.updateProgress(progressId, progress);
-        };
-
-        const progressInterval = setInterval(updateProgress, 1000);
-
-        uploadProcess.stdout.on('data', (data) => {
-          stdout += data.toString();
-        });
-
-        uploadProcess.stderr.on('data', (data) => {
-          stderr += data.toString();
-        });
-
-        uploadProcess.on('close', (code) => {
-          clearInterval(progressInterval);
-          notifications.dismiss(progressId);
-
-          // Use the output parser for messages/warnings only.
-          const parsed = this.parseUploadOutput(stdout, stderr);
-
-          // TRUST THE EXIT CODE. arduino-cli returns 0 only on a real, completed
-          // upload; a non-zero code means it did NOT flash the board. The old
-          // logic OR-ed in lenient stdout patterns (100%, "wrote N bytes", etc.)
-          // which produced false "upload successful" when the upload actually
-          // failed. Require code === 0.
-          const hasCriticalErrors = parsed.errors.some(e =>
-            /fatal|failed|cannot connect|access denied|permission denied/i.test(e)
-          );
-
-          if (code === 0 && !hasCriticalErrors) {
-            notifications.success(`Successfully uploaded to ${port}!`);
-            resolve({
-              success: true,
-              output: stdout + '\n' + stderr,
-              port: port,
-              message: parsed.message || 'Upload completed successfully',
-              warnings: parsed.warnings
-            });
-          } else {
-            // Provide detailed error message
-            const errorMsg = parsed.errors.length > 0
-              ? parsed.errors.join('\n')
-              : (parsed.message || `Upload failed with exit code ${code}`);
-            notifications.error(`Upload failed: ${errorMsg}`);
-            reject(new Error(errorMsg + '\n\n' + (stdout + '\n' + stderr).trim()));
-          }
-        });
-
-        uploadProcess.on('error', (error) => {
-          clearInterval(progressInterval);
-          notifications.dismiss(progressId);
-          
-          const friendlyError = new Error(`Failed to start upload: ${error.message}`);
-          notifications.error('Failed to start upload process');
-          reject(friendlyError);
-        });
-
-        // Handle timeout
-        setTimeout(() => {
-          if (!uploadProcess.killed) {
-            uploadProcess.kill();
-            clearInterval(progressInterval);
-            notifications.dismiss(progressId);
-            notifications.error('Upload timed out after 1 minute');
-            reject(new Error('Upload timed out. Please check your connection and try again.'));
-          }
-        }, 60000);
+      return await this.jobs.run({ kind: 'upload', sketchPath, fqbn: boardFQBN, port }, async (job) => {
+        const compiled = this.platformioRoot(sketchPath) ? null : await this._compileJob(job, sketchPath, boardFQBN);
+        return this._uploadJob(job, sketchPath, boardFQBN, port, compiled);
       });
-
     } catch (error) {
-      return ErrorHandler.handle(error, 'Arduino Upload', {
-        userMessage: ErrorHandler.getFriendlyMessage(error, 'upload'),
-        metadata: { sketchPath, boardFQBN, port }
-      });
+      return this._handled(error, 'Arduino Upload', { sketchPath, boardFQBN, port });
     }
   }
 
   /**
-   * Upload only (without compiling first) - useful when already compiled
+   * Upload without compiling first (the sketch was compiled already). Throws on failure.
    */
   async uploadOnly(sketchPath, boardFQBN, port) {
-    if (!sketchPath || !boardFQBN || !port) {
-      throw new Error('Sketch path, board FQBN, and port are required');
-    }
-
-    return new Promise((resolve, reject) => {
-      const args = [
-        'upload',
-        '--fqbn', boardFQBN,
-        '--port', port,
-        '--verbose',
-        sketchPath
-      ];
-
-      const uploadProcess = spawn(this.cliPath, args, {
-        cwd: path.dirname(sketchPath)
-      });
-
-      let stdout = '';
-      let stderr = '';
-
-      uploadProcess.stdout.on('data', (data) => {
-        stdout += data.toString();
-      });
-
-      uploadProcess.stderr.on('data', (data) => {
-        stderr += data.toString();
-      });
-
-      uploadProcess.on('close', (code) => {
-        const parsed = this.parseUploadOutput(stdout, stderr);
-
-        // Trust the exit code (see upload()): non-zero means the board was not flashed.
-        if (code === 0) {
-          resolve({
-            success: true,
-            output: stdout + '\n' + stderr,
-            port: port,
-            message: parsed.message || 'Upload complete'
-          });
-        } else {
-          reject(new Error((parsed.message || `Upload failed with code ${code}`) + '\n\n' + (stdout + '\n' + stderr).trim()));
-        }
-      });
-
-      uploadProcess.on('error', (error) => {
-        reject(new Error(`Failed to start upload: ${error.message}`));
-      });
-    });
+    if (!sketchPath || !boardFQBN || !port) throw new Error('Sketch path, board FQBN, and port are required');
+    return this.jobs.run({ kind: 'upload', sketchPath, fqbn: boardFQBN, port }, (job) => this._uploadJob(job, sketchPath, boardFQBN, port));
   }
 
   // ==================== Library Operations ====================

@@ -535,6 +535,15 @@
 }
 .v-msg-ai .verify-card { margin: 0; }
 
+/* A compile or upload: stage, upload percentage, the last lines, the summary. */
+.v-build-stage { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 12px; min-height: 16px; }
+.v-build-stage .v-label { white-space: nowrap; }
+.v-build-meter { width: 100%; max-width: 220px; }
+.v-build-log { max-height: 96px; }
+.v-build-summary { font: 12px/1.5 var(--v-mono); color: var(--v-text-2); }
+.v-card .v-build-summary { margin: 0; }
+.v-card .v-answer-actions .v-steps-toggle { margin-left: 0; }
+
 .v-divider { display: flex; align-items: center; gap: 12px; color: var(--v-text-3); }
 .v-divider::before, .v-divider::after { content: ''; height: 1px; flex: 1; background: var(--v-line); }
 

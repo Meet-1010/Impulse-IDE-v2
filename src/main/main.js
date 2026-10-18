@@ -433,6 +433,10 @@ app.whenReady().then(() => {
     ignoreSystem: process.env.IMPULSE_TOOLCHAIN_ISOLATED === '1'
   });
   arduinoService = new ArduinoService({ cliPath: toolchain.findCli()?.path || null });
+  // Builds and uploads stream to the window as they run (the IDE console, chat mode's build card).
+  arduinoService.jobs.on('event', (ev) => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('build:event', ev);
+  });
   esp32sim = new Esp32Simulator({
     runCli: (args, opts) => arduinoService.runCommand(args, opts),
     dataDir: path.join(app.getPath('userData'), 'emulators'),

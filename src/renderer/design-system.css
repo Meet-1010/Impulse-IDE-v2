@@ -921,6 +921,11 @@ li.CodeMirror-hint-active {
     line-height: 1.7;
 }
 
+.console-line.build {
+  color: var(--muted-foreground);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .console-line.success {
     color: var(--ds-signal);
     font-weight: 400;
@@ -1356,6 +1361,20 @@ li.CodeMirror-hint-active {
 .status-cli[data-state="error"] .status-dot {
     background: var(--ds-danger);
 }
+
+/* The build in progress (stage, upload percentage), then its outcome for a while. */
+.status-build[data-state="busy"] .status-dot {
+    background: var(--ds-warning, #d7a32b);
+    animation: status-build-pulse 1.2s ease-in-out infinite;
+}
+.status-build[data-state="ok"] .status-dot {
+    background: var(--ds-signal);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--ds-signal) 18%, transparent);
+}
+.status-build[data-state="error"] { color: var(--ds-danger); }
+.status-build[data-state="error"] .status-dot { background: var(--ds-danger); }
+.status-build[data-state="warning"] .status-dot { background: var(--ds-warning, #d7a32b); }
+@keyframes status-build-pulse { 50% { opacity: 0.35; } }
 
 .status-cursor {
     font-family: var(--font-mono);

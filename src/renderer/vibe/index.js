@@ -371,6 +371,7 @@ function noticeCard(m) {
 function renderMessage(m) {
   if (m.role === 'user') return userMessage(m);
   if (m.role === 'assistant') return assistantMessage(m);
+  if (m.role === 'card' && m.kind === 'build') return buildRecordCard(m);
   if (m.role === 'card' && m.kind === 'verify' && m.result) return verifyCard(m);
   if (m.role === 'card') return noticeCard(m);
   return null;
@@ -683,20 +684,151 @@ function openPlusMenu(anchor) {
   ], { label: 'More tools', side: 'top' });
 }
 
+/* ═════════════════════════════ builds ═══════════════════════════════════ */
+// A compile or upload as it runs (main/services/buildJobs.js streams it): a
+// card with the stage, the upload percentage and the last lines; at the end,
+// Arduino IDE's memory summary, or what went wrong and what to do.
+
+let liveBuild = null;
+const BUILD_LOG_LINES = 400;
+
+function boardLabel(fqbn) {
+  if (fqbn === 'platformio:project') return 'the PlatformIO environment';
+  const named = impulse.board.nameOf?.(fqbn);
+  if (named) return named;
+  const b = impulse.board.current();
+  const base = fqbn ? fqbn.split(':').slice(0, 3).join(':') : '';
+  if (b?.name && (!base || !b.fqbn || b.fqbn.startsWith(base))) return b.name;
+  return base ? base.split(':').pop() : 'the board';
+}
+
+function liveBuildCard(info) {
+  const started = performance.now();
+  const timer = h('span', { class: 'v-step-time', text: '0.0s' });
+  const stage = h('span', { class: 'v-label', text: info.kind === 'upload' ? 'Compiling' : 'Starting' });
+  const bar = h('span');
+  const meter = h('div', { class: 'v-meter v-build-meter', role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': '100', hidden: true }, bar);
+  const log = h('pre', { class: 'v-card-log v-build-log', hidden: true });
+  const all = [];
+  let stageText = stage.textContent;
+  const el = h('div', { class: 'v-msg-ai', 'aria-busy': 'true', dataset: { build: info.id } },
+    h('div', { class: 'v-card v-build' },
+      h('div', { class: 'v-card-head' }, led('amber', { pulse: true }), h('span', { text: info.title }), timer),
+      h('div', { class: 'v-build-stage' }, stage, meter),
+      log));
+  const tick = setInterval(() => { timer.textContent = seconds(performance.now() - started); }, 100);
+  return {
+    ...info,
+    el,
+    lines(lines) {
+      all.push(...lines);
+      if (all.length > BUILD_LOG_LINES) all.splice(0, all.length - BUILD_LOG_LINES);
+      log.hidden = false;
+      log.textContent = all.slice(-12).join('\n');
+      log.scrollTop = log.scrollHeight;
+    },
+    stage(label) {
+      stageText = label;
+      stage.textContent = label;
+      meter.hidden = true;
+      bar.style.width = '0%';
+    },
+    progress(pct) {
+      meter.hidden = false;
+      bar.style.width = `${pct}%`;
+      meter.setAttribute('aria-valuenow', String(pct));
+      stage.textContent = `${stageText} ${pct}%`;
+    },
+    tail: (n) => all.slice(-n),
+    stop: () => clearInterval(tick),
+  };
+}
+
+function fixPrompt(m) {
+  const lines = [`${m.build === 'upload' ? 'Uploading' : 'Compiling'} the sketch failed: ${m.error?.title || 'unknown error'}.`];
+  if (m.error?.excerpt) lines.push(m.error.excerpt);
+  for (const d of (m.error?.diagnostics || []).slice(0, 8)) lines.push(`${String(d.file).split(/[\\/]/).pop()}:${d.line}: ${d.level}: ${d.message}`);
+  lines.push('Find the cause and fix it.');
+  return lines.join('\n');
+}
+
+function buildRecordCard(m) {
+  const stopped = m.error?.code === 'CANCELLED';
+  const card = h('div', { class: 'v-card v-build' },
+    h('div', { class: 'v-card-head' }, led(m.ok ? 'green' : stopped ? 'amber' : 'red'), h('span', { text: m.title }), m.ms ? h('span', { class: 'v-step-time', text: seconds(m.ms) }) : null));
+  if (!m.ok && !stopped && m.error?.hint) card.append(h('p', { text: m.error.hint }));
+  if (!m.ok && !stopped && m.error?.excerpt) card.append(h('pre', { class: 'v-card-log', text: m.error.excerpt }));
+  for (const line of m.summary || []) card.append(h('p', { class: 'v-build-summary', text: line }));
+  const actions = [];
+  if (!m.ok && !stopped) actions.push(h('button', { type: 'button', class: 'v-btn primary', onclick: () => send(fixPrompt(m), { mode: 'debug' }) }, icon(ICON.debug), 'Fix it'));
+  if (m.ok && m.build === 'compile' && impulse.board.current().portPresent) actions.push(h('button', { type: 'button', class: 'v-btn', onclick: () => boardAction('upload') }, icon(ICON.upload), 'Upload to the board'));
+  let fullLog = null;
+  if (m.log?.length) {
+    fullLog = h('pre', { class: 'v-card-log', text: m.log.join('\n'), hidden: true });
+    const toggle = h('button', { type: 'button', class: 'v-steps-toggle', 'aria-expanded': 'false' }, icon(ICON.chevronRight), 'Output');
+    toggle.addEventListener('click', () => {
+      const show = fullLog.hidden;
+      fullLog.hidden = !show;
+      toggle.setAttribute('aria-expanded', String(show));
+    });
+    actions.push(toggle);
+  }
+  if (actions.length) card.append(h('div', { class: 'v-answer-actions' }, ...actions));
+  if (fullLog) card.append(fullLog);
+  return h('div', { class: 'v-msg-ai', dataset: { id: m.id } }, card);
+}
+
+function onBuildEvent(ev) {
+  if (ev.phase === 'start') {
+    liveBuild?.stop();
+    const name = boardLabel(ev.fqbn);
+    const title = ev.kind === 'upload' ? `Uploading to ${name}${ev.port ? ` on ${ev.port}` : ''}` : `Compiling for ${name}`;
+    liveBuild = liveBuildCard({ id: ev.jobId, kind: ev.kind, title, name, port: ev.port, fqbn: ev.fqbn });
+    chats.begin(title);
+    setEmpty(false);
+    // During an agent turn the card goes above the live answer; otherwise at the end.
+    const working = thread.querySelector('.v-msg-ai[aria-busy="true"]:not([data-build])');
+    if (working) thread.insertBefore(liveBuild.el, working);
+    else append(liveBuild.el);
+    setAnnounce(`${title}…`, 'amber', { pulse: true });
+    return;
+  }
+  if (!liveBuild || ev.jobId !== liveBuild.id) return;
+  if (ev.phase === 'output') liveBuild.lines(ev.lines);
+  else if (ev.phase === 'stage') liveBuild.stage(ev.label);
+  else if (ev.phase === 'progress') liveBuild.progress(ev.percent);
+  else if (ev.phase === 'done') {
+    const live = liveBuild;
+    liveBuild = null;
+    live.stop();
+    setAnnounce('');
+    const title = ev.ok
+      ? (live.kind === 'upload' ? `Uploaded to ${live.name}${ev.port || live.port ? ` on ${ev.port || live.port}` : ''}` : `Compiled for ${live.name}`)
+      : ev.error?.code === 'CANCELLED' ? (live.kind === 'upload' ? 'The upload was stopped' : 'The build was stopped') : (ev.error?.title || 'Failed');
+    const record = chats.add({
+      role: 'card', kind: 'build', build: live.kind, ok: !!ev.ok, title,
+      port: ev.port || live.port || null, fqbn: live.fqbn || null, ms: Math.round(ev.ms || 0),
+      summary: ev.summary || [],
+      error: ev.ok ? null : { code: ev.error?.code || null, title: ev.error?.title || '', hint: ev.error?.hint || '', excerpt: ev.error?.excerpt || '', diagnostics: (ev.error?.diagnostics || []).slice(0, 8) },
+      log: live.tail(60),
+    });
+    live.el.replaceWith(buildRecordCard(record));
+    renderChats();
+  }
+}
+
 /* ═════════════════════════════ board, folder, credits ════════════════════ */
 
 let boardBusy = false;
 
-/** Verify or upload from chat mode: progress in the dock, the result in the chat. */
+/** Verify or upload from chat mode. The build itself appears in the thread as a card (onBuildEvent). */
 async function boardAction(kind) {
   if (boardBusy) return;
   if (!impulse.project.current()) {
     toast('Ask Impulse to build something first: there is no sketch yet.');
     return;
   }
-  const verb = kind === 'upload' ? 'Uploading' : 'Compiling';
   boardBusy = true;
-  setAnnounce(`${verb}…`, 'amber', { pulse: true });
   const res = await (kind === 'upload' ? impulse.board.upload() : impulse.board.verify());
   boardBusy = false;
   renderAccount();
@@ -706,25 +838,8 @@ async function boardAction(kind) {
     impulse.board.openPicker();
     return;
   }
-  if (res.ok) {
-    const b = impulse.board.current();
-    toast(kind === 'upload'
-      ? `Uploaded to ${b.name || 'the board'} on ${res.port}`
-      : `Compiled${res.size ? ` · ${Number(res.size).toLocaleString()} bytes${res.percent ? ` (${res.percent}% of flash)` : ''}` : ''}`);
-    return;
-  }
-  const error = String(res.error || 'Something went wrong.').trim();
-  const lines = error.split('\n').filter((l) => l.trim());
-  const card = chats.add({
-    role: 'card', kind: 'board', state: 'red',
-    title: kind === 'upload' ? 'The upload failed' : 'The sketch didn\'t compile',
-    text: lines.slice(0, 6).join('\n').slice(0, 900),
-    prompt: `${kind === 'upload' ? 'Uploading' : 'Compiling'} the sketch failed:\n${lines.slice(0, 40).join('\n')}\nFind the cause and fix it.`,
-  });
-  if (!chats.current.messages.some((m) => m.role === 'user')) chats.begin(card.title);
-  setEmpty(false);
-  append(noticeCard(card));
-  renderChats();
+  // No build ran (nothing to save, no sketch…) or one is already running: say so; a build that ran has its card.
+  if (!res.ok && (!res.code || res.code === 'BUSY')) toast(res.error);
 }
 
 function setAnnounce(message, state = 'amber', { pulse = false } = {}) {
@@ -1231,6 +1346,7 @@ export async function startChatMode() {
   impulse.account = account;
 
   wire();
+  api.arduino?.onBuildEvent?.(onBuildEvent);
   let side0 = 'open';
   try { side0 = localStorage.getItem(SIDE_KEY) || 'open'; } catch { /* no storage */ }
   setSide(side0 !== 'closed');

@@ -1,4 +1,5 @@
 const { validateToolCall } = require('./toolSchema');
+const { boundedOutput } = require('./retain');
 const BoardKnowledge = require('../knowledge/boardKnowledge');
 const { findComponents, componentText, COMPONENTS } = require('../knowledge/components');
 
@@ -212,21 +213,18 @@ class ToolExecutor {
     }
     try {
       const compileResult = await this.arduinoService.compile(sketchPath, boardFQBN);
-      if (compileResult && compileResult.success === false) {
-        return { success: false, error: compileResult.error?.message || compileResult.error || compileResult.message || 'Compilation failed' };
-      }
+      if (compileResult && compileResult.success === false) return buildFailure(compileResult, 'compile');
       return {
-        output: compileResult.output,
-        warnings: compileResult.warnings || [],
         success: true,
-        message: compileResult.message
+        message: compileResult.message,
+        summary: compileResult.summary || [],
+        memory: compileResult.memory || null,
+        warnings: (compileResult.warnings || []).slice(0, 10),
+        diagnostics: (compileResult.diagnostics || []).slice(0, 20),
+        output: boundedOutput(compileResult.output || '', 1200),
       };
     } catch (err) {
-      return {
-        success: false,
-        error: err.message,
-        output: err.stdout || err.stderr
-      };
+      return { success: false, error: err.message, output: boundedOutput(err.output || err.stdout || err.stderr || '', 1500) };
     }
   }
 
@@ -273,22 +271,18 @@ class ToolExecutor {
     }
     try {
       const uploadResult = await this.arduinoService.upload(sketchPath, boardFQBN, port);
-      if (uploadResult && uploadResult.success === false) {
-        return { success: false, error: uploadResult.error?.message || uploadResult.error || uploadResult.message || 'Upload failed' };
-      }
+      if (uploadResult && uploadResult.success === false) return buildFailure(uploadResult, 'upload');
       return {
-        output: uploadResult.output,
+        success: true,
+        message: uploadResult.message || `Uploaded to ${port}`,
         port: uploadResult.port ?? port,
         boardFQBN,
-        success: true,
-        message: uploadResult.message || 'Upload complete'
+        summary: uploadResult.summary || [],
+        memory: uploadResult.memory || null,
+        output: boundedOutput(uploadResult.output || '', 1200),
       };
     } catch (err) {
-      return {
-        success: false,
-        error: err.message,
-        output: err.stdout || err.stderr
-      };
+      return { success: false, error: err.message, output: boundedOutput(err.output || err.stdout || err.stderr || '', 1500) };
     }
   }
 
@@ -732,6 +726,31 @@ class ToolExecutor {
   clearBuffer() {
     this.serialBuffer = [];
   }
+}
+
+/**
+ * A failed build job as the model should see it: the code, what went wrong
+ * and what to do, the diagnostics, and a bounded slice of the output. BUSY
+ * means another build is running: the model must wait, not start another.
+ */
+function buildFailure(result, kind) {
+  if (result.code === 'BUSY') {
+    return {
+      success: false,
+      code: 'BUSY',
+      error: result.title || result.error?.message || 'A build is already running.',
+      note: 'Do not start another compile or upload. The running one finishes on its own; ask the user, or call get_current_state later.',
+    };
+  }
+  return {
+    success: false,
+    code: result.code || null,
+    error: [result.title || result.error?.message || result.error || (kind === 'upload' ? 'Upload failed' : 'Compilation failed'), result.hint].filter(Boolean).join(' '),
+    excerpt: result.excerpt || '',
+    diagnostics: (result.diagnostics || []).slice(0, 20),
+    summary: result.summary || [],
+    output: boundedOutput(result.output || '', 2500),
+  };
 }
 
 module.exports = ToolExecutor;

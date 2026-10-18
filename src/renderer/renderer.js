@@ -92,6 +92,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         return;
     }
     try {
+        setupBuildStream();
         // Chat mode hides the IDE, so the board picker lives outside it.
         const boardModal = document.getElementById('boardPortModal');
         if (boardModal) document.body.appendChild(boardModal);
@@ -2844,7 +2845,6 @@ async function compileSketch() {
         return { ok: false, error: 'The sketch could not be saved, so the build would use old code.' };
     }
 
-    logToConsole(pio ? `Building PlatformIO environment ${state.pio.env}…` : 'Compiling...', 'info');
     setButtonState('compileBtn', true, 'Compiling...');
     clearProblems();
 
@@ -2852,7 +2852,6 @@ async function compileSketch() {
         const result = await window.electronAPI.arduino.compile(state.currentSketch, pio ? PIO_FQBN : await fqbnFor(boardFQBN));
 
         if (result.success) {
-            logToConsole('Compilation successful!', 'success');
             // Update context awareness
             state.context.lastCompileResult = {
                 success: true,
@@ -2868,16 +2867,13 @@ async function compileSketch() {
                 output: result.data?.output || ''
             });
 
-            if (result.data) {
-                if (result.data.programSize) {
-                    logToConsole(`Program size: ${result.data.programSize} bytes (${result.data.usagePercent}%)`, 'info');
-                }
-                if (result.data.warnings && result.data.warnings.length > 0) {
-                    result.data.warnings.forEach(w => logToConsole(`Warning: ${w}`, 'warning'));
-                }
-            }
-            return { ok: true, size: result.data?.programSize ?? null, percent: result.data?.usagePercent ?? null };
+            return { ok: true, size: result.data?.programSize ?? null, percent: result.data?.usagePercent ?? null, summary: result.data?.summary || [] };
         } else {
+            if (result.code === 'BUSY') {
+                // Another build is running: its result arrives on its own.
+                logToConsole(result.error, 'warning');
+                return { ok: false, busy: true, code: 'BUSY', error: result.error };
+            }
             // Update context awareness - compilation failed
             state.context.lastCompileResult = {
                 success: false,
@@ -2891,15 +2887,11 @@ async function compileSketch() {
                 errors: result.errors || (result.error ? [result.error] : []),
                 output: result.output || result.error || ''
             });
-            logToConsole('Compilation failed!', 'error');
-            if (result.error) {
-                logToConsole(result.error, 'error');
-                showProblem(result.output || result.error);
-            }
+            if (result.error) showProblem(problemText(result));
             if (result.analyzedError) {
                 displayErrorAnalysis(result.analyzedError);
             }
-            return { ok: false, error: result.output || result.error || 'Compilation failed' };
+            return { ok: false, error: result.output || result.error || 'Compilation failed', code: result.code || null, title: result.title || null, hint: result.hint || '' };
         }
     } catch (error) {
         logToConsole(`Compilation error: ${error.message}`, 'error');
@@ -2944,7 +2936,6 @@ async function uploadSketch() {
         await window.electronAPI.serial.disconnect();
     }
 
-    logToConsole('Uploading...', 'info');
     setButtonState('uploadBtn', true, 'Uploading...');
     clearProblems();
 
@@ -2952,20 +2943,20 @@ async function uploadSketch() {
         const result = await window.electronAPI.arduino.upload(state.currentSketch, pio ? PIO_FQBN : await fqbnFor(boardFQBN), port);
 
         if (result.success) {
-            logToConsole('Upload successful!', 'success');
-            logToConsole(`Uploaded to ${port}`, 'info');
             if (reopenMonitor) reconnectSerialAfterUpload(port);
-            return { ok: true, port };
+            return { ok: true, port, summary: result.data?.summary || [] };
         } else {
-            logToConsole('Upload failed!', 'error');
-            if (result.error) {
-                logToConsole(result.error, 'error');
-                showProblem(result.error);
+            if (result.code === 'BUSY') {
+                // Another build is running: its result arrives on its own.
+                logToConsole(result.error, 'warning');
+                if (reopenMonitor) connectSerial();
+                return { ok: false, busy: true, code: 'BUSY', error: result.error, port };
             }
+            if (result.error) showProblem(problemText(result));
             if (result.analyzedError) {
                 displayErrorAnalysis(result.analyzedError);
             }
-            return { ok: false, error: result.error || 'Upload failed', port };
+            return { ok: false, error: result.error || 'Upload failed', port, code: result.code || null, title: result.title || null, hint: result.hint || '' };
         }
     } catch (error) {
         logToConsole(`Upload error: ${error.message}`, 'error');
@@ -4520,8 +4511,11 @@ function logToConsole(message, type = 'info') {
     const time = new Date().toLocaleTimeString();
     const line = document.createElement('div');
     line.className = `console-line ${type}`;
-    line.textContent = `[${time}] ${message}`;
+    line.textContent = type === 'build' ? message : `[${time}] ${message}`;
     consoleEl.appendChild(line);
+    if (consoleEl.childElementCount > 3000) {
+        while (consoleEl.childElementCount > 2500) consoleEl.removeChild(consoleEl.firstChild);
+    }
     consoleEl.scrollTop = consoleEl.scrollHeight;
 }
 
@@ -5066,6 +5060,110 @@ async function openBoardOptions() {
     syncBoardFqbn();
 }
 
+// ============================================
+// Build stream: every compile and upload as it runs
+// ============================================
+// The main process runs one build at a time and streams it (see
+// main/services/buildJobs.js): the console shows each line as the tools print
+// it, the Verify/Upload button shows the stage and the upload percentage, and
+// the end brings Arduino IDE's memory summary or what went wrong.
+const BUILD_BUTTON_LABEL = {
+    starting: 'Starting', compiling: 'Compiling', detecting: 'Compiling', 'compiling-sketch': 'Compiling', 'compiling-libraries': 'Compiling',
+    'compiling-core': 'Compiling core', linking: 'Linking', sizing: 'Compiling', uploading: 'Uploading', connecting: 'Connecting',
+    erasing: 'Erasing', writing: 'Uploading', verifying: 'Verifying', resetting: 'Resetting',
+};
+let liveBuild = null;
+
+function buildBoardName(fqbn) {
+    if (!fqbn) return 'the board';
+    if (fqbn === PIO_FQBN) return `the PlatformIO environment${state.pio?.env ? ` ${state.pio.env}` : ''}`;
+    const base = baseFqbn(fqbn);
+    return state.boards?.find(b => b.fqbn === base)?.name || base.split(':').pop();
+}
+
+let buildStatusTimer = null;
+
+/** The footer's build item: the stage while a build runs, the outcome for a few seconds after. */
+function setBuildStatus(text, state, { linger = false } = {}) {
+    const el = document.getElementById('statusBuild');
+    if (!el) return;
+    clearTimeout(buildStatusTimer);
+    el.hidden = !text;
+    if (!text) return;
+    el.dataset.state = state;
+    el.querySelector('.status-text').textContent = text;
+    if (linger) buildStatusTimer = setTimeout(() => { el.hidden = true; }, 12000);
+}
+
+function updateBuildButtons() {
+    const b = liveBuild;
+    if (!b) return;
+    const label = BUILD_BUTTON_LABEL[b.stage] || (b.kind === 'upload' ? 'Uploading' : 'Compiling');
+    const text = b.percent !== null ? `${label} ${b.percent}%` : `${label}…`;
+    setButtonState(b.kind === 'upload' ? 'uploadBtn' : 'compileBtn', true, text);
+    setBuildStatus(text, 'busy');
+}
+
+function setupBuildStream() {
+    if (!window.electronAPI?.arduino?.onBuildEvent) return;
+    window.electronAPI.arduino.onBuildEvent((ev) => {
+        if (ev.phase === 'start') {
+            liveBuild = { id: ev.jobId, kind: ev.kind, stage: 'starting', percent: null, port: ev.port };
+            const name = buildBoardName(ev.fqbn);
+            showOutputTab('console');
+            logToConsole(ev.kind === 'upload' ? `Uploading to ${name} on ${ev.port}…` : `Compiling for ${name}…`, 'info');
+            setButtonState('compileBtn', true, 'Verify');
+            setButtonState('uploadBtn', true, 'Upload');
+            updateBuildButtons();
+            return;
+        }
+        if (!liveBuild || ev.jobId !== liveBuild.id) return;
+        if (ev.phase === 'output') {
+            for (const line of ev.lines) logToConsole(line, 'build');
+        } else if (ev.phase === 'stage') {
+            liveBuild.stage = ev.stage;
+            liveBuild.percent = null;
+            updateBuildButtons();
+        } else if (ev.phase === 'progress') {
+            liveBuild.percent = ev.percent;
+            updateBuildButtons();
+        } else if (ev.phase === 'done') {
+            const b = liveBuild;
+            liveBuild = null;
+            setButtonState('compileBtn', false, 'Verify');
+            setButtonState('uploadBtn', false, 'Upload');
+            if (ev.ok) {
+                for (const line of ev.summary || []) logToConsole(line, 'info');
+                logToConsole(b.kind === 'upload' ? `Done uploading to ${ev.port || b.port}.` : 'Done compiling.', 'success');
+                const flash = ev.result?.memory?.flash;
+                const size = flash?.used ? ` · ${flash.used.toLocaleString()} bytes${flash.percent !== null && flash.percent !== undefined ? ` (${flash.percent}%)` : ''}` : '';
+                setBuildStatus(b.kind === 'upload' ? `Uploaded to ${ev.port || b.port}` : `Compiled${size}`, 'ok', { linger: true });
+            } else if (ev.error?.code === 'CANCELLED') {
+                logToConsole('Stopped.', 'warning');
+                setBuildStatus('Stopped', 'warning', { linger: true });
+            } else {
+                for (const line of ev.summary || []) logToConsole(line, 'info');
+                logToConsole(`${ev.error?.title || (b.kind === 'upload' ? 'The upload failed' : 'The sketch did not compile')}${ev.error?.hint ? ` ${ev.error.hint}` : ''}`, 'error');
+                setBuildStatus(ev.error?.title || (b.kind === 'upload' ? 'Upload failed' : 'Compile failed'), 'error', { linger: true });
+            }
+        }
+    });
+}
+
+/**
+ * What the Problems panel shows for a failed build: what went wrong and what
+ * to do, then each diagnostic as "file:line:col: level: message" (the panel
+ * makes those clickable). The whole log stays in the console.
+ */
+function problemText(result) {
+    const lines = [];
+    const title = result.title || result.error;
+    if (title) lines.push(result.hint ? `${title} ${result.hint}` : title);
+    for (const d of result.diagnostics || []) lines.push(`${d.file}:${d.line}:${d.col ?? 1}: ${d.level}: ${d.message}`);
+    if (!(result.diagnostics || []).length && result.excerpt && result.excerpt !== title) lines.push(result.excerpt);
+    return lines.join('\n') || result.output || result.error || 'The build failed.';
+}
+
 function setButtonState(buttonId, disabled, text) {
     const btn = document.getElementById(buttonId);
     if (!btn) return;
@@ -5411,6 +5509,8 @@ Object.assign(window.impulse, {
     },
     board: {
         current: currentBoard,
+        /** A board's menu name from its FQBN (options stripped), or null. */
+        nameOf: (fqbn) => (fqbn ? (state.boards || []).find(b => b.fqbn === baseFqbn(fqbn))?.name || null : null),
         ports: () => sortPorts((state.ports || []).filter(p => p.vid)).map(p => ({
             port: p.port,
             label: describePort(p),
