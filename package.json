@@ -46,7 +46,8 @@
     "notices": "node scripts/third-party-notices.mjs",
     "test:e2e": "node scripts/e2e.mjs",
     "build:cli": "node scripts/build-cli.mjs",
-    "field-lab": "node scripts/build-field-lab.mjs"
+    "field-lab": "node scripts/build-field-lab.mjs",
+    "knowledge:probe": "node scripts/knowledge-probe.mjs"
   },
   "keywords": [
     "arduino",

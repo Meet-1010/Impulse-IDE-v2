@@ -152,7 +152,11 @@ describe('board knowledge from arduino-cli', () => {
     expect(text).toMatch(/3\.3 V logic, NOT 5 V tolerant/);
     expect(text).toMatch(/LED_BUILTIN = RGB LED on GPIO48/);
     expect(text).toMatch(/I2C SDA 8, SCL 9/);
-    expect(text.length).toBeLessThan(1600);
+    // The knowledge layer's notes follow the core's facts: onboard parts, upload, power, the core's API drift.
+    expect(text).toMatch(/\n\[BOARD NOTES\] ESP32-S3 DevKitC-1/);
+    expect(text).toMatch(/RGB LED \(WS2812\) on GPIO48/);
+    expect(text).toMatch(/Espressif ESP32 Arduino core 2\.0\.17: Core 2\.x/);
+    expect(text.length).toBeLessThan(3600);
   });
 
   test('a board whose core isn\'t installed names the core to install', async () => {
@@ -161,12 +165,13 @@ describe('board knowledge from arduino-cli', () => {
     expect(await bk.summary('missing:arch:board')).toBeNull();
   });
 
-  test('board search merges installed and installable boards', async () => {
+  test('board search puts the catalog first, then what arduino-cli lists, without repeats', async () => {
     const found = await new BoardKnowledge(fakeCli(s3dir)).search('uno');
-    expect(found).toEqual([
-      { name: 'Arduino UNO', fqbn: 'arduino:avr:uno', core: 'arduino:avr', installed: true },
-      { name: 'Arduino UNO R4 WiFi', fqbn: null, core: 'arduino:renesas_uno', installed: false },
-    ]);
+    expect(found[0].catalog).toBe(true);
+    expect(found.find((b) => b.fqbn === 'arduino:avr:uno')).toMatchObject({ core: 'arduino:avr', installed: true, catalog: true });
+    const r4 = found.filter((b) => /R4 WiFi/i.test(b.name));
+    expect(r4).toHaveLength(1);
+    expect(r4[0]).toMatchObject({ core: 'arduino:renesas_uno', installed: false });
   });
 
   test('the agent\'s tools answer through the executor', async () => {

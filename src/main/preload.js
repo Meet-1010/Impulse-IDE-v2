@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     compileDebug: (sketchPath, boardFQBN) => ipcRenderer.invoke('arduino:compile-debug', sketchPath, boardFQBN),
     upload: (sketchPath, boardFQBN, port) => ipcRenderer.invoke('arduino:upload', sketchPath, boardFQBN, port),
     cancelBuild: () => ipcRenderer.invoke('arduino:cancel-build'),
+    boardCatalog: () => ipcRenderer.invoke('arduino:board-catalog'),
     buildStatus: () => ipcRenderer.invoke('arduino:build-status'),
     // Every compile/upload as it runs: start, stage, progress, output lines, done (see main/services/buildJobs.js).
     onBuildEvent: (callback) => {

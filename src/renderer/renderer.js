@@ -4725,13 +4725,24 @@ function setupBoardPortSelector() {
 
     // Modal OK button
     if (modalOk) {
-        modalOk.addEventListener('click', () => {
+        modalOk.addEventListener('click', async () => {
             const selectedBoard = modal.querySelector('.board-port-list-item.selected[data-board]');
             const selectedPort = modal.querySelector('.board-port-list-item.selected[data-port]');
 
             if (selectedBoard) {
                 const boardFQBN = selectedBoard.dataset.board;
-                const boardName = selectedBoard.textContent.trim();
+                const boardName = selectedBoard.dataset.name || selectedBoard.textContent.trim();
+                // A popular board whose core is missing: one download first, then it is an ordinary board.
+                if (selectedBoard.dataset.coreKey && !installedPlatforms().has(boardFQBN.split(':').slice(0, 2).join(':'))) {
+                    modalOk.disabled = true;
+                    const ready = await ensureCoreInstalled(selectedBoard.dataset.coreKey, boardName).finally(() => { modalOk.disabled = false; });
+                    if (!ready) return;
+                    await loadBoards();
+                }
+                // Catalog boards that need an option (an STM32 variant, the Nano's bootloader) remember it.
+                if (selectedBoard.dataset.options) {
+                    try { saveChoices(baseFqbn(boardFQBN), JSON.parse(selectedBoard.dataset.options)); } catch { /* no options */ }
+                }
                 document.getElementById('boardSelectSidebar').value = boardFQBN;
                 state.selectedBoard = boardFQBN;
                 state.context.selectedBoard = boardFQBN;
@@ -4781,13 +4792,60 @@ function setupBoardPortSelector() {
     loadSavedBoardPortOptions();
 }
 
-function openBoardPortModal() {
+async function openBoardPortModal() {
     const modal = document.getElementById('boardPortModal');
-    if (modal) {
-        modal.classList.add('open');
-        renderBoardList();
-        renderPortList(false);
+    if (!modal) return;
+    modal.classList.add('open');
+    renderBoardList();
+    renderPortList(false);
+    if (!state.boardCatalog && !state.boardCatalogLoading) {
+        state.boardCatalogLoading = true;
+        try {
+            const res = await window.electronAPI.arduino.boardCatalog?.();
+            if (res?.success) state.boardCatalog = res.data;
+        } catch (e) {
+            console.warn('[boards] catalog unavailable:', e);
+        } finally {
+            state.boardCatalogLoading = false;
+        }
+        if (modal.classList.contains('open')) renderBoardList();
     }
+}
+
+/** The platforms (vendor:arch) whose cores arduino-cli lists as installed. */
+function installedPlatforms() {
+    return new Set((state.boards || []).map(b => String(b.fqbn || '').split(':').slice(0, 2).join(':')));
+}
+
+/**
+ * Install the core a catalog board needs (one download, like Arduino IDE's
+ * Boards Manager), with the footer showing progress. True when it is there.
+ */
+async function ensureCoreInstalled(key, boardName) {
+    const info = await window.electronAPI.toolchain?.extraCore?.(key).catch(() => null);
+    if (!info?.success) {
+        logToConsole(`Could not check the core for ${boardName}: ${info?.error || 'the toolchain is not ready'}`, 'error');
+        return false;
+    }
+    if (info.data.installed) return true;
+    const { label, size } = info.data;
+    const ok = await confirmDialog(`Install ${label}?`,
+        `${boardName} needs ${label}: a one-time download of ${size}. Impulse installs it with arduino-cli, as Arduino IDE's Boards Manager does.`,
+        { confirmLabel: 'Install' });
+    if (!ok) return false;
+    logToConsole(`Installing ${label} (${size})…`, 'info');
+    setBuildStatus(`Installing ${label}…`, 'busy');
+    const stop = window.electronAPI.toolchain.onProgress((p) => setBuildStatus(p.percent === null ? p.message : `${p.message} ${p.percent}%`, 'busy'));
+    const res = await window.electronAPI.toolchain.installCore(key).catch(e => ({ success: false, error: e.message }));
+    stop?.();
+    if (!res?.success) {
+        setBuildStatus(`Could not install ${label}`, 'error', { linger: true });
+        logToConsole(`Could not install ${label}: ${res?.error || 'unknown error'}`, 'error');
+        return false;
+    }
+    setBuildStatus(`${label} installed`, 'ok', { linger: true });
+    logToConsole(`${label} installed.`, 'success');
+    return true;
 }
 
 function closeBoardPortModal() {
@@ -4803,40 +4861,102 @@ function closeBoardPortModal() {
 
 function renderBoardList() {
     const boardList = document.getElementById('boardList');
-    if (!boardList || !state.boards) return;
-
+    if (!boardList) return;
     boardList.innerHTML = '';
-
-    state.boards.forEach(board => {
-        const item = document.createElement('div');
-        item.className = 'board-port-list-item';
-        item.dataset.board = board.fqbn;
-        if (state.selectedBoard === board.fqbn) {
-            item.classList.add('selected');
-        }
-
-        item.innerHTML = `
-            <span class="board-port-list-item-icon">${ICONS.chip}</span>
-            <span>${escapeHtml(board.name)}</span>
-        `;
-
-        item.addEventListener('click', () => {
-            // Toggle selection
+    const installed = installedPlatforms();
+    const installedFqbns = new Set((state.boards || []).map(b => b.fqbn));
+    const item = ({ fqbn, name, hint = '', badge = '', extra = {} }) => {
+        const el = document.createElement('div');
+        el.className = 'board-port-list-item';
+        el.dataset.board = fqbn;
+        el.dataset.name = name;
+        for (const [k, v] of Object.entries(extra)) if (v) el.dataset[k] = v;
+        if (state.selectedBoard === fqbn || baseFqbn(state.selectedBoard) === fqbn) el.classList.add('selected');
+        el.innerHTML = `<span class="board-port-list-item-icon">${ICONS.chip}</span><span>${escapeHtml(name)}${hint ? ` <span class="board-port-list-item-hint">${escapeHtml(hint)}</span>` : ''}</span>${badge ? `<span class="board-port-badge">${escapeHtml(badge)}</span>` : ''}`;
+        el.addEventListener('click', () => {
             boardList.querySelectorAll('.board-port-list-item').forEach(i => i.classList.remove('selected'));
-            item.classList.add('selected');
+            el.classList.add('selected');
         });
+        return el;
+    };
+    const header = (text) => {
+        const el = document.createElement('div');
+        el.className = 'board-port-group';
+        el.textContent = text;
+        return el;
+    };
 
-        boardList.appendChild(item);
-    });
+    // Popular boards: the catalog, grouped by family, best-known first.
+    const catalog = state.boardCatalog || [];
+    if (catalog.length) {
+        const groups = new Map();
+        for (const b of catalog) {
+            if (!groups.has(b.familyTitle)) groups.set(b.familyTitle, []);
+            groups.get(b.familyTitle).push(b);
+        }
+        const popular = document.createElement('div');
+        popular.className = 'board-port-section';
+        popular.dataset.section = 'popular';
+        popular.appendChild(header('Popular boards'));
+        for (const [title, boards] of groups) {
+            const group = document.createElement('div');
+            group.className = 'board-port-family';
+            group.appendChild(header(title));
+            for (const b of boards) {
+                const have = installed.has(b.platform);
+                group.appendChild(item({
+                    fqbn: b.fqbn, name: b.name,
+                    badge: have ? (b.sim ? 'simulates' : '') : 'core download',
+                    extra: { coreKey: have ? '' : b.coreKey || '', options: Object.keys(b.options || {}).length ? JSON.stringify(b.options) : '', catalogId: b.id },
+                }));
+            }
+            popular.appendChild(group);
+        }
+        boardList.appendChild(popular);
+    } else if (state.boardCatalogLoading) {
+        boardList.appendChild(header('Loading popular boards…'));
+    }
+
+    // Every board of the installed cores, behind a toggle.
+    const all = document.createElement('div');
+    all.className = 'board-port-section';
+    all.dataset.section = 'all';
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'board-port-toggle';
+    toggle.setAttribute('aria-expanded', state.boardListShowAll ? 'true' : 'false');
+    toggle.textContent = `${state.boardListShowAll ? 'Hide' : 'Show'} all installed boards (${(state.boards || []).length})`;
+    toggle.addEventListener('click', () => { state.boardListShowAll = !state.boardListShowAll; renderBoardList(); });
+    all.appendChild(toggle);
+    if (state.boardListShowAll || !catalog.length) {
+        for (const board of state.boards || []) all.appendChild(item({ fqbn: board.fqbn, name: board.name, extra: { installedFqbn: installedFqbns.has(board.fqbn) ? '1' : '' } }));
+    }
+    boardList.appendChild(all);
+    const search = document.getElementById('boardSearchInput');
+    if (search?.value) filterBoardList(search.value);
 }
 
 function filterBoardList(searchTerm) {
-    const items = document.querySelectorAll('#boardList .board-port-list-item');
-    const term = searchTerm.toLowerCase();
-
-    items.forEach(item => {
-        const text = item.textContent.toLowerCase();
-        item.style.display = text.includes(term) ? 'flex' : 'none';
+    const term = searchTerm.toLowerCase().trim();
+    const list = document.getElementById('boardList');
+    if (!list) return;
+    // Searching looks through every installed board too, not only the popular ones.
+    if (term && !state.boardListShowAll && !list.querySelector('.board-port-section[data-section="all"] .board-port-list-item')) {
+        state.boardListShowAll = true;
+        renderBoardList();
+        return;
+    }
+    list.querySelectorAll('.board-port-list-item').forEach(el => {
+        const text = `${el.dataset.name || ''} ${el.dataset.board || ''} ${el.textContent}`.toLowerCase();
+        el.style.display = !term || text.includes(term) ? 'flex' : 'none';
+    });
+    list.querySelectorAll('.board-port-family').forEach(group => {
+        const visible = [...group.querySelectorAll('.board-port-list-item')].some(el => el.style.display !== 'none');
+        group.style.display = visible ? '' : 'none';
+    });
+    list.querySelectorAll('.board-port-section').forEach(section => {
+        const visible = [...section.querySelectorAll('.board-port-list-item')].some(el => el.style.display !== 'none');
+        section.querySelectorAll(':scope > .board-port-group').forEach(h => { h.style.display = visible ? '' : 'none'; });
     });
 }
 

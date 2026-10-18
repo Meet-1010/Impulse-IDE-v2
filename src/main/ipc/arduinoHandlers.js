@@ -38,6 +38,13 @@ function register(ipcMain, ctx) {
     busy: result.busy || null,
   });
 
+  // The board catalog (knowledge/boards/catalog.json): the boards the picker shows first, each with the core it needs.
+  ipcMain.handle('arduino:board-catalog', withDebugLog('arduino:board-catalog', async () => {
+    const { popularBoards } = require('../services/ai/knowledge/boardRecords');
+    const { extraCoreFor } = require('../services/toolchain');
+    return { success: true, data: popularBoards().map((b) => ({ ...b, coreKey: extraCoreFor(b.fqbn) })) };
+  }));
+
   ipcMain.handle('arduino:cancel-build', withDebugLog('arduino:cancel-build', async () => ({ success: true, cancelled: arduinoService.jobs.cancel() })));
   ipcMain.handle('arduino:build-status', withDebugLog('arduino:build-status', async () => ({ success: true, data: arduinoService.jobs.status() })));
 

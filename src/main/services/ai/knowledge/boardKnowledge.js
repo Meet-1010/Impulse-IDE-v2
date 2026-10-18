@@ -7,6 +7,7 @@
  */
 const { readDefinitions, pinFacts, variantHeaders } = require('./pinsHeader');
 const { familyOf, familyById, guideText } = require('./mcuGuide');
+const records = require('./boardRecords');
 
 const CACHE_LIMIT = 40;
 
@@ -103,6 +104,20 @@ class BoardKnowledge {
       source: headers.length ? headers.map((h) => h.replace(/^.*\/packages\//, 'packages/')) : ['(no variant pin header found)'],
       more: family ? `get_mcu_guide("${family.id}") has the chip's limits, pins to avoid and common mistakes.` : 'get_mcu_guide("general") has the rules that apply to every board.',
     };
+    // The knowledge layer: what the core cannot say (onboard parts, upload, power, clones, API drift).
+    const layer = records.boardNotes(d.fqbn, { familyId: family?.id || null, coreVersion: d.coreVersion });
+    if (layer) {
+      info.catalog = layer.entry ? { id: layer.entry.id, name: layer.entry.name, rank: layer.entry.rank, india: layer.entry.india } : null;
+      info.onboard = layer.record?.onboard || [];
+      info.pinsTaken = layer.record?.taken || [];
+      info.upload = [...(layer.record?.upload || []), ...(layer.family?.upload || [])];
+      info.power = layer.family?.power || [];
+      info.clones = layer.family?.clones || [];
+      info.libraries = layer.family?.libraries || [];
+      info.boardNotes = [...(layer.record?.notes || []), ...(layer.family?.notes || [])];
+      const drift = records.driftText(records.platformOf(d.fqbn), d.coreVersion);
+      if (drift) info.coreApi = drift;
+    }
     if (raw) {
       info.definitions = [...defs.entries()].slice(0, 400).map(([name, v]) => `${name} = ${v.value}`);
     }
@@ -140,7 +155,8 @@ class BoardKnowledge {
     if (pin('TX') !== null) parts.push(`Serial pins TX ${pin('TX')}, RX ${pin('RX')}`);
     const text = [`[BOARD FACTS, from the installed core] ${parts.join('; ')}.`, ...info.notes.slice(0, 3)];
     text.push('Use the core\'s constants (LED_BUILTIN, SDA, A0…); call get_board_info, get_mcu_guide or get_component_guide before guessing a pin, voltage or I2C address.');
-    return text.join(' ');
+    const notes = records.notesText(info.fqbn, { familyId: info.family, coreVersion: (info.core.split(' ')[1] || '') });
+    return notes ? `${text.join(' ')}\n${notes}` : text.join(' ');
   }
 
   /** The family guide for a chip, family id or board. */
@@ -170,9 +186,19 @@ class BoardKnowledge {
   async search(query) {
     const out = [];
     const seen = new Set();
+    // The catalog first: the boards people actually have, with the core each needs.
+    for (const b of records.searchCatalog(query)) {
+      if (seen.has(b.fqbn)) continue;
+      seen.add(b.fqbn);
+      out.push({ name: b.name, fqbn: b.fqbn, core: b.platform, installed: null, catalog: true, note: b.india });
+    }
     const listed = await this.runCli(['board', 'listall', query, '--format', 'json'], { timeout: 20000 });
     if (listed?.success) {
-      for (const b of JSON.parse(listed.stdout).boards || []) {
+      const installedBoards = JSON.parse(listed.stdout).boards || [];
+      // Catalog hits learn whether their core is installed from what arduino-cli lists.
+      const installedPlatforms = new Set(installedBoards.map((b) => String(b.fqbn || '').split(':').slice(0, 2).join(':')));
+      for (const o of out) if (o.catalog) o.installed = installedPlatforms.has(o.core);
+      for (const b of installedBoards) {
         if (!b.fqbn || seen.has(b.fqbn)) continue;
         seen.add(b.fqbn);
         out.push({ name: b.name, fqbn: b.fqbn, core: b.fqbn.split(':').slice(0, 2).join(':'), installed: true });
@@ -183,7 +209,8 @@ class BoardKnowledge {
       for (const b of JSON.parse(searched.stdout).boards || []) {
         const core = b.platform?.metadata?.id || '';
         const key = b.fqbn || `${core}|${b.name}`;
-        if (seen.has(key) || out.some((o) => o.name === b.name && o.core === core)) continue;
+        const same = (a, c) => String(a || '').toLowerCase() === String(c || '').toLowerCase();
+        if (seen.has(key) || out.some((o) => same(o.name, b.name) && o.core === core)) continue;
         seen.add(key);
         out.push({ name: b.name, fqbn: b.fqbn || null, core, installed: !!b.fqbn });
       }
