@@ -3,7 +3,7 @@ const { circuitBlock } = require('./knowledge/circuitFacts');
 const ToolExecutor = require('./tools/toolExecutor');
 const SimpleMemory = require('./memory/simpleMemory');
 const ModelPreferences = require('./config/modelPreferences');
-const { getAllTools, getDebugTools, getPlanTools } = require('./tools/toolSchema');
+const { getCoreTools, getDebugTools, getPlanTools, getPackTools } = require('./tools/toolSchema');
 const ImpulseProvider = require('./providers/impulseProvider');
 const OllamaProvider = require('./providers/ollamaProvider');
 
@@ -14,6 +14,22 @@ const KEYLESS = new Set(['ollama']);
  * AI Agent
  * Main orchestrator for AI-powered Arduino development assistance
  */
+/** Tools that change the sketch: after one of them the sketch must compile before the turn ends. */
+const CODE_EDIT_TOOLS = new Set(['set_editor_code', 'edit_code', 'replace_in_code']);
+
+/** What a failed verify compile tells the model: the error, the first diagnostic, known fixes. */
+function verifySummary(check) {
+  const lines = [check.error || 'Compilation failed'];
+  if (check.excerpt) lines.push(check.excerpt);
+  for (const d of (check.diagnostics || []).slice(0, 5)) lines.push(`${String(d.file || '').split(/[\\/]/).pop()}:${d.line}: ${d.level}: ${d.message}`);
+  if (check.knownFixes?.local?.length || check.knownFixes?.shared?.length) lines.push(`knownFixes: ${JSON.stringify(check.knownFixes).slice(0, 1500)}`);
+  return lines.join('\n');
+}
+
+function safeJson(text) {
+  try { return JSON.parse(text) || {}; } catch { return {}; }
+}
+
 class AIAgent {
   constructor(arduinoService, serialMonitor, errorMemory, config = {}) {
     this.arduinoService = arduinoService;
@@ -265,7 +281,8 @@ class AIAgent {
     if (mode === 'ask') return [];
     if (mode === 'plan') return getPlanTools();
     if (mode === 'debug') return getDebugTools();
-    return getAllTools();
+    // Agent mode starts with the standing set; load_tools adds a pack for the rest of the turn.
+    return getCoreTools();
   }
 
   /**
@@ -309,8 +326,11 @@ class AIAgent {
       this.recordModelUsage(this.currentProvider.model).catch(() => {});
     }
 
-    const toolsForMode = this._getToolsForMode(mode);
+    const toolsForMode = [...this._getToolsForMode(mode)];
     const useTools = Array.isArray(toolsForMode) && toolsForMode.length > 0;
+    // One id per user message: every model call of this turn carries it, so the
+    // gateway can add up what a task cost.
+    const taskId = `t_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 
     // Build user content: prepend IDE context when available
     const ctx = [];
@@ -377,7 +397,8 @@ class AIAgent {
       temperature: this.config.temperature,
       max_tokens: this.config.max_tokens,
       effort: mode === 'ask' || mode === 'plan' ? 'medium' : 'high',
-      tools: toolsForMode
+      tools: toolsForMode,
+      taskId,
     };
 
     // Ask mode: single turn, no tools
@@ -401,12 +422,32 @@ class AIAgent {
     let iteration = 0;
     const maxIterations = this.config.maxIterations;
     const toolResults = [];
+    // The verify guard: code edited this turn must compile before the answer stands.
+    let editedSinceCompile = false;
+    let verifyRounds = 0;
 
     while (iteration < maxIterations) {
       step({ type: 'thinking' });
       const response = await ask(messages, chatOptions);
 
       if (!response.toolCalls || response.toolCalls.length === 0) {
+        // Before the model's "done" stands: an edited sketch that was not compiled since gets compiled now.
+        if (mode === 'agent' && editedSinceCompile && verifyRounds < 2 && context.hasFileOpen !== false) {
+          verifyRounds++;
+          editedSinceCompile = false;
+          step({ type: 'tool', name: 'compile_sketch' });
+          const check = await this.toolExecutor.execute({ name: 'compile_sketch', arguments: {} });
+          toolResults.push({ ...check, tool: 'compile_sketch', verify: true });
+          if (check && check.success === false && check.code !== 'BUSY') {
+            messages.push({ role: 'assistant', content: response.content || '' });
+            messages.push({ role: 'user', content: `[VERIFY] The sketch you edited does not compile:\n${verifySummary(check)}\nFix it (knownFixes, if present, says what fixed this before), then tell the user what you changed.` });
+            iteration++;
+            continue;
+          }
+          if (check && check.success && Array.isArray(check.summary) && check.summary.length) {
+            response.content = `${response.content || ''}\n\n${check.summary[0]}`.trim();
+          }
+        }
         if (response.content) {
           this.conversationHistory.push({
             role: 'assistant',
@@ -417,7 +458,8 @@ class AIAgent {
           response: response.content,
           toolResults: toolResults,
           usage: response.usage,
-          model: response.model
+          model: response.model,
+          taskId,
         };
       }
 
@@ -442,12 +484,26 @@ class AIAgent {
         stopIfAsked();
         step({ type: 'tool', name: String(toolCall.name || '') });
         const startTime = Date.now();
-        const result = await this.toolExecutor.execute(toolCall);
+        let result;
+        if (toolCall.name === 'load_tools') {
+          // A pack joins the request's tools for the rest of the turn.
+          const args = typeof toolCall.arguments === 'string' ? safeJson(toolCall.arguments) : (toolCall.arguments || {});
+          const pack = String(args.pack || '');
+          const extra = getPackTools(pack).filter((t) => !chatOptions.tools.some((x) => x.name === t.name));
+          chatOptions.tools = [...chatOptions.tools, ...extra];
+          result = extra.length
+            ? { success: true, tool: 'load_tools', loaded: extra.map((t) => t.name), note: 'These tools are available now; call them directly.' }
+            : { success: false, tool: 'load_tools', error: `Unknown or already loaded pack "${pack}". Packs: boards, memory, project, playground.` };
+        } else {
+          result = await this.toolExecutor.execute(toolCall);
+        }
         const executionTime = Date.now() - startTime;
         if (typeof result === 'object' && result !== null) {
           result.executionTime = executionTime;
         }
         toolResults.push(result);
+        if (result && result.success !== false && CODE_EDIT_TOOLS.has(toolCall.name)) editedSinceCompile = true;
+        if (toolCall.name === 'compile_sketch' && result && result.success !== false) editedSinceCompile = false;
 
         messages.push({
           role: 'tool',

@@ -151,6 +151,12 @@ class ToolExecutor {
           break;
 
         // State Operations
+        case 'serial':
+          result = await this.executeSerial(toolCall.arguments || {});
+          break;
+        case 'load_tools':
+          result = { success: false, error: 'load_tools is handled by the agent loop; call it again from the model.' };
+          break;
         case 'get_circuit':
           result = circuitToolResult(this.uiCallbacks?.getCircuit ? await this.uiCallbacks.getCircuit() : null);
           break;
@@ -322,6 +328,31 @@ class ToolExecutor {
   }
 
   // Serial Monitor Operation Implementations
+  /** One tool for the monitor: dispatches on `action` (see toolSchema SERIAL). */
+  async executeSerial(args = {}) {
+    const action = String(args.action || '').toLowerCase();
+    const port = async () => (args.port || '').trim() || (this.uiCallbacks?.getSelectedPort ? await this.uiCallbacks.getSelectedPort() : '') || '';
+    switch (action) {
+      case 'connect': {
+        const p = await port();
+        if (!p) return { success: false, error: 'No port: plug the board in and select its port, or pass port.' };
+        return this.executeConnectSerial({ port: p, baudRate: Number(args.baudRate) || 115200 });
+      }
+      case 'read': return this.executeReadSerial({ lines: Number(args.lines) || 50 });
+      case 'send': return this.executeSendSerial({ data: String(args.data ?? '') });
+      case 'disconnect': return this.executeDisconnectSerial();
+      case 'auto_baud': {
+        const p = await port();
+        if (!p) return { success: false, error: 'No port to try baud rates on.' };
+        return this.executeAutoDetectBaud({ port: p });
+      }
+      case 'get_baud': return this.executeGetBaudRate();
+      case 'set_baud': return this.executeSetBaudRate({ baudRate: Number(args.baudRate) });
+      case 'baud_rates': return this.executeGetAvailableBaudRates ? this.executeGetAvailableBaudRates() : { baudRates: this.availableBaudRates };
+      default: return { success: false, error: `Unknown serial action "${args.action}". Use connect, read, send, disconnect, auto_baud, get_baud, set_baud or baud_rates.` };
+    }
+  }
+
   async executeConnectSerial(args) {
     const { port, baudRate = 115200 } = args;
     await this.serialMonitor.connect(port, baudRate);
@@ -355,11 +386,16 @@ class ToolExecutor {
   }
 
   async executeReadSerial(args) {
-    const { lines = 50 } = args;
-    const recentLines = this.serialBuffer.slice(-lines);
+    // Bounded: at most 200 lines of 300 characters, so a chatty sketch cannot flood the request.
+    const lines = Math.max(1, Math.min(200, Number(args?.lines) || 50));
+    const recentLines = this.serialBuffer.slice(-lines).map((e) => {
+      const text = typeof e === 'string' ? e : String(e?.data ?? '');
+      return typeof e === 'string' ? text.slice(0, 300) : { ...e, data: text.slice(0, 300) };
+    });
     return {
       lines: recentLines,
-      totalBuffered: this.serialBuffer.length
+      totalBuffered: this.serialBuffer.length,
+      connected: !!this.serialMonitor?.isConnected,
     };
   }
 

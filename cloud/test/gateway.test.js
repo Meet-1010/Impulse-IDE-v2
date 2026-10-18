@@ -38,7 +38,7 @@ describe('AI gateway', () => {
   const lastUsage = async () => (await t.pool.query('select * from usage_event where user_id = $1 order by id desc limit 1', [userId])).rows[0];
 
   test('streams the answer through unchanged and charges what it cost', async () => {
-    const res = await send({ ...MESSAGE, stream: true });
+    const res = await send({ ...MESSAGE, stream: true }, { 'x-impulse-task': 't_abc123_xyz' });
     assert.equal(res.status, 200);
     assert.match(res.headers.get('content-type'), /text\/event-stream/);
     const text = await readAll(res);
@@ -53,6 +53,7 @@ describe('AI gateway', () => {
     assert.equal(usage.credits_charged, 1490);
     assert.equal(usage.output_tokens, 300);
     assert.equal(usage.request_id, 'req_test');
+    assert.equal(usage.task_id, 't_abc123_xyz', 'the app\'s task id is kept so cost per task is one query');
     const b = await balance();
     assert.equal(b.plan_credits, 100000 - 1490, 'plan credits are spent first');
     assert.equal(b.bonus_credits, 200000);

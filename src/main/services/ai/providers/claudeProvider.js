@@ -158,7 +158,10 @@ class ClaudeProvider extends BaseProvider {
     const request = this.buildRequest(messages, options);
     let response;
     try {
-      const requestOptions = options.signal ? { signal: options.signal } : undefined;
+      // The task id lets the gateway add up what one user message cost across its model calls.
+      const requestOptions = {};
+      if (options.signal) requestOptions.signal = options.signal;
+      if (options.taskId && /^[\w.-]{1,64}$/.test(options.taskId)) requestOptions.headers = { 'x-impulse-task': options.taskId };
       const stream = request.betas
         ? this.client.beta.messages.stream(request, requestOptions)
         : this.client.messages.stream(request, requestOptions);

@@ -66,115 +66,36 @@ const TOOL_SCHEMA = {
   },
 
   // Serial Monitor Operations
-  CONNECT_SERIAL: {
-    name: 'connect_serial',
-    description: 'Connect to a serial port for monitoring',
+  // The serial monitor as one tool: fewer schemas in every request, same reach.
+  SERIAL: {
+    name: 'serial',
+    description: 'The serial monitor. action: "connect" (port, baudRate; default 115200) opens the port and starts buffering; "read" (lines; default 50) returns the latest buffered lines; "send" (data) writes to the port; "disconnect" closes it (an upload needs the port free); "auto_baud" (port) tries common rates until the output is readable; "get_baud" / "set_baud" (baudRate) read or change the rate; "baud_rates" lists the rates. Garbled output means the wrong baud rate (or the wrong clock for the board).',
     parameters: {
       type: 'object',
       properties: {
-        port: {
-          type: 'string',
-          description: 'Serial port path'
-        },
-        baudRate: {
-          type: 'number',
-          description: 'Baud rate (common: 9600, 115200)',
-          default: 115200
-        }
+        action: { type: 'string', enum: ['connect', 'read', 'send', 'disconnect', 'auto_baud', 'get_baud', 'set_baud', 'baud_rates'], description: 'What to do' },
+        port: { type: 'string', description: 'Serial port path (connect, auto_baud); defaults to the selected port' },
+        baudRate: { type: 'number', description: 'Baud rate (connect, set_baud): 9600, 115200, 74880…' },
+        data: { type: 'string', description: 'Text to send (send)' },
+        lines: { type: 'number', description: 'How many recent lines to read (read), up to 200' }
       },
-      required: ['port']
+      required: ['action']
     }
   },
 
-  DISCONNECT_SERIAL: {
-    name: 'disconnect_serial',
-    description: 'Disconnect from serial port',
-    parameters: {
-      type: 'object',
-      properties: {}
-    }
-  },
-
-  SEND_SERIAL: {
-    name: 'send_serial',
-    description: 'Send data to the connected serial port',
+  // Tool packs the model loads when it needs them (see TOOL_PACKS): the standing set stays small.
+  LOAD_TOOLS: {
+    name: 'load_tools',
+    description: 'Make more tools available for the rest of this turn. pack: "boards" (list_boards, list_ports, search_boards, get_mcu_guide: finding boards and ports, chip-level limits), "memory" (analyze_error, search_memory, record_fix: past errors and fixes), "project" (save_sketch, get_current_sketch_path), "playground" (update_playground: step-by-step hardware instructions for the user). Call it once per pack you need.',
     parameters: {
       type: 'object',
       properties: {
-        data: {
-          type: 'string',
-          description: 'Data to send'
-        }
+        pack: { type: 'string', enum: ['boards', 'memory', 'project', 'playground'], description: 'Which pack to load' }
       },
-      required: ['data']
+      required: ['pack']
     }
   },
 
-  READ_SERIAL: {
-    name: 'read_serial',
-    description: 'Read recent serial monitor output',
-    parameters: {
-      type: 'object',
-      properties: {
-        lines: {
-          type: 'number',
-          description: 'Number of recent lines to read',
-          default: 50
-        }
-      }
-    }
-  },
-
-  AUTO_DETECT_BAUD: {
-    name: 'auto_detect_baud',
-    description: 'Automatically detect the correct baud rate for a serial port',
-    parameters: {
-      type: 'object',
-      properties: {
-        port: {
-          type: 'string',
-          description: 'Serial port path'
-        }
-      },
-      required: ['port']
-    }
-  },
-
-  // Baud Rate Operations
-  GET_BAUD_RATE: {
-    name: 'get_baud_rate',
-    description: 'Get the current baud rate setting for serial communication',
-    parameters: {
-      type: 'object',
-      properties: {}
-    }
-  },
-
-  SET_BAUD_RATE: {
-    name: 'set_baud_rate',
-    description: 'Set the baud rate for serial communication. Common rates: 300, 1200, 2400, 4800, 9600, 19200, 38400, 57600, 74880, 115200, 230400, 250000, 500000, 1000000, 2000000',
-    parameters: {
-      type: 'object',
-      properties: {
-        baudRate: {
-          type: 'number',
-          description: 'The baud rate to set (e.g., 9600, 115200)'
-        }
-      },
-      required: ['baudRate']
-    }
-  },
-
-  GET_AVAILABLE_BAUD_RATES: {
-    name: 'get_available_baud_rates',
-    description: 'Get list of all available baud rate options',
-    parameters: {
-      type: 'object',
-      properties: {}
-    }
-  },
-
-  // Code Editor Operations
   GET_EDITOR_CODE: {
     name: 'get_editor_code',
     description: 'Get the current code content from the editor. If the result is empty or whitespace-only, the user has no code yet—use set_editor_code to write code when they ask for it.',
@@ -447,7 +368,25 @@ const TOOL_SCHEMA = {
   }
 };
 
-const DEBUG_TOOL_NAMES = ['analyze_error', 'search_memory', 'record_fix', 'get_circuit'];
+/**
+ * The standing tool set of agent mode: what almost every build turn needs.
+ * Everything else sits in a pack the model loads with load_tools, so a request
+ * carries about half the schema tokens it used to.
+ */
+const CORE_TOOL_NAMES = [
+  'get_current_state', 'get_editor_code', 'set_editor_code', 'edit_code', 'replace_in_code', 'search_code',
+  'compile_sketch', 'upload_sketch', 'serial', 'get_board_info', 'get_component_guide', 'get_circuit', 'load_tools',
+];
+
+const TOOL_PACKS = {
+  boards: ['list_boards', 'list_ports', 'search_boards', 'get_mcu_guide'],
+  memory: ['analyze_error', 'search_memory', 'record_fix'],
+  project: ['save_sketch', 'get_current_sketch_path'],
+  playground: ['update_playground'],
+};
+
+/** Debug mode: the standing set plus the memory pack (it must read, edit, compile and watch serial to fix anything). */
+const DEBUG_TOOL_NAMES = [...CORE_TOOL_NAMES, ...TOOL_PACKS.memory];
 
 /** Plan mode reads the project and the hardware but changes nothing. */
 const PLAN_TOOL_NAMES = [
@@ -461,6 +400,16 @@ const PLAN_TOOL_NAMES = [
  */
 function getAllTools() {
   return Object.values(TOOL_SCHEMA);
+}
+
+/** The standing set of agent mode. */
+function getCoreTools() {
+  return CORE_TOOL_NAMES.map((n) => getTool(n)).filter(Boolean);
+}
+
+/** The tools of one pack (load_tools), or [] for an unknown pack. */
+function getPackTools(pack) {
+  return (TOOL_PACKS[pack] || []).map((n) => getTool(n)).filter(Boolean);
 }
 
 /**
@@ -544,5 +493,9 @@ module.exports = {
   getDebugTools,
   getPlanTools,
   getTool,
-  validateToolCall
+  validateToolCall,
+  getCoreTools,
+  getPackTools,
+  TOOL_PACKS,
+  CORE_TOOL_NAMES
 };

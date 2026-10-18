@@ -22,7 +22,7 @@ describe('ToolExecutor', () => {
   it('rejects unknown tools and arguments of the wrong type', async () => {
     const { executor } = makeExecutor();
     expect((await executor.execute({ name: 'rm_rf', arguments: {} })).success).toBe(false);
-    const bad = await executor.execute({ name: 'set_baud_rate', arguments: { baudRate: 'fast' } });
+    const bad = await executor.execute({ name: 'serial', arguments: { action: 'set_baud', baudRate: 'fast' } });
     expect(bad.success).toBe(false);
     expect(bad.error).toContain('baudRate');
   });

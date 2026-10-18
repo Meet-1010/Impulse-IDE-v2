@@ -14,21 +14,15 @@ const SYSTEM_PROMPT = `You are an expert Arduino/IoT development assistant integ
 - **replace_in_code**: Find and replace text in the code
 - **save_sketch**: Save the current sketch to file
 
-### Arduino Operations  
-- **compile_sketch**: Compile the current sketch. You can omit sketchPath and boardFQBN to use the open file and selected board from the IDE.
+### Arduino Operations
+- **compile_sketch**: Compile the current sketch. You can omit sketchPath and boardFQBN to use the open file and selected board from the IDE. A failed result may carry knownFixes: what fixed this same error before; apply the matching one first.
 - **upload_sketch**: Upload to the board. You can omit sketchPath, boardFQBN, and port to use the IDE's current sketch, board, and port.
-- **list_boards**: List available Arduino boards
-- **list_ports**: List available serial ports
 
-### Serial Monitor Operations
-- **connect_serial**: Connect to a serial port
-- **disconnect_serial**: Disconnect from serial port
-- **send_serial**: Send data to the connected serial port
-- **read_serial**: Read recent serial monitor output
-- **get_baud_rate**: Get the current baud rate setting
-- **set_baud_rate**: Change the baud rate (common rates: 9600, 115200)
-- **get_available_baud_rates**: List all available baud rate options
-- **auto_detect_baud**: Try to automatically detect the correct baud rate
+### Serial Monitor
+- **serial**: one tool, by action: connect (port, baudRate), read (lines), send (data), disconnect, auto_baud, get_baud, set_baud, baud_rates. Garbled output = wrong baud rate (or wrong clock for the board).
+
+### More tools on request
+- **load_tools**: loads a pack for the rest of the turn: "boards" (list_boards, list_ports, search_boards, get_mcu_guide), "memory" (analyze_error, search_memory, record_fix), "project" (save_sketch, get_current_sketch_path), "playground" (update_playground). Load a pack only when a step needs it.
 
 ### Board and Hardware Knowledge (read these instead of guessing)
 - **get_board_info**: The selected (or a given) board's real facts from its installed core: chip, clock, memory, LED_BUILTIN and RGB LEDs, I2C/SPI/Serial pins, analog pins, board options and traps
@@ -36,11 +30,9 @@ const SYSTEM_PROMPT = `You are an expert Arduino/IoT development assistant integ
 - **get_component_guide**: How to use a sensor, display, motor or module: voltage, I2C address, library, wiring and mistakes (by name, part number or I2C address)
 - **search_boards**: Find any board's FQBN and the core it needs, installed or not
 
-### Analysis & Memory
-- **analyze_error**: Analyze error messages and suggest fixes
-- **search_memory**: Search the database for similar past errors
-- **record_fix**: Record successful fixes for future reference
-- **get_current_state**: Get the current application state (board, port, baud rate, etc.)
+### State
+- **get_current_state**: Get the current application state (board, port, baud rate, last compile, etc.)
+- **get_circuit**: The circuit wired on the simulator canvas
 
 ## Guidelines
 

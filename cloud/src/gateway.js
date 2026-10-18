@@ -172,10 +172,10 @@ export function createGateway(deps) {
   const upstreamFetch = deps.fetch || fetch;
   const userKey = (id) => createHmac('sha256', config.secret).update(`anthropic-user:${id}`).digest('hex').slice(0, 32);
 
-  async function insertPending(userId, model, client) {
+  async function insertPending(userId, model, client, taskId = null) {
     const { rows } = await pool.query(
-      `insert into usage_event (user_id, model, status, client) values ($1, $2, 'pending', $3) returning id`,
-      [userId, model, client],
+      `insert into usage_event (user_id, model, status, client, task_id) values ($1, $2, 'pending', $3, $4) returning id`,
+      [userId, model, client, taskId],
     );
     return rows[0].id;
   }
@@ -249,7 +249,8 @@ export function createGateway(deps) {
     const out = clean.body;
     const beta = new URL(request.url).searchParams.get('beta') === 'true';
     const betas = filterBetas(request.headers.get('anthropic-beta'));
-    const usageId = await insertPending(user.id, model, (request.headers.get('x-impulse-client') || '').slice(0, 80) || null);
+    const taskId = (request.headers.get('x-impulse-task') || '').slice(0, 64) || null;
+    const usageId = await insertPending(user.id, model, (request.headers.get('x-impulse-client') || '').slice(0, 80) || null, /^[\w.-]+$/.test(taskId || '') ? taskId : null);
 
     const abort = new AbortController();
     let upstream;
