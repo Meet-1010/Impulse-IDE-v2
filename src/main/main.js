@@ -22,6 +22,7 @@ const ArduinoService = require('./services/arduinoService');
 const SerialMonitor = require('./services/serialMonitor');
 const ErrorMemory = require('./services/errorMemory');
 const AIAgent = require('./services/ai/agent');
+const { FixCapture } = require('./services/ai/learning/fixCapture');
 const { CloudAccount } = require('./services/cloud/account');
 const { cloudURL, localModelsEnabled } = require('./services/cloud/config');
 const ChatStore = require('./services/chatStore');
@@ -64,6 +65,7 @@ let errorMemory;
 let aiAgent;
 let cloudAccount;
 let chatStore;
+let learning = null;
 let workspace;
 let esp32sim;
 
@@ -453,6 +455,7 @@ app.whenReady().then(() => {
     version: app.getVersion(),
   });
   chatStore = new ChatStore(path.join(app.getPath('userData'), 'chats'));
+  learning = setupLearning();
   // A build with a cloud address is credits-only: no models on this computer.
   aiAgent = new AIAgent(arduinoService, serialMonitor, errorMemory, { localModels: localModelsEnabled() });
   aiAgent.initializeProviders();
@@ -484,6 +487,8 @@ app.whenReady().then(() => {
       },
       setEditorCode: async (code) => {
         uiState.editorCode = code;
+        // The window echoes this write back through ui:update-editor-code; count it as the agent's.
+        uiState.lastEditBy = 'agent-pending';
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('ui:set-editor-code', code);
         }
@@ -514,6 +519,8 @@ app.whenReady().then(() => {
       getSelectedPort: async () => uiState.selectedPort,
       getLastCompileResult: async () => uiState.lastCompileResult ?? null,
       getCircuit: async () => uiState.circuit ?? null,
+      // Fixes that resolved the same error before: this computer's, then other people's.
+      knownFixes: async ({ output, kind, failureCode, board }) => learning?.known({ output, kind, failureCode, board }) ?? null,
       setPlayground: async (content, append) => {
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('playground:update', content, append);
@@ -571,6 +578,7 @@ app.whenReady().then(() => {
 
   const ctx = {
     mainWindow,
+    learning,
     arduinoService,
     serialMonitor,
     errorMemory,
@@ -594,6 +602,76 @@ app.whenReady().then(() => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });
+
+/**
+ * Learning from fixes: a failed build followed by a success is a fix. Kept on
+ * this computer; shared with Impulse Cloud when signed in and sharing is on
+ * (PRIVACY.md). Known fixes join a failed build's tool result.
+ */
+function setupLearning() {
+  const Store = require('electron-store');
+  const prefs = new Store({ name: 'learning', defaults: { share: true } });
+  const capture = new FixCapture({ file: path.join(app.getPath('userData'), 'learning.json') });
+  capture.on('error', (e) => console.warn('[learning] could not save:', e?.message || e));
+  const shareOn = () => prefs.get('share') !== false;
+
+  const share = async (fix) => {
+    if (!shareOn() || !cloudAccount?.status().signedIn) return;
+    const res = await cloudAccount.shareFix(fix).catch(() => null);
+    if (res?.ok) capture.markShared(fix.id);
+  };
+  capture.on('fix', (fix) => { share(fix).catch(() => {}); });
+  // Fixes recorded while signed out or offline go when the account is back.
+  const drain = () => { for (const fix of capture.unshared().slice(-20)) share(fix).catch(() => {}); };
+  cloudAccount?.on('change', (status) => { if (status.signedIn) drain(); });
+
+  // Every finished build or upload, with the sketch as it was at that moment.
+  arduinoService.jobs.on('result', (ev) => {
+    try {
+      const fqbn = ev.fqbn || uiState.selectedBoard || null;
+      const details = aiAgent?.toolExecutor?.boardKnowledge?.cache?.get(fqbn) || null;
+      capture.observeBuild({
+        kind: ev.kind,
+        ok: ev.ok,
+        sketchPath: ev.sketchPath,
+        fqbn,
+        coreVersion: details?.coreVersion || '',
+        output: ev.ok ? '' : (ev.error?.output || ev.error?.message || ''),
+        failureCode: ev.ok ? '' : (ev.error?.code || ''),
+        excerpt: ev.ok ? '' : (ev.error?.excerpt || ''),
+        code: uiState.editorCode || '',
+        editedBy: uiState.lastEditBy === 'agent' || uiState.lastEditBy === 'agent-pending' ? 'agent' : uiState.lastEditBy === 'user' ? 'user' : null,
+        model: aiAgent?.currentProvider?.model || null,
+      });
+    } catch (error) {
+      console.warn('[learning] could not record the build:', error?.message || error);
+    }
+  });
+
+  return {
+    status: () => ({ share: shareOn(), ...capture.stats() }),
+    async setShare(on) {
+      prefs.set('share', !!on);
+      if (on) drain();
+      return { share: shareOn(), ...capture.stats() };
+    },
+    /** Known fixes for a failure: local first, then the cloud's (same board first). */
+    async known({ output, kind, failureCode, board }) {
+      const local = capture.lookup(output, kind, failureCode);
+      const out = { hash: local.hash, seenHere: local.count, local: local.fixes.map((f) => ({ fixedBy: f.fixedBy, board: f.board, diff: f.diff.slice(0, 1200), at: f.at })), shared: [] };
+      if (shareOn() && cloudAccount?.status().signedIn) {
+        const res = await cloudAccount.knownFixes(local.hash, board).catch(() => null);
+        if (res?.ok && res.data) {
+          out.sharedCount = res.data.fixes;
+          out.sharedUsers = res.data.users;
+          out.shared = (res.data.known || []).map((f) => ({ fixedBy: f.fixedBy, board: f.board, coreVersion: f.coreVersion, diff: String(f.diff || '').slice(0, 1200) }));
+        }
+      }
+      return out;
+    },
+    capture,
+  };
+}
 
 app.on('will-quit', () => {
   esp32sim?.stopAll();

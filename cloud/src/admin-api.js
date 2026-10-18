@@ -7,6 +7,7 @@ import { MODELS } from './pricing.js';
 import { MC, adjust, describe, getAccount, setPlan } from './credits.js';
 import { PLAN_IDS, validateSettings } from './settings.js';
 import { publicUser } from './account-api.js';
+import { topSignatures } from './learning.js';
 
 const json = (data, status = 200) => Response.json(data, { status, headers: { 'cache-control': 'no-store' } });
 const fail = (status, message) => json({ error: message }, status);
@@ -328,6 +329,20 @@ export function createAdminApi({ pool, auth, settings, budget, config }) {
       );
       await audit(who.admin.id, `upgrade.${b.action}`, req.user_id, { plan: req.plan, request: req.id });
       return json({ ok: true });
+    },
+
+    /** What people struggle with: the most common build errors and the fixes that worked. */
+    async learning(request) {
+      const who = await adminFrom(request);
+      if (who.error) return who.error;
+      const days = Math.min(365, Math.max(1, Number(new URL(request.url).searchParams.get('days')) || 30));
+      const signatures = await topSignatures(pool, { days, limit: 100 });
+      const { rows: [totals] } = await pool.query(
+        `select count(*)::int as total, count(distinct user_id)::int as users, count(*) filter (where fixed_by = 'agent')::int as by_agent
+         from fix_record where created_at > now() - ($1 || ' days')::interval`, [String(days)],
+      );
+      const s = await settings.get();
+      return json({ days, total: totals.total, users: totals.users, byAgent: totals.by_agent, enabled: !!s.learningEnabled, signatures });
     },
 
     async audit(request) {

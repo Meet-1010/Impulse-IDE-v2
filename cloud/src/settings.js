@@ -18,6 +18,8 @@ export const DEFAULTS = Object.freeze({
   dailyBudgetUsd: 25,
   maintenance: false,
   announcement: '',
+  // Accept fix records from the apps (learning from fixes); off stops intake, lookups still work.
+  learningEnabled: true,
   // monthlyCredits is the allowance per period; periodHours null means a
   // calendar month. The free plan refills a small allowance every few hours,
   // so a student who runs out waits rather than paying; paid plans are monthly.
@@ -42,6 +44,7 @@ const RULES = {
   rateLimitPerMinute: (v) => (isInt(v, 1, 10_000) ? null : 'a whole number from 1 to 10,000'),
   dailyBudgetUsd: (v) => (isNum(v, 0, 1_000_000) ? null : 'a number from 0 to 1,000,000'),
   maintenance: (v) => (typeof v === 'boolean' ? null : 'true or false'),
+  learningEnabled: (v) => (typeof v === 'boolean' ? null : 'true or false'),
   announcement: (v) => (typeof v === 'string' && v.length <= 280 ? null : 'text up to 280 characters'),
   plans: (v) => {
     if (!v || typeof v !== 'object') return 'an object of plans';

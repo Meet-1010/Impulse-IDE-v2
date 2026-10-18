@@ -328,6 +328,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     }
   },
 
+  // Learning from fixes: whether fixes are shared with Impulse Cloud, and what is kept here.
+  learning: {
+    status: () => ipcRenderer.invoke('learning:status'),
+    setShare: (share) => ipcRenderer.invoke('learning:set-share', !!share),
+  },
+
   // Notification system
   onNotification: (channel, callback) => {
     if (typeof channel !== 'string' || !channel.startsWith('notification:')) return () => {};

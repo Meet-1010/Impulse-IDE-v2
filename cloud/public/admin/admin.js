@@ -472,6 +472,35 @@ async function audit(main) {
       : h('p', { class: 'empty', text: 'Nothing has been changed yet.' })));
 }
 
+/* ─────────────── Learning ─────────────── */
+
+async function learning(main, query) {
+  const days = [7, 30, 90].includes(Number(query.get('days'))) ? Number(query.get('days')) : 30;
+  const data = await get(`/learning?days=${days}`);
+  const rows = data.signatures.map((s) => {
+    const details = h('tr', { class: 'details', hidden: true }, h('td', { colspan: '6' },
+      h('p', { class: 'muted', style: 'margin:0 0 8px;font-size:12.5px', text: s.excerpt }),
+      s.diff ? h('pre', { class: 'code', text: s.diff }) : h('p', { class: 'muted', text: 'Fixed without a code change (port, wiring or board setting).' })));
+    const row = h('tr', { class: 'clickable', onclick: () => { details.hidden = !details.hidden; } },
+      h('td', {}, h('span', { class: 'tag', text: s.kind }), ' ', h('span', { text: s.signature.replace(/^(?:compile|upload):/, '').replace(/^[A-Z_]+:/, '') })),
+      h('td', { class: 'nowrap', text: `${s.fixes}` }), h('td', { class: 'nowrap', text: `${s.users}` }),
+      h('td', { class: 'nowrap', text: s.fixes ? `${Math.round((s.byAgent / s.fixes) * 100)}%` : '—' }),
+      h('td', { class: 'muted', text: [s.board, s.coreVersion].filter(Boolean).join(' · ') }),
+      h('td', { class: 'muted nowrap', text: ago(s.lastAt) }));
+    return [row, details];
+  }).flat();
+  main.replaceChildren(
+    pageHead('Learning from fixes', `What people struggled with and what fixed it, last ${days} days. ${data.enabled ? 'Intake is on.' : 'Intake is off (Settings).'}`,
+      seg([[7, '7 days'], [30, '30 days'], [90, '90 days']], days, (d) => { location.hash = `#/learning?days=${d}`; }, 'Date range')),
+    h('section', { class: 'tiles', 'aria-label': 'Totals' },
+      h('div', { class: 'tile' }, h('span', { class: 'label', text: 'Fixes shared' }), h('span', { class: 'value', text: `${data.total}` }), h('span', { class: 'hint', text: `last ${days} days` })),
+      h('div', { class: 'tile' }, h('span', { class: 'label', text: 'People' }), h('span', { class: 'value', text: `${data.users}` }), h('span', { class: 'hint', text: 'who shared a fix' })),
+      h('div', { class: 'tile' }, h('span', { class: 'label', text: 'Fixed by the agent' }), h('span', { class: 'value', text: data.total ? `${Math.round((data.byAgent / data.total) * 100)}%` : '—' }), h('span', { class: 'hint', text: 'the rest by hand' }))),
+    h('section', { class: 'panel' }, rows.length
+      ? h('table', {}, h('thead', {}, h('tr', {}, ['Error', 'Fixes', 'People', 'By agent', 'Board · core', 'Last'].map((c) => h('th', { text: c })))), h('tbody', {}, rows))
+      : h('p', { class: 'empty', text: 'No fixes shared yet. They arrive when a failed build is followed by a success in an app with sharing on.' })));
+}
+
 /* ─────────────── Router ─────────────── */
 
 async function refreshCount() {
@@ -500,6 +529,7 @@ async function route() {
     else if (section === 'requests') await requests(main, query);
     else if (section === 'settings') await settings(main);
     else if (section === 'audit') await audit(main);
+    else if (section === 'learning') await learning(main, query);
     else await overview(main, query);
     document.title = `${main.querySelector('h1')?.textContent || 'Admin'} · Impulse admin`;
   } catch (error) {

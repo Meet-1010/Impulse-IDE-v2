@@ -13,6 +13,7 @@ const libHandlers = require('./libHandlers');
 const errorsHandlers = require('./errorsHandlers');
 const aiHandlers = require('./aiHandlers');
 const cloudHandlers = require('./cloudHandlers');
+const learningHandlers = require('./learningHandlers');
 const chatHandlers = require('./chatHandlers');
 const appHandlers = require('./appHandlers');
 const sketchHandlers = require('./sketchHandlers');
@@ -52,6 +53,7 @@ function registerAllIpc(ipcMain, ctx) {
   errorsHandlers.register(ipcMain, ctx);
   aiHandlers.register(ipcMain, ctx);
   cloudHandlers.register(ipcMain, ctx);
+  learningHandlers.register(ipcMain, ctx);
   chatHandlers.register(ipcMain, ctx);
   sketchHandlers.register(ipcMain, ctx);
   problemHandlers.register(ipcMain, ctx);

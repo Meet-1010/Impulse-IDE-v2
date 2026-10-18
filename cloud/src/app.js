@@ -10,6 +10,7 @@ import { createGateway } from './gateway.js';
 import { createAccountApi } from './account-api.js';
 import { createAdminApi } from './admin-api.js';
 import { createDesktopHandoff } from './desktop.js';
+import { createLearningApi } from './learning.js';
 import { getAccount } from './credits.js';
 
 /**
@@ -34,6 +35,7 @@ export function createApp({ config, pool, background, log = (m) => console.log(m
   const account = createAccountApi(deps);
   const admin = createAdminApi(deps);
   const desktop = createDesktopHandoff(deps);
+  const learning = createLearningApi(deps);
 
   const app = new Hono();
 
@@ -55,6 +57,10 @@ export function createApp({ config, pool, background, log = (m) => console.log(m
   app.get('/v1/usage', (c) => account.usage(c.req.raw));
   app.get('/v1/plans', (c) => account.plans(c.req.raw));
   app.post('/v1/upgrade-request', (c) => account.requestUpgrade(c.req.raw));
+  // Learning from fixes: the apps share (error, fix) records and ask for known fixes.
+  app.post('/v1/learn/fixes', (c) => learning.share(c.req.raw));
+  app.get('/v1/learn/fixes', (c) => learning.known(c.req.raw));
+  app.get('/v1/knowledge/manifest', (c) => learning.manifest(c.req.raw));
 
   app.get('/desktop/complete', (c) => desktop.complete(c.req.raw));
   app.post('/desktop/token', (c) => desktop.token(c.req.raw));
@@ -74,6 +80,7 @@ export function createApp({ config, pool, background, log = (m) => console.log(m
   app.get('/admin/api/requests', (c) => admin.requests(c.req.raw));
   app.post('/admin/api/requests/:id', (c) => admin.decide(c.req.raw, c.req.param('id')));
   app.get('/admin/api/audit', (c) => admin.audit(c.req.raw));
+  app.get('/admin/api/learning', (c) => admin.learning(c.req.raw));
 
   app.get('/', (c) => c.redirect(config.websiteURL, 302));
   // Folder pages without the trailing slash (/admin → /admin/).

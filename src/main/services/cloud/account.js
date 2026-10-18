@@ -136,6 +136,35 @@ class CloudAccount extends EventEmitter {
     return { ok: res.ok, status: res.status, data, headers: res.headers, error };
   }
 
+  // ── learning from fixes ──────────────────────────────────────────────────
+
+  /** Send one fix record (already redacted by FixCapture). */
+  async shareFix(fix) {
+    if (!this.token) return { ok: false, error: 'Not signed in.' };
+    const body = {
+      hash: fix.hash, signature: fix.signature, kind: fix.kind, failureCode: fix.failureCode, board: fix.board, core: fix.core,
+      coreVersion: fix.coreVersion, libraries: fix.libraries, errorExcerpt: fix.errorExcerpt, diff: fix.diff, fixedBy: fix.fixedBy, model: fix.model,
+    };
+    return this.request('POST', '/v1/learn/fixes', { body });
+  }
+
+  /** Fixes other people found for this error (same board first). */
+  async knownFixes(hash, board = null) {
+    if (!this.token || !/^[a-f0-9]{8,32}$/.test(String(hash || ''))) return { ok: false, data: null };
+    const q = new URLSearchParams({ hash });
+    if (board) q.set('board', board);
+    return this.request('GET', `/v1/learn/fixes?${q}`);
+  }
+
+  /** The most common errors and their fixes (cached an hour). */
+  async learningManifest() {
+    if (!this.token) return null;
+    if (this.manifest && Date.now() - this.manifest.at < 60 * 60 * 1000) return this.manifest.value;
+    const res = await this.request('GET', '/v1/knowledge/manifest');
+    if (res.ok) this.manifest = { at: Date.now(), value: res.data };
+    return res.ok ? res.data : this.manifest?.value || null;
+  }
+
   // ── state ────────────────────────────────────────────────────────────────
 
   status() {

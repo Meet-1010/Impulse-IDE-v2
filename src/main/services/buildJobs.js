@@ -98,10 +98,13 @@ class BuildJobs extends EventEmitter {
         const result = await work(handle);
         this._flush(job);
         this.emit('event', { phase: 'done', jobId: job.id, kind: job.kind, ok: true, ms: Date.now() - started, stage: job.stage, port: job.port, result: publicResult(result), summary: result?.summary || [] });
+        // The full result, for the main process only (learning from fixes); never sent to the window.
+        this.emit('result', { jobId: job.id, kind: job.kind, sketchPath: job.sketchPath, fqbn: job.fqbn, port: job.port, ok: true, result });
         return result;
       } catch (error) {
         this._flush(job);
         const cancelled = job.controller.signal.aborted;
+        if (!cancelled) this.emit('result', { jobId: job.id, kind: job.kind, sketchPath: job.sketchPath, fqbn: job.fqbn, port: job.port, ok: false, error });
         this.emit('event', {
           phase: 'done', jobId: job.id, kind: job.kind, ok: false, ms: Date.now() - started, stage: job.stage, port: job.port,
           error: {

@@ -386,6 +386,8 @@ export function createAccount({ api, onSignedIn, onUseLocal }) {
   }
 
   // ── Account menu ───────────────────────────────────────────────────────
+  let learning = { share: true, fixes: 0, shared: 0 };
+  api.learning?.status?.().then((res) => { if (res?.success) learning = res.data; }).catch(() => {});
   function accountMenu(anchor, extra = []) {
     // Signed out: straight to sign-in (a one-item menu would only add a click).
     if (!status.signedIn && status.configured && !extra.length) {
@@ -406,6 +408,15 @@ export function createAccount({ api, onSignedIn, onUseLocal }) {
       { element: header },
       { separator: true },
       { label: 'Credits and plan', icon: ICON.bolt, meta: status.credits ? fmtCredits(status.credits.remaining) : null, onSelect: () => openPlans() },
+      {
+        label: learning.share ? 'Sharing fixes: on' : 'Sharing fixes: off',
+        icon: ICON.checkSmall,
+        sub: learning.share ? 'When a failed build gets fixed, the error and the fix (not your sketch) help everyone' : 'Fixes stay on this computer',
+        onSelect: async () => {
+          const res = await api.learning?.setShare?.(!learning.share).catch(() => null);
+          if (res?.success) { learning = res.data; toast(learning.share ? 'Sharing fixes is on' : 'Sharing fixes is off'); }
+        },
+      },
       status.isAdmin ? { label: 'Admin console', icon: ICON.shield, sub: 'Opens in your browser', onSelect: () => api.cloud.openAdmin() } : null,
       ...extra,
       { separator: true },

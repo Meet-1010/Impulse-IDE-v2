@@ -22,6 +22,9 @@ function register(ipcMain, ctx) {
   });
 
   ipcMain.on('ui:update-editor-code', (event, code) => {
+    // The window's editor changed: unless the agent just wrote it, that is the user's edit.
+    if (uiState.editorCode !== code && uiState.lastEditBy !== 'agent-pending') uiState.lastEditBy = 'user';
+    if (uiState.lastEditBy === 'agent-pending') uiState.lastEditBy = 'agent';
     uiState.editorCode = typeof code === 'string' ? code : String(code ?? '');
   });
 

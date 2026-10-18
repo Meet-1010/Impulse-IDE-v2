@@ -217,7 +217,7 @@ class ToolExecutor {
     }
     try {
       const compileResult = await this.arduinoService.compile(sketchPath, boardFQBN);
-      if (compileResult && compileResult.success === false) return buildFailure(compileResult, 'compile');
+      if (compileResult && compileResult.success === false) return this._withKnownFixes(buildFailure(compileResult, 'compile'), compileResult, 'compile', boardFQBN);
       return {
         success: true,
         message: compileResult.message,
@@ -275,7 +275,7 @@ class ToolExecutor {
     }
     try {
       const uploadResult = await this.arduinoService.upload(sketchPath, boardFQBN, port);
-      if (uploadResult && uploadResult.success === false) return buildFailure(uploadResult, 'upload');
+      if (uploadResult && uploadResult.success === false) return this._withKnownFixes(buildFailure(uploadResult, 'upload'), uploadResult, 'upload', boardFQBN);
       return {
         success: true,
         message: uploadResult.message || `Uploaded to ${port}`,
@@ -288,6 +288,27 @@ class ToolExecutor {
     } catch (err) {
       return { success: false, error: err.message, output: boundedOutput(err.output || err.stdout || err.stderr || '', 1500) };
     }
+  }
+
+  /**
+   * Fixes that resolved this same error before (this computer's, then other
+   * people's through Impulse Cloud) join a failed build's result, so the model
+   * applies what worked instead of guessing. Never slows a failure by more
+   * than a couple of seconds.
+   */
+  async _withKnownFixes(failure, result, kind, boardFQBN) {
+    if (failure.code === 'BUSY' || !this.uiCallbacks?.knownFixes) return failure;
+    try {
+      const known = await Promise.race([
+        this.uiCallbacks.knownFixes({ output: result.output || result.excerpt || '', kind, failureCode: result.code || '', board: String(boardFQBN || '').split(':').slice(0, 3).join(':') }),
+        new Promise((resolve) => setTimeout(() => resolve(null), 2500)),
+      ]);
+      if (known && (known.local?.length || known.shared?.length)) {
+        failure.knownFixes = known;
+        failure.note = `${failure.note ? `${failure.note} ` : ''}This error was seen before: knownFixes lists what fixed it (local = on this computer, shared = other Impulse users). Apply the matching fix before trying anything else.`;
+      }
+    } catch { /* known fixes are a bonus */ }
+    return failure;
   }
 
   async executeListBoards() {
