@@ -35,8 +35,11 @@ Turn it off in the account menu (**Sharing fixes: off**): fixes then stay on thi
 | Update check (app version) | GitHub Releases (`Meet-1010/Impulse-IDE-v2`) | At launch and every few hours, in installed builds |
 | Download of arduino-cli, the ESP32 emulator | GitHub (`arduino/arduino-cli` releases), Espressif's releases, checked against checksums built into the app | Only if you choose to set them up and they aren't installed |
 | Board, core and library indexes and downloads | Arduino's servers and any board URLs you added, through arduino-cli | When you install boards or libraries, or compile with a library that isn't installed yet |
+| A documentation page's address (nothing else: no code, no prompt) | The board maker's own site, from a fixed list (Arduino, Espressif, Seeed, Adafruit, PJRC, Raspberry Pi, M5Stack, Waveshare, DFRobot, Heltec, GitHub) | When the AI needs a hardware fact it is not sure of; pages are cached on your computer for a week |
 | Problem reports and part requests | Your browser opens a GitHub issue form | Only when you choose to; you review the text and submit it yourself on GitHub |
 | A fix record (error signature, board, core, library names, a redacted diff of the lines that changed, who fixed it) | Impulse Cloud | After a failed build or upload is followed by a success, only when signed in with Sharing fixes on |
+
+When the AI reads a documentation page, only the address of that page is requested. Impulse will not fetch anything outside that list of documentation sites, and never sends your code, prompt or circuit with the request.
 
 Impulse never sends your sketches, circuits, serial data or files anywhere else.
 

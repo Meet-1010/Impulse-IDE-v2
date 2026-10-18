@@ -51,6 +51,46 @@ export async function runSimulatorCheck({ sketchPath, code, context = simulation
   };
 }
 
+/**
+ * What a failed simulator run tells the model. The failing checks alone send
+ * it round in circles: it also needs what the board actually printed, what the
+ * pins actually did, and what is wired, so it can tell its own bug from a
+ * missing part or a check that could never pass.
+ * @param {object} result  from runSimulatorCheck
+ * @param {{ wiring?: string, hasCircuit?: boolean }} [circuit]
+ * @returns {string}
+ */
+export function simulatorFixPrompt(result, { wiring = '', hasCircuit = false } = {}) {
+  const lines = [];
+  if (result.stage === 'compile') {
+    lines.push(`[SIMULATOR] The sketch does not compile for the simulated ${result.board || 'board'}:`);
+    lines.push(String(result.error || '').split('\n').slice(0, 12).join('\n'));
+    lines.push('Fix the code.');
+    return lines.join('\n');
+  }
+  if (result.stage === 'run') {
+    lines.push(`[SIMULATOR] The run stopped on the simulated ${result.board || 'board'}: ${result.error}`);
+    lines.push('That is usually a sketch that blocks forever or crashes. Fix the code.');
+    return lines.join('\n');
+  }
+  const failed = (result.results || []).filter((r) => !r.pass);
+  lines.push(`[SIMULATOR] It compiled and ran ${result.simSeconds?.toFixed?.(1) ?? '?'} s on the simulated ${result.board || 'board'}, and ${failed.length === 1 ? 'one check did not pass' : `${failed.length} checks did not pass`}:`);
+  for (const r of failed.slice(0, 6)) lines.push(`- ${r.raw}: ${r.detail}`);
+  for (const p of (result.parseErrors || []).slice(0, 3)) lines.push(`- that check could not be read: ${p.raw || p.message}`);
+  const serial = String(result.serial || '').trim();
+  lines.push(serial
+    ? `What it printed:\n${serial.split('\n').slice(-12).join('\n')}`
+    : 'It printed nothing at all.');
+  const pins = (result.pins || []).filter((p) => p.changes || p.high || p.low).slice(0, 8);
+  if (pins.length) lines.push(`Pins: ${pins.map((p) => `${p.label || p.pin} ${p.summary || (p.changes ? `changed ${p.changes}×` : 'steady')}`).join('; ')}`);
+  else lines.push('No pin changed while it ran.');
+  lines.push(hasCircuit ? `Wired on the canvas:\n${wiring}` : 'Nothing is wired on the simulator canvas, so anything the sketch expects from a sensor or a button cannot happen there.');
+  lines.push(hasCircuit
+    ? 'Decide what is actually wrong: the code, or a check that cannot pass with this wiring. Fix the code if it is the code; if the wiring or the check is the problem, say so plainly and change the check instead of the logic.'
+    : 'If the sketch needs parts to pass, do not twist the code to satisfy the check: say the circuit is missing and either adjust the @expect lines to what can be tested without parts, or ask the user to draw the circuit in the simulator.');
+  return lines.join('\n');
+}
+
 const el = (tag, className, text) => {
   const node = document.createElement(tag);
   if (className) node.className = className;

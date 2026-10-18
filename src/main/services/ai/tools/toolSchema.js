@@ -100,6 +100,21 @@ const TOOL_SCHEMA = {
     }
   },
 
+  // Official documentation, for what the knowledge layer does not carry.
+  READ_DOCS: {
+    name: 'read_docs',
+    description: 'The board maker\'s own documentation. action: "list" names the official pages Impulse knows for the selected board and its chip; "read" (url, focus) fetches one and returns the part about `focus`. Only documentation sites are allowed. Use it when a fact about the hardware decides the code and you are not certain: a peripheral\'s behaviour, a vendor pinout, a core API. Quote what the page says and name it; if it cannot be read, say so rather than guessing.',
+    parameters: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['list', 'read'], description: 'What to do' },
+        url: { type: 'string', description: 'The page to read (from list, or a documentation URL)' },
+        focus: { type: 'string', description: 'What you are looking for on the page: "GPIO", "I2C pins", "deep sleep"' }
+      },
+      required: ['action']
+    }
+  },
+
   // Tool packs the model loads when it needs them (see TOOL_PACKS): the standing set stays small.
   LOAD_TOOLS: {
     name: 'load_tools',
@@ -396,7 +411,7 @@ const CORE_TOOL_NAMES = [
 ];
 
 const TOOL_PACKS = {
-  boards: ['list_boards', 'list_ports', 'search_boards', 'get_mcu_guide'],
+  boards: ['list_boards', 'list_ports', 'search_boards', 'get_mcu_guide', 'read_docs'],
   memory: ['analyze_error', 'search_memory', 'record_fix'],
   project: ['save_sketch', 'get_current_sketch_path'],
   playground: ['update_playground'],
@@ -409,7 +424,7 @@ const DEBUG_TOOL_NAMES = [...CORE_TOOL_NAMES, ...TOOL_PACKS.memory];
 const PLAN_TOOL_NAMES = [
   'get_editor_code', 'get_current_sketch_path', 'search_code', 'get_current_state', 'list_boards', 'list_ports',
   'get_board_info', 'get_mcu_guide', 'get_component_guide', 'search_boards', 'search_memory',
-  'get_circuit', 'libraries',
+  'get_circuit', 'libraries', 'read_docs',
 ];
 
 /**

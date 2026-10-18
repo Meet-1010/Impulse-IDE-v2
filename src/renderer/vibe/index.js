@@ -12,6 +12,7 @@ import { CharField } from './char-field.js';
 import { createChats, projectNameFrom } from './chats.js';
 import { createAccount } from './account.js';
 import { openLibraries } from './libraries.js';
+import { simulatorFixPrompt } from '../verify.js';
 import { refillWhen } from './credits-text.js';
 import { createBench } from './bench.js';
 import { closePopover, menu, popover } from './menu.js';
@@ -462,7 +463,7 @@ function modelLabel(id) {
   return local?.displayName || id.replace(/^impulse:/, '');
 }
 
-async function send(textArg, { mode: modeArg } = {}) {
+async function send(textArg, { mode: modeArg, autoFix = 0 } = {}) {
   const text = String(textArg ?? input.value).trim();
   if (busy) return;
   if (!text) {
@@ -589,6 +590,15 @@ async function send(textArg, { mode: modeArg } = {}) {
     }
     await loadProjectFiles();
     renderChats();
+    chats.save();
+    // A failed check goes straight back to the agent once, with what the run
+    // actually showed. Waiting for a click and sending only the failing lines
+    // is what made this go round in circles.
+    if (check && !check.ok && autoFix < 1) {
+      const circuit = await impulse.sim.facts?.();
+      await send(simulatorFixPrompt(check, { wiring: circuit?.lines?.join('\n') || '', hasCircuit: !!circuit?.hasCircuit }), { mode: 'agent', autoFix: autoFix + 1 });
+    }
+    return;
   }
   chats.save();
 }

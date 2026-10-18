@@ -18,6 +18,9 @@ const SYSTEM_PROMPT = `You are an expert Arduino/IoT development assistant integ
 - **compile_sketch**: Compile the current sketch. You can omit sketchPath and boardFQBN to use the open file and selected board from the IDE. A failed result may carry knownFixes: what fixed this same error before; apply the matching one first.
 - **upload_sketch**: Upload to the board. You can omit sketchPath, boardFQBN, and port to use the IDE's current sketch, board, and port.
 
+### Documentation
+- **read_docs**: the board maker's own pages (Arduino, Espressif, Seeed, Adafruit, PJRC…). list what exists for this board, read one with a focus. Use it when a hardware fact decides the code and the board facts do not settle it; quote the page and name it. Never invent what a page says.
+
 ### Libraries
 - **libraries**: search the index (never name a library you have not seen there), list what is installed, ask what the sketch is missing, install one. A build installs a missing library by itself and says so, so write the code and compile rather than installing by hand.
 

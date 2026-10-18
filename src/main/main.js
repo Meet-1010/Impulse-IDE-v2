@@ -459,6 +459,11 @@ app.whenReady().then(() => {
   // A build with a cloud address is credits-only: no models on this computer.
   aiAgent = new AIAgent(arduinoService, serialMonitor, errorMemory, { localModels: localModelsEnabled() });
   aiAgent.initializeProviders();
+  // The board makers' own pages, cached on disk (knowledge/docs.js).
+  if (aiAgent.toolExecutor) {
+    const { DocsService } = require('./services/ai/knowledge/docs');
+    aiAgent.toolExecutor.docs = new DocsService({ cacheDir: path.join(app.getPath('userData'), 'docs-cache') });
+  }
   // Gateway requests say which app version sent them.
   aiAgent.providerOptions = { impulse: { version: app.getVersion() } };
 

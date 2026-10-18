@@ -150,6 +150,9 @@ class ToolExecutor {
           break;
 
         // State Operations
+        case 'read_docs':
+          result = await this.executeReadDocs(toolCall.arguments || {});
+          break;
         case 'libraries':
           result = await this.executeLibraries(toolCall.arguments || {});
           break;
@@ -344,6 +347,33 @@ class ToolExecutor {
   async executeListPorts() {
     const ports = await this.arduinoService.listPorts();
     return { ports };
+  }
+
+  /**
+   * The board maker's own pages. `list` says which Impulse knows for this
+   * board; `read` fetches one (documentation hosts only) and returns the part
+   * about `focus`, so an answer can quote the manufacturer.
+   */
+  async executeReadDocs(args = {}) {
+    if (!this.docs) return { success: false, error: 'Documentation reading is not set up in this build.' };
+    const action = String(args.action || '').toLowerCase();
+    const fqbn = (await this.selectedFqbn().catch(() => '')) || '';
+    const info = fqbn && this.boardKnowledge ? await this.boardKnowledge.boardInfo(fqbn).catch(() => null) : null;
+    const pages = this.docs.listFor({ catalogId: info?.catalog?.id || '', family: info?.family || '', boardName: info?.name || '' });
+    if (action === 'list') {
+      return pages.length
+        ? { success: true, pages, note: 'Read one with action "read" and a focus; quote the page and name it in your answer.' }
+        : { success: true, pages: [], note: 'Impulse knows no official page for this board. Say what you know from the board facts instead of guessing.' };
+    }
+    if (action === 'read') {
+      const url = String(args.url || '').trim() || pages[0]?.url;
+      if (!url) return { success: false, error: 'Give a url, or call action "list" first.' };
+      const page = await this.docs.read(url, { focus: String(args.focus || '').slice(0, 120) });
+      return page.ok
+        ? { success: true, url: page.url, title: page.title, focus: args.focus || null, truncated: !!page.truncated, cached: !!page.cached, text: page.text }
+        : { success: false, error: page.error, url };
+    }
+    return { success: false, error: `Unknown read_docs action "${args.action}". Use list or read.` };
   }
 
   /**

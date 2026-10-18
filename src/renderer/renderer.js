@@ -5812,6 +5812,8 @@ Object.assign(window.impulse, {
             if (simActive) requestAnimationFrame(() => simManager?.fit());
         },
         fit: () => simManager?.fit(),
+        /** What is wired on the canvas (the same facts the agent is given). */
+        facts: () => simManager?.circuitFacts?.() || null,
         /** Start the simulation (compiles first); no-op while it runs. */
         run() {
             if (simManager && !simManager.running) simManager.run();
