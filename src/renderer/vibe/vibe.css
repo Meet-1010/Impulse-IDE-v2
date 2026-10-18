@@ -313,9 +313,10 @@
     gap: 8px;
     height: 30px;
     max-width: 420px;
-    /* Shrinks (the name gets an ellipsis) before the controls on its right do. */
+    /* Shrinks (the name gets an ellipsis) before the controls on its right do,
+       but never past the point where the board's name is unreadable. */
     flex: 0 1 auto;
-    min-width: 0;
+    min-width: 148px;
     padding: 0 10px;
     border: 1px solid var(--v-line);
     border-radius: 3px;
@@ -912,8 +913,12 @@
 .v-board-action svg { width: 15px; height: 15px; flex: none; }
 .v-board-action.upload { border-color: color-mix(in srgb, var(--v-trace) 40%, var(--v-line)); color: var(--v-trace); }
 .v-board-action.upload:hover:not(:disabled) { background: color-mix(in srgb, var(--v-trace) 12%, var(--v-raised)); }
-@media (max-width: 900px) {
+/* Narrow windows: the Upload label goes before the board's name does. */
+@media (max-width: 1100px) {
     .v-board-action.upload span { display: none; }
+}
+@media (max-width: 760px) {
+    .v-board-chip { min-width: 96px; }
 }
 
 /* ── Files: the project's files, with the usual things ────────────────── */
