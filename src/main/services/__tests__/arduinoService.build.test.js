@@ -170,18 +170,12 @@ describe('ArduinoService build jobs', () => {
   });
 
   it('stops a build that prints nothing for too long and says so', async () => {
-    jest.useFakeTimers();
-    try {
-      spawn.mockImplementationOnce(() => fakeProcess([['out', 'Compiling sketch...\n']]));
-      const pending = service.compile(sketch, 'arduino:avr:uno');
-      await Promise.resolve();
-      await jest.advanceTimersByTimeAsync(181_000);
-      const result = await pending;
-      expect(result.success).toBe(false);
-      expect(result.code).toBe('TIMEOUT');
-      expect(result.title).toBe('The build stopped responding');
-    } finally {
-      jest.useRealTimers();
-    }
+    service.timeouts.compileIdleMs = 80;
+    spawn.mockImplementationOnce(() => fakeProcess([['out', 'Compiling sketch...\n']]));
+    const result = await service.compile(sketch, 'arduino:avr:uno');
+    expect(result.success).toBe(false);
+    expect(result.code).toBe('TIMEOUT');
+    expect(result.title).toBe('The build stopped responding');
+    expect(result.hint).toMatch(/Nothing was printed/);
   });
 });

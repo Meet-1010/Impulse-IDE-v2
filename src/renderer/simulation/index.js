@@ -776,7 +776,12 @@ export class SimulationManager {
     }
     if (this._loading) return;
     if (kind !== 'links' && kind !== 'load') this._recordHistory();
-    if (kind !== 'load') this._scheduleSave();
+    if (kind !== 'load') {
+      // A change from the canvas is the user's own work: the agent is told so.
+      this._changedBy = 'user';
+      this._changedAt = new Date().toISOString();
+      this._scheduleSave();
+    }
     window.dispatchEvent(new CustomEvent('impulse:circuit-changed'));
     clearTimeout(this._checkTimer);
     this._checkTimer = setTimeout(() => this._renderChecks(), 250);
@@ -833,14 +838,19 @@ export class SimulationManager {
     await this.canvas.load(JSON.parse(snap));
     this._loading = false;
     this._updateHistoryButtons();
+    this._changedBy = 'user';
+    this._changedAt = new Date().toISOString();
     this._scheduleSave();
     this._updateBoardLabel();
     this._renderChecks();
     window.dispatchEvent(new CustomEvent('impulse:circuit-changed'));
   }
 
-  /** Replace the canvas with a model (from a diagram, the AI, a board swap). */
-  async _applyModel(model, { record = true, fit = true } = {}) {
+  /**
+   * Replace the canvas with a model (from a diagram, the AI, a board swap).
+   * `by` says who made the circuit ('user', 'ai' or 'load' for a file).
+   */
+  async _applyModel(model, { record = true, fit = true, by = null } = {}) {
     if (this.running) this.stop();
     this._loading = true;
     await this.canvas.load(model, hintsToPoints);
@@ -848,6 +858,10 @@ export class SimulationManager {
     this._updateBoardLabel();
     this._updateEmpty();
     if (fit) this.fit();
+    if (by) {
+      this._changedBy = by;
+      this._changedAt = new Date().toISOString();
+    }
     if (record) {
       this._recordHistory();
       this._scheduleSave();
@@ -857,7 +871,24 @@ export class SimulationManager {
   }
 
   _diagram() {
-    return toDiagram(this.canvas.model(), { author: '' });
+    // `impulse` records who last changed the circuit, so a later chat knows it is the user's work.
+    return { ...toDiagram(this.canvas.model(), { author: '' }), impulse: { changedBy: this._changedBy || 'user', updatedAt: this._changedAt || new Date().toISOString() } };
+  }
+
+  /**
+   * The circuit as the AI agent reads it (published to the main process on
+   * every change): one line per wired board pin, the parts, the wiring
+   * check's warnings, and who changed it last.
+   */
+  circuitFacts() {
+    const { hasCircuit, board, pins } = this.getWiring();
+    const lines = Object.entries(pins).map(([num, list]) => `${pinLabel(this.board, Number(num))} → ${list.map(p => `${p.label}:${p.pin}`).join(', ')}`);
+    let checks = [];
+    try { checks = this._checks().filter(i => i.level !== 'info').map(i => ({ level: i.level, text: i.text })); } catch { checks = []; }
+    const parts = this.canvas
+      ? this.canvas.parts.filter(p => !partDef(p.type)?.board && partDef(p.type)?.category !== 'Breadboards').map(p => `${partDef(p.type)?.label || p.type} ${p.id}`)
+      : [];
+    return { hasCircuit, board, boardLabel: this.board?.label || board, parts, lines, checks, changedBy: this._changedBy || null, updatedAt: this._changedAt || null, sketchPath: this.sketchPath || null };
   }
 
   _scheduleSave() {
@@ -867,6 +898,8 @@ export class SimulationManager {
 
   async _save() {
     clearTimeout(this._saveTimer);
+    // A fired timer's id is not a pending save: switching sketches must not rewrite a file nothing changed.
+    this._saveTimer = null;
     if (!this.canvas) return;
     const json = JSON.stringify(this._diagram(), null, 2);
     if (this.sketchPath) {
@@ -924,6 +957,10 @@ export class SimulationManager {
       try { data = JSON.parse(res.content); } catch { data = null; }
       const model = data && fromDiagram(data);
       if (model && !model.errors.length) {
+        // Who made this circuit, from the file (a user's circuit stays the user's in a later chat).
+        const meta = data.impulse && typeof data.impulse === 'object' ? data.impulse : {};
+        this._changedBy = ['user', 'ai'].includes(meta.changedBy) ? meta.changedBy : 'load';
+        this._changedAt = typeof meta.updatedAt === 'string' ? meta.updatedAt : null;
         await this._applyModel(model, { record: false });
         this._resetHistory();
         if (model.unsupported.length) this.toast(`This circuit uses parts Impulse doesn't simulate yet: ${model.unsupported.join(', ')}. They were left out.`, 'warn');
@@ -1718,7 +1755,7 @@ export class SimulationManager {
       this.toast('The AI produced an invalid circuit. Try again.', 'error');
       return false;
     }
-    await this._applyModel(layoutCircuit(check.circuit));
+    await this._applyModel(layoutCircuit(check.circuit), { by: 'ai' });
     check.warnings.forEach(w => this._systemLine(`AI circuit builder: ${w}`, 'warn'));
     this._systemLine(`Placed ${check.circuit.parts.length} parts with ${check.circuit.wires.length} wires. Press ▶ to simulate (${mod}Z undoes).`, 'success');
     return true;

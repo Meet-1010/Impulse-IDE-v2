@@ -1,5 +1,6 @@
 const { validateToolCall } = require('./toolSchema');
 const { boundedOutput } = require('./retain');
+const { circuitToolResult } = require('../knowledge/circuitFacts');
 const BoardKnowledge = require('../knowledge/boardKnowledge');
 const { findComponents, componentText, COMPONENTS } = require('../knowledge/components');
 
@@ -150,6 +151,9 @@ class ToolExecutor {
           break;
 
         // State Operations
+        case 'get_circuit':
+          result = circuitToolResult(this.uiCallbacks?.getCircuit ? await this.uiCallbacks.getCircuit() : null);
+          break;
         case 'get_current_state':
           result = await this.executeGetCurrentState();
           break;

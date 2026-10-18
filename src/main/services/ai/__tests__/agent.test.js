@@ -195,6 +195,26 @@ describe('AIAgent', () => {
       expect(systems[2]).toMatch(/\[BOARD CHANGED\] The selected board is now esp32:esp32:esp32; earlier messages .* esp32:esp32:esp32s3/);
     });
 
+    it('puts the circuit on the canvas in the system message, and says when it changed', async () => {
+      const agent = createAgent();
+      agent.registerProvider('mock', MockProvider);
+      agent.setProvider('mock', 'key');
+      agent.toolExecutor.boardKnowledge = { summary: async () => null };
+      const systems = [];
+      agent.currentProvider.chat = async (msgs) => { systems.push(msgs[0].content); return { content: 'ok', toolCalls: [] }; };
+      const circuit = { hasCircuit: true, hash: 'a1', board: 'uno', boardLabel: 'Arduino Uno', parts: ['LED led1'], lines: ['D13 → LED led1:A'], checks: [], changedBy: 'user', updatedAt: null };
+      await agent.processQuery('blink it', { circuit }, 'ask');
+      await agent.processQuery('faster', { circuit }, 'ask');
+      await agent.processQuery('and the button?', { circuit: { ...circuit, hash: 'b2', parts: ['LED led1', 'Pushbutton btn1'], lines: ['D13 → LED led1:A', 'D2 → Pushbutton btn1:1.l'] } }, 'ask');
+      expect(systems[0]).toMatch(/\[CIRCUIT\] On the simulator canvas.*wired by the user/);
+      expect(systems[0]).toMatch(/D13 → LED led1:A/);
+      expect(systems[0]).not.toMatch(/CIRCUIT CHANGED/);
+      expect(systems[1]).not.toMatch(/CIRCUIT CHANGED/);
+      expect(systems[2]).toMatch(/D2 → Pushbutton btn1:1\.l/);
+      expect(systems[2]).toMatch(/\[CIRCUIT CHANGED\]/);
+      expect(JSON.stringify(agent.conversationHistory)).not.toMatch(/CIRCUIT/);
+    });
+
     it('goes on without them when there is no board or arduino-cli is slow', async () => {
       const agent = createAgent();
       agent.registerProvider('mock', MockProvider);

@@ -3,6 +3,8 @@
  * @module main/ipc/uiHandlers
  */
 
+const { normalizeCircuit } = require('../services/ai/knowledge/circuitFacts');
+
 const UI_STATE_KEYS = ['currentBaudRate', 'currentSketchPath', 'selectedBoard', 'selectedPort', 'editorCode'];
 
 /**
@@ -38,6 +40,11 @@ function register(ipcMain, ctx) {
 
   ipcMain.on('ui:update-port', (event, port) => {
     uiState.selectedPort = port != null ? String(port) : null;
+  });
+
+  // The circuit on the simulator canvas (so the agent writes for the real wiring).
+  ipcMain.on('ui:update-circuit', (event, facts) => {
+    uiState.circuit = normalizeCircuit(facts);
   });
 
   // Last compile result (so the AI agent can see compilation errors).

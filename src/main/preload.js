@@ -299,6 +299,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     updateBoard: (board) => ipcRenderer.send('ui:update-board', board),
     updatePort: (port) => ipcRenderer.send('ui:update-port', port),
     updateCompileResult: (result) => ipcRenderer.send('ui:update-compile-result', result),
+    updateCircuit: (facts) => ipcRenderer.send('ui:update-circuit', facts),
     
     // Listen for UI update requests from main process (AI)
     onGetEditorCode: (callback) => {

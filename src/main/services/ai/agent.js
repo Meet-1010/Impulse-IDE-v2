@@ -1,4 +1,5 @@
 const { getSystemPrompt } = require('./prompts/systemPrompt');
+const { circuitBlock } = require('./knowledge/circuitFacts');
 const ToolExecutor = require('./tools/toolExecutor');
 const SimpleMemory = require('./memory/simpleMemory');
 const ModelPreferences = require('./config/modelPreferences');
@@ -357,10 +358,17 @@ class AIAgent {
       boardFacts = `${boardFacts || ''}\n[BOARD CHANGED] The selected board is now ${context.selectedBoard}; earlier messages in this conversation were about ${this.lastBoard}. Use the facts for the current board, not earlier answers.`.trim();
     }
     if (context.selectedBoard) this.lastBoard = context.selectedBoard;
+    // The circuit on the simulator canvas goes with every request too, and a
+    // note when it changed since earlier messages.
+    const circuitHash = context.circuit?.hash ?? null;
+    const circuitChanged = this.lastCircuitHash !== undefined && circuitHash !== this.lastCircuitHash && this.conversationHistory.length > 1;
+    const circuitFacts = circuitBlock(context.circuit, { changed: circuitChanged });
+    this.lastCircuitHash = circuitHash;
+    const standing = [boardFacts, circuitFacts].filter(Boolean).join('\n\n');
     const messages = [
       {
         role: 'system',
-        content: boardFacts ? `${getSystemPrompt(mode)}\n\n${boardFacts}` : getSystemPrompt(mode)
+        content: standing ? `${getSystemPrompt(mode)}\n\n${standing}` : getSystemPrompt(mode)
       },
       ...this.conversationHistory
     ];

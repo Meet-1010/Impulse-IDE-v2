@@ -416,6 +416,16 @@ const TOOL_SCHEMA = {
     }
   },
 
+  // The circuit on the simulator canvas
+  GET_CIRCUIT: {
+    name: 'get_circuit',
+    description: 'The circuit wired on the simulator canvas (saved as diagram.json next to the sketch): every board pin and the parts on it, the wiring check\'s warnings, and who changed it last. Call it before writing code for hardware the user has drawn; when nothing is drawn, suggest drawing it in the simulator so you can check the wiring.',
+    parameters: {
+      type: 'object',
+      properties: {}
+    }
+  },
+
   // Playground — hardware task instructions
   UPDATE_PLAYGROUND: {
     name: 'update_playground',
@@ -437,12 +447,13 @@ const TOOL_SCHEMA = {
   }
 };
 
-const DEBUG_TOOL_NAMES = ['analyze_error', 'search_memory', 'record_fix'];
+const DEBUG_TOOL_NAMES = ['analyze_error', 'search_memory', 'record_fix', 'get_circuit'];
 
 /** Plan mode reads the project and the hardware but changes nothing. */
 const PLAN_TOOL_NAMES = [
   'get_editor_code', 'get_current_sketch_path', 'search_code', 'get_current_state', 'list_boards', 'list_ports',
   'get_board_info', 'get_mcu_guide', 'get_component_guide', 'search_boards', 'search_memory',
+  'get_circuit',
 ];
 
 /**

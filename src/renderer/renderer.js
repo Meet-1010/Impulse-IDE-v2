@@ -5237,6 +5237,16 @@ function setupSimulation() {
 
     simManager = new SimulationManager();
     window.simManager = simManager;
+    // The agent reads the circuit from the main process: publish it on every change.
+    let circuitTimer = null;
+    const publishCircuit = () => {
+        clearTimeout(circuitTimer);
+        circuitTimer = setTimeout(() => {
+            try { window.electronAPI.ui.updateCircuit?.(simManager.circuitFacts()); } catch (e) { console.warn('[circuit] could not publish:', e); }
+        }, 250);
+    };
+    window.addEventListener('impulse:circuit-changed', publishCircuit);
+    publishCircuit();
     // The Serial Plotter also graphs what the simulated board prints.
     window.addEventListener('impulse:sim-serial-line', (e) => {
         if (state.plotter.running) feedPlotterData(e.detail);

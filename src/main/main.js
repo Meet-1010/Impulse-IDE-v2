@@ -513,6 +513,7 @@ app.whenReady().then(() => {
       getSelectedBoard: async () => uiState.selectedBoard,
       getSelectedPort: async () => uiState.selectedPort,
       getLastCompileResult: async () => uiState.lastCompileResult ?? null,
+      getCircuit: async () => uiState.circuit ?? null,
       setPlayground: async (content, append) => {
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('playground:update', content, append);

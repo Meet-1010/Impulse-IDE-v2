@@ -78,7 +78,8 @@ function register(ipcMain, ctx) {
         selectedBoard: uiState.selectedBoard ?? ctx.board ?? null,
         selectedPort: uiState.selectedPort ?? ctx.port ?? null,
         hasFileOpen: ctx.hasFileOpen ?? false,
-        lastCompileResult: uiState.lastCompileResult ?? null
+        lastCompileResult: uiState.lastCompileResult ?? null,
+        circuit: uiState.circuit ?? null
       };
       const effectiveMode = ['plan', 'ask', 'debug'].includes(parsed.data.mode) ? parsed.data.mode : 'agent';
       // Each step goes to the chat as it happens (the orb's label).

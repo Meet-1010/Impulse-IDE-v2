@@ -48,6 +48,8 @@ class ArduinoService {
     this.cliPath = cliPath || 'arduino-cli';
     /** One compile or upload at a time, watched live (see buildJobs.js). */
     this.jobs = new BuildJobs();
+    /** How long a build may stay silent, and run in all (tests shorten these). */
+    this.timeouts = { compileIdleMs: COMPILE_IDLE_MS, compileMaxMs: COMPILE_MAX_MS, uploadIdleMs: UPLOAD_IDLE_MS, uploadMaxMs: UPLOAD_MAX_MS };
     this.coreIndexed = false;
     this.platformio = platformio;
   }
@@ -595,7 +597,7 @@ class ArduinoService {
     await this.ensureCoreIndexed();
     job.stage('compiling');
     const { code, output, reason } = await this._runStreaming(job, ['compile', '--fqbn', boardFQBN, '--verbose', sketchPath], {
-      cwd: path.dirname(sketchPath), idleMs: COMPILE_IDLE_MS, maxMs: COMPILE_MAX_MS,
+      cwd: path.dirname(sketchPath), idleMs: this.timeouts.compileIdleMs, maxMs: this.timeouts.compileMaxMs,
     });
     const memory = parseMemory(output);
     const diagnostics = parseDiagnostics(output);
@@ -636,7 +638,7 @@ class ArduinoService {
     }
     job.stage('uploading');
     const { code, output, reason } = await this._runStreaming(job, ['upload', '--fqbn', boardFQBN, '--port', port, '--verbose', sketchPath], {
-      cwd: path.dirname(sketchPath), idleMs: UPLOAD_IDLE_MS, maxMs: UPLOAD_MAX_MS,
+      cwd: path.dirname(sketchPath), idleMs: this.timeouts.uploadIdleMs, maxMs: this.timeouts.uploadMaxMs,
     });
     if (code === 0) {
       return {
@@ -654,7 +656,7 @@ class ArduinoService {
   _failure(output, kind, { reason = null, code = null, memory = null, diagnostics = null, override = null, errors = null } = {}) {
     let f;
     if (reason === 'CANCELLED') f = { code: 'CANCELLED', title: 'Stopped', hint: '' };
-    else if (reason === 'IDLE') f = { code: 'TIMEOUT', title: kind === 'upload' ? 'The upload stopped responding' : 'The build stopped responding', hint: `Nothing was printed for ${Math.round((kind === 'upload' ? UPLOAD_IDLE_MS : COMPILE_IDLE_MS) / 60000)} minutes, so Impulse stopped it. Try again; if it happens again, check the cable and the port.` };
+    else if (reason === 'IDLE') f = { code: 'TIMEOUT', title: kind === 'upload' ? 'The upload stopped responding' : 'The build stopped responding', hint: `Nothing was printed for ${Math.max(1, Math.round((kind === 'upload' ? this.timeouts.uploadIdleMs : this.timeouts.compileIdleMs) / 60000))} minutes, so Impulse stopped it. Try again; if it happens again, check the cable and the port.` };
     else if (reason === 'MAX') f = { code: 'TIMEOUT', title: kind === 'upload' ? 'The upload took too long' : 'The build took too long', hint: 'Impulse stopped it. Try again.' };
     else if (reason === 'SPAWN' || code === 'ENOENT') f = { code: 'TOOLCHAIN', title: 'The build tools could not be started', hint: 'Impulse installs them on first start; open Tools › Toolchain setup to repair them.' };
     else f = override || classifyFailure(output, kind, { memory });
@@ -947,7 +949,7 @@ class ArduinoService {
     try {
       return await this.jobs.run({ kind: 'upload', sketchPath, fqbn: boardFQBN, port: port || null, label: `programmer ${programmerId}` }, async (job) => {
         job.stage('compiling');
-        const { code, output, reason } = await this._runStreaming(job, args, { cwd: dir, idleMs: UPLOAD_IDLE_MS, maxMs: UPLOAD_MAX_MS });
+        const { code, output, reason } = await this._runStreaming(job, args, { cwd: dir, idleMs: this.timeouts.uploadIdleMs, maxMs: this.timeouts.uploadMaxMs });
         const memory = parseMemory(output);
         if (code === 0) return { success: true, output, memory, summary: summaryLines(memory), message: `Uploaded with ${programmerId}` };
         throw this._failure(output, 'upload', { reason, code, memory });
