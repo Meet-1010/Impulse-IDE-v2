@@ -476,6 +476,7 @@
 .v-prose .code-block-header { display: flex; align-items: center; justify-content: space-between; height: 32px; padding: 0 6px 0 12px; border-bottom: 1px solid var(--v-line); }
 .v-prose .code-lang { font: 500 10.5px/1 var(--v-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--v-text-3); }
 .v-prose .code-block-actions { display: flex; gap: 2px; }
+.v-prose .code-applied { display: inline-flex; align-items: center; height: 24px; padding: 0 8px; color: var(--v-led-green); font-size: 12px; }
 .v-prose .code-copy-btn, .v-prose .code-insert-btn { height: 24px; padding: 0 8px; border: 0; border-radius: 3px; background: transparent; color: var(--v-text-3); font-size: 12px; cursor: pointer; }
 .v-prose .code-copy-btn:hover, .v-prose .code-insert-btn:hover { background: var(--v-hover); color: var(--v-text); }
 .v-prose .code-insert-btn { display: none; }

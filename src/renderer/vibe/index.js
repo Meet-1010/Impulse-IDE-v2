@@ -327,6 +327,7 @@ function assistantMessage(m) {
     head.append(copy);
   }
   const body = h('div', { class: 'v-prose', html: impulse.ai.format(m.text || '') });
+  if (m.applied) impulse.ai.markApplied(body, m.applied);
   const parts2 = [head, body];
   if (m.ok && m.mode === 'plan') {
     parts2.push(h('div', { class: 'v-answer-actions' },
@@ -542,15 +543,28 @@ async function send(textArg, { mode: modeArg } = {}) {
     credits: before !== null && after !== null && before !== undefined && after !== undefined ? Math.max(0, Math.round((before - after) * 10) / 10) : 0,
     steps,
   });
-  live.el.replaceWith(assistantMessage(record));
+  const answerEl = assistantMessage(record);
+  live.el.replaceWith(answerEl);
   chats.set({ status: ok ? 'ok' : result?.stopped ? 'stopped' : 'error' });
   setBusy(false);
   renderChats();
   syncIde();
   if (ok) impulse.ai.recordUsage(result.data);
 
+  // The answer carries the whole sketch instead of editing the file: write it in for the user.
+  let edited = ok && impulse.ai.editedCode(result.data);
+  if (ok && !edited && (useMode === 'agent' || useMode === 'debug')) {
+    const applied = await impulse.ai.applyAnswerCode(record.text);
+    if (applied) {
+      edited = true;
+      chats.update(record.id, { applied: applied.code });
+      impulse.ai.markApplied(answerEl, applied.code);
+      toast(`Code written to ${applied.file}`);
+    }
+  }
+
   // Code changed: run it in the simulator before anyone trusts it.
-  if (ok && impulse.ai.editedCode(result.data)) {
+  if (edited) {
     bench.refreshCode();
     const checking = noticeCard({ id: 'checking', state: 'amber', title: 'Checking it in the simulator…' });
     checking.querySelector('.v-led').setAttribute('data-pulse', '');

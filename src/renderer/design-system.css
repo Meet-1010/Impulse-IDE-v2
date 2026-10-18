@@ -1158,6 +1158,14 @@ li.CodeMirror-hint-active {
     color: var(--ds-text-4);
 }
 
+.code-applied {
+    display: inline-flex;
+    align-items: center;
+    height: 22px;
+    padding: 0 8px;
+    color: var(--ds-signal);
+    font-size: 11px;
+}
 .code-insert-btn {
     border: 1px solid var(--ds-line);
     border-radius: 9999px;

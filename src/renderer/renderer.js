@@ -15,6 +15,7 @@ import { attachBreakpoints } from './breakpoints.js';
 import { setupSourceControl } from './source-control.js';
 import { detectBaud, diffSerial, captureBoardSerial, renderCompareReport } from './compare.js';
 import { runHeadless } from './simulation/headless.js';
+import { sketchBlockFrom } from './answer-code.js';
 import { programOf } from './simulation/runners.js';
 import { createChatOrb, COPY as ORB_COPY } from './morph-orb/morph-orb.js';
 import { pickDetectedBoard } from './board-detect.js';
@@ -4276,7 +4277,17 @@ async function sendAIMessage() {
         }
         const data = result.data || {};
         const editedCode = (data.toolResults || []).some(t => t && t.success && CODE_EDIT_TOOLS.has(t.tool));
-        if (editedCode) verifyAiEdit();
+        if (editedCode) {
+            verifyAiEdit();
+        } else if (mode === 'agent' || mode === 'debug') {
+            // The answer carries the whole sketch instead of editing the file: write it in for the user.
+            applyAnswerCode(result.content).then((applied) => {
+                if (!applied) return;
+                markAppliedCodeBlocks(document.getElementById('aiMessages'), applied.code);
+                logToConsole(`Code written to ${applied.file}`, 'info');
+                verifyAiEdit();
+            });
+        }
 
         if (data.toolResults && data.toolResults.length > 0) {
             const toolSummary = data.toolResults
@@ -4366,6 +4377,43 @@ function setupCodeBlockActions() {
             }
         }
     });
+}
+
+/**
+ * A whole sketch in an answer goes into the open sketch, saved, so the user
+ * never has to click Insert. Returns what was written, or null when the
+ * answer has no single sketch-shaped block, nothing is open, or the sketch
+ * already holds that code.
+ */
+async function applyAnswerCode(text) {
+    const block = sketchBlockFrom(text);
+    if (!block || !state.editor || !state.currentSketch) return null;
+    // The code belongs in the sketch file, not whichever tab is in front.
+    if (state.currentFile && state.currentFile !== state.currentSketch) {
+        const i = state.openFiles.findIndex(f => f.path === state.currentSketch);
+        if (i < 0) return null;
+        if (i !== state.activeTabIndex) switchToTab(i);
+    }
+    if (state.editor.getValue().trim() === block.code.trim()) return null;
+    state.editor.setValue(block.code);
+    window.electronAPI.ui.updateEditorCode(block.code);
+    if (state.currentFile) await saveFile({ quiet: true });
+    return { code: block.code, file: (state.currentFile || state.currentSketch).split(/[\\/]/).pop() };
+}
+
+/** Code blocks that were written into the sketch lose their Insert button. */
+function markAppliedCodeBlocks(root, code) {
+    if (!root || !code) return;
+    const want = String(code).trim();
+    for (const wrapper of root.querySelectorAll('.code-block-wrapper')) {
+        if (wrapper.querySelector('code')?.textContent.trim() !== want) continue;
+        const btn = wrapper.querySelector('.code-insert-btn');
+        if (!btn) continue;
+        const mark = document.createElement('span');
+        mark.className = 'code-applied';
+        mark.textContent = 'In the sketch';
+        btn.replaceWith(mark);
+    }
 }
 
 function insertCodeAtCursor(code) {
@@ -5506,6 +5554,8 @@ Object.assign(window.impulse, {
         format: formatAIContent,
         copy: copyText,
         insert: insertCodeAtCursor,
+        applyAnswerCode,
+        markApplied: markAppliedCodeBlocks,
     },
     board: {
         current: currentBoard,
