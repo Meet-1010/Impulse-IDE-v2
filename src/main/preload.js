@@ -318,6 +318,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     updateCompileResult: (result) => ipcRenderer.send('ui:update-compile-result', result),
     updateCircuit: (facts) => ipcRenderer.send('ui:update-circuit', facts),
     
+    // The agent wants to upload: chat mode asks in the conversation.
+    onConfirmUpload: (callback) => {
+      const handler = (event, request) => callback(request);
+      ipcRenderer.on('ui:confirm-upload', handler);
+      return () => ipcRenderer.removeListener('ui:confirm-upload', handler);
+    },
+    replyConfirmUpload: (id, allowed) => ipcRenderer.send('ui:confirm-upload-reply', id, !!allowed),
+
     // Listen for UI update requests from main process (AI)
     onGetEditorCode: (callback) => {
       const handler = () => {

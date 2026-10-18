@@ -974,3 +974,5 @@
 .v-lib .v-btn { flex: none; }
 .v-btn.danger { background: var(--v-led-red); border-color: var(--v-led-red); color: var(--v-canvas); }
 .v-btn.danger:hover { background: color-mix(in srgb, var(--v-led-red) 86%, var(--v-canvas)); }
+.v-build-pin { font-size: 12.5px; color: var(--v-led-amber); }
+.v-card .v-build-pin { margin: 0; }

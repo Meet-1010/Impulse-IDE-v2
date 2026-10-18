@@ -41,7 +41,8 @@ describe('ToolExecutor', () => {
     });
     expect(arduinoService.upload).not.toHaveBeenCalled();
     expect(res.success).toBe(false);
-    expect(res.error).toContain('declined');
+    expect(res.code).toBe('DECLINED');
+    expect(res.error).toMatch(/did not allow the upload/);
   });
 
   it('uploads after the user approves', async () => {

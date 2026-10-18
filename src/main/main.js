@@ -463,6 +463,8 @@ app.whenReady().then(() => {
   if (aiAgent.toolExecutor) {
     const { DocsService } = require('./services/ai/knowledge/docs');
     aiAgent.toolExecutor.docs = new DocsService({ cacheDir: path.join(app.getPath('userData'), 'docs-cache') });
+    // Every compile, from anywhere, reports pins the board does not have.
+    arduinoService.pinInspector = () => aiAgent.toolExecutor.checkPins();
   }
   // Gateway requests say which app version sent them.
   aiAgent.providerOptions = { impulse: { version: app.getVersion() } };
@@ -509,6 +511,26 @@ app.whenReady().then(() => {
       },
       confirmUpload: async ({ sketchPath, boardFQBN, port }) => {
         if (!mainWindow || mainWindow.isDestroyed()) return false;
+        // Chat mode asks inside the conversation; a system dialog over it is
+        // the wrong shape and is easy to miss behind the window.
+        if (shellMode === 'vibe') {
+          const id = `u_${Date.now().toString(36)}`;
+          const answered = new Promise((resolve) => {
+            const onReply = (_event, replyId, allowed) => {
+              if (replyId !== id) return;
+              ipcMain.removeListener('ui:confirm-upload-reply', onReply);
+              resolve(!!allowed);
+            };
+            ipcMain.on('ui:confirm-upload-reply', onReply);
+            // The window never answered (it was reloaded): do not upload.
+            setTimeout(() => {
+              ipcMain.removeListener('ui:confirm-upload-reply', onReply);
+              resolve(false);
+            }, 120000);
+          });
+          mainWindow.webContents.send('ui:confirm-upload', { id, sketchPath, boardFQBN, port, name: path.basename(sketchPath) });
+          return answered;
+        }
         const { response } = await dialog.showMessageBox(mainWindow, {
           type: 'question',
           buttons: ['Upload', 'Cancel'],

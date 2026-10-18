@@ -730,6 +730,10 @@ function openPlusMenu(anchor) {
 
 let liveBuild = null;
 const BUILD_LOG_LINES = 400;
+// arduino-cli colours its output; the codes are noise in the card's log.
+// eslint-disable-next-line no-control-regex
+const ANSI = /\u001b\[[0-9;]*[A-Za-z]/g;
+const stripAnsi = (text) => text.replace(ANSI, '');
 
 function boardLabel(fqbn) {
   if (fqbn === 'platformio:project') return 'the PlatformIO environment';
@@ -760,7 +764,7 @@ function liveBuildCard(info) {
     ...info,
     el,
     lines(lines) {
-      all.push(...lines);
+      all.push(...lines.map((l) => stripAnsi(String(l))));
       if (all.length > BUILD_LOG_LINES) all.splice(0, all.length - BUILD_LOG_LINES);
       log.hidden = false;
       log.textContent = all.slice(-12).join('\n');
@@ -797,7 +801,10 @@ function buildRecordCard(m) {
     h('div', { class: 'v-card-head' }, led(m.ok ? 'green' : stopped ? 'amber' : 'red'), h('span', { text: m.title }), m.ms ? h('span', { class: 'v-step-time', text: seconds(m.ms) }) : null));
   if (!m.ok && !stopped && m.error?.hint) card.append(h('p', { text: m.error.hint }));
   if (!m.ok && !stopped && m.error?.excerpt) card.append(h('pre', { class: 'v-card-log', text: m.error.excerpt }));
-  for (const line of m.summary || []) card.append(h('p', { class: 'v-build-summary', text: line }));
+  for (const line of m.summary || []) {
+    // The pin check's lines are a finding, not a size report.
+    card.append(h('p', { class: /^\[PIN CHECK\]|^- /.test(line) ? 'v-build-pin' : 'v-build-summary', text: line.replace(/^\[PIN CHECK\] /, '') }));
+  }
   const actions = [];
   if (!m.ok && !stopped) actions.push(h('button', { type: 'button', class: 'v-btn primary', onclick: () => send(fixPrompt(m), { mode: 'debug' }) }, icon(ICON.debug), 'Fix it'));
   if (m.ok && m.build === 'compile' && impulse.board.current().portPresent) actions.push(h('button', { type: 'button', class: 'v-btn', onclick: () => boardAction('upload') }, icon(ICON.upload), 'Upload to the board'));
@@ -815,6 +822,29 @@ function buildRecordCard(m) {
   if (actions.length) card.append(h('div', { class: 'v-answer-actions' }, ...actions));
   if (fullLog) card.append(fullLog);
   return h('div', { class: 'v-msg-ai', dataset: { id: m.id } }, card);
+}
+
+/**
+ * The agent asked to upload. Nothing reaches the board until this is answered,
+ * so it is a card in the conversation with the board and port it would use.
+ */
+function askUpload(request) {
+  const board = impulse.board.current();
+  setEmpty(false);
+  chats.begin(`Upload to ${board.name || 'the board'}`);
+  const card = h('div', { class: 'v-card' },
+    h('div', { class: 'v-card-head' }, led('amber', { pulse: true }), 'Upload to the board?'),
+    h('p', { text: `Impulse wants to put ${request.name} on ${board.name || request.boardFQBN} on ${request.port}. Anything wired to the board runs the new code.` }));
+  const answer = (allowed) => {
+    api.ui.replyConfirmUpload(request.id, allowed);
+    card.replaceChildren(
+      h('div', { class: 'v-card-head' }, led(allowed ? 'green' : null), allowed ? 'Uploading…' : 'Upload cancelled'),
+      h('p', { text: allowed ? `${request.name} is going to ${request.port}.` : 'Nothing was sent to the board.' }));
+  };
+  card.append(h('div', { class: 'v-answer-actions' },
+    h('button', { type: 'button', class: 'v-btn primary', onclick: () => answer(true) }, icon(ICON.upload), 'Upload'),
+    h('button', { type: 'button', class: 'v-btn', text: 'Not now', onclick: () => answer(false) })));
+  append(h('div', { class: 'v-msg-ai' }, card));
 }
 
 function onBuildEvent(ev) {
@@ -1395,6 +1425,7 @@ export async function startChatMode() {
 
   wire();
   api.arduino?.onBuildEvent?.(onBuildEvent);
+  api.ui?.onConfirmUpload?.(askUpload);
   let side0 = 'open';
   try { side0 = localStorage.getItem(SIDE_KEY) || 'open'; } catch { /* no storage */ }
   setSide(side0 !== 'closed');

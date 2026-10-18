@@ -4531,14 +4531,19 @@ function updateTokenCounter() {
 // Surface a "not available yet" stub action visibly (toast + console),
 // so users get feedback instead of a silent console-only line.
 
+// arduino-cli colours its output; the codes are noise in a plain console.
+// eslint-disable-next-line no-control-regex
+const ANSI = /\u001b\[[0-9;]*[A-Za-z]/g;
+
 function logToConsole(message, type = 'info') {
     const consoleEl = document.getElementById('consoleOutput');
     if (!consoleEl) return;
 
     const time = new Date().toLocaleTimeString();
+    const text = String(message).replace(ANSI, '');
     const line = document.createElement('div');
     line.className = `console-line ${type}`;
-    line.textContent = type === 'build' ? message : `[${time}] ${message}`;
+    line.textContent = type === 'build' ? text : `[${time}] ${text}`;
     consoleEl.appendChild(line);
     if (consoleEl.childElementCount > 3000) {
         while (consoleEl.childElementCount > 2500) consoleEl.removeChild(consoleEl.firstChild);

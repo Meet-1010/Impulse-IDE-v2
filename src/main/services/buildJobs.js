@@ -178,8 +178,12 @@ function summarize(job) {
 /** What of a result travels to the renderer: facts, not the whole log. */
 function publicResult(result) {
   if (!result || typeof result !== 'object') return null;
-  const { memory = null, summary = [], warnings = [], diagnostics = [], message = '', port = null } = result;
-  return { memory, summary, warnings: warnings.slice(0, 20), diagnostics: diagnostics.slice(0, 20), message, port };
+  const { memory = null, summary = [], warnings = [], diagnostics = [], message = '', port = null,
+    pinIssues = [], pinReport = null, installedLibraries = [] } = result;
+  return {
+    memory, summary, warnings: warnings.slice(0, 20), diagnostics: diagnostics.slice(0, 20), message, port,
+    pinIssues: pinIssues.slice(0, 10), pinReport, installedLibraries,
+  };
 }
 
 module.exports = { BuildJobs, BuildBusyError };

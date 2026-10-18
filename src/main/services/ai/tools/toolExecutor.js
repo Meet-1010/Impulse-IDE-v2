@@ -191,9 +191,15 @@ class ToolExecutor {
       }
 
       const ok = !(result && typeof result === 'object' && result.success === false);
+      // The tool's own fields (code, summary, diagnostics, knownFixes…) travel
+      // on the envelope as well as inside `result`: the agent loop reads them
+      // there, and burying them made the verify guard blind to a BUSY build.
+      const own = result && typeof result === 'object' ? { ...result } : {};
+      delete own.success;
+      delete own.tool;
       return ok
-        ? { success: true, tool: toolCall.name, result }
-        : { success: false, tool: toolCall.name, error: result.error || 'Tool failed', result };
+        ? { success: true, tool: toolCall.name, ...own, result }
+        : { success: false, tool: toolCall.name, ...own, error: result.error || 'Tool failed', result };
     } catch (error) {
       return {
         success: false,
@@ -236,6 +242,9 @@ class ToolExecutor {
         memory: compileResult.memory || null,
         warnings: (compileResult.warnings || []).slice(0, 10),
         diagnostics: (compileResult.diagnostics || []).slice(0, 20),
+        installedLibraries: compileResult.installedLibraries || [],
+        pinIssues: compileResult.pinIssues || [],
+        pinReport: compileResult.pinReport || null,
         output: boundedOutput(compileResult.output || '', 1200),
       };
     } catch (err) {
@@ -266,7 +275,11 @@ class ToolExecutor {
       return { success: false, error: 'No board selected. Please select a board from the Board dropdown.' };
     }
     if (!port) {
-      return { success: false, error: 'No port selected. Please select a port from the Port dropdown (and connect your board via USB).' };
+      return {
+        success: false,
+        code: 'NO_PORT',
+        error: 'No port is selected, so there is nothing to upload to. Tell the user to plug the board in and pick its port from the board chip; the simulator can run the sketch meanwhile.',
+      };
     }
     // Uploading drives real hardware: the user approves every agent upload.
     if (!this.uiCallbacks || !this.uiCallbacks.confirmUpload) {
@@ -274,7 +287,7 @@ class ToolExecutor {
     }
     const approved = await this.uiCallbacks.confirmUpload({ sketchPath, boardFQBN, port });
     if (!approved) {
-      return { success: false, error: 'The user declined the upload. Do not retry unless they ask.' };
+      return { success: false, code: 'DECLINED', error: 'The user did not allow the upload. Do not retry unless they ask again.' };
     }
     // The port is freed and reopened by the upload itself (arduinoService).
     // Save editor content before uploading

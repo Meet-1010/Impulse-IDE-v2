@@ -53,6 +53,8 @@ class ArduinoService {
     this.libraries = new LibraryService((args, opts) => this.runCommand(args, opts));
     /** A build that fails on a missing header installs what provides it and builds again. */
     this.autoInstallLibraries = true;
+    /** Set by the main process: checks the sketch's pins against the board. */
+    this.pinInspector = null;
     /** One compile or upload at a time, watched live (see buildJobs.js). */
     this.jobs = new BuildJobs();
     /** How long a build may stay silent, and run in all (tests shorten these). */
@@ -630,8 +632,12 @@ class ArduinoService {
     if (code === 0) {
       const summary = summaryLines(memory);
       if (installedLibraries.length) summary.unshift(`Installed ${installedLibraries.map((l) => l.name).join(', ')} to build this sketch.`);
+      // It compiles; whether the pins exist on this board is another question.
+      const pins = this.pinInspector ? await this.pinInspector({ sketchPath, fqbn: boardFQBN }).catch(() => null) : null;
+      if (pins?.report) summary.push(...pins.report.split('\n'));
       return {
         success: true, output, warnings, memory, summary, diagnostics, installedLibraries,
+        pinIssues: pins?.issues || [], pinReport: pins?.report || null,
         programSize: memory?.flash?.used ?? null, usagePercent: memory?.flash?.percent ?? null,
         message: summary[0] || 'Compiled.',
       };

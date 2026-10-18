@@ -190,8 +190,17 @@ function checkSketchPins(code, boardInfo, { taken = [], boardName = '' } = {}) {
  */
 function pinReport(issues, { boardName = 'this board' } = {}) {
   if (!issues?.length) return null;
-  const errors = issues.filter((i) => i.level === 'error');
-  const warnings = issues.filter((i) => i.level === 'warning');
+  // One line per pin: naming the same pin once for pinMode and again for
+  // digitalWrite says nothing more.
+  const seenPins = new Set();
+  const once = issues.filter((i) => {
+    const key = `${i.level}:${i.pin}`;
+    if (seenPins.has(key)) return false;
+    seenPins.add(key);
+    return true;
+  });
+  const errors = once.filter((i) => i.level === 'error');
+  const warnings = once.filter((i) => i.level === 'warning');
   const lines = [];
   if (errors.length) lines.push(`[PIN CHECK] ${errors.length === 1 ? 'A pin in this sketch cannot work' : `${errors.length} pins in this sketch cannot work`} on ${boardName}:`);
   else lines.push(`[PIN CHECK] Worth a look on ${boardName}:`);
