@@ -22,6 +22,9 @@ export function simulationContext() {
  * @returns {Promise<{ ok: boolean, stage: 'compile'|'run'|'done', error?: string, seconds?: number,
  *   results?: object[], parseErrors?: object[], pins?: object[], serial?: string, simSeconds?: number, board?: string }>}
  */
+/** Expectation kinds that depend on the emulator keeping up with time. */
+const TIMING_KINDS = /frequency|toggle|pulse|duty|period/;
+
 export async function runSimulatorCheck({ sketchPath, code, context = simulationContext(), signal, onStage }) {
   const { seconds, items, errors: parseErrors } = parseExpectations(code, context.board);
   onStage?.('compile');
@@ -30,13 +33,28 @@ export async function runSimulatorCheck({ sketchPath, code, context = simulation
     return { ok: false, stage: 'compile', error: (compiled?.error || 'Compilation failed').trim(), parseErrors, board: context.label };
   }
   onStage?.('run');
+  const attempt = () => runHeadless(programOf(compiled), { seconds, signal, board: context.board, mcu: context.mcu, circuit: context.circuit });
   let run;
   try {
-    run = await runHeadless(programOf(compiled), { seconds, signal, board: context.board, mcu: context.mcu, circuit: context.circuit });
+    run = await attempt();
   } catch (err) {
     return { ok: false, stage: 'run', error: err.message, parseErrors, board: context.label };
   }
-  const results = evaluateExpectations(items, run, context.board);
+  let results = evaluateExpectations(items, run, context.board);
+  // The ESP32 runs in a real-time emulator: on a busy computer its first run
+  // after launch can lag and drop a few pin edges, failing a timing check the
+  // sketch would pass. One more run settles it before anyone is told.
+  if (BOARDS[context.board]?.family === 'esp32' && !signal?.aborted
+    && results.some((r, i) => !r.pass && TIMING_KINDS.test(items[i]?.kind || ''))) {
+    try {
+      const again = await attempt();
+      const second = evaluateExpectations(items, again, context.board);
+      if (second.filter((r) => r.pass).length >= results.filter((r) => r.pass).length) {
+        run = again;
+        results = second;
+      }
+    } catch { /* the first run stands */ }
+  }
   return {
     ok: results.every(r => r.pass) && parseErrors.length === 0,
     stage: 'done',
@@ -81,9 +99,13 @@ export function simulatorFixPrompt(result, { wiring = '', hasCircuit = false } =
   lines.push(serial
     ? `What it printed:\n${serial.split('\n').slice(-12).join('\n')}`
     : 'It printed nothing at all.');
-  const pins = (result.pins || []).filter((p) => p.changes || p.high || p.low).slice(0, 8);
-  if (pins.length) lines.push(`Pins: ${pins.map((p) => `${p.label || p.pin} ${p.summary || (p.changes ? `changed ${p.changes}×` : 'steady')}`).join('; ')}`);
-  else lines.push('No pin changed while it ran.');
+  // summarizeTrace: { pin, label, edges, hz, high } per pin that did anything.
+  const pins = (result.pins || []).filter((p) => p.edges || p.high).slice(0, 8);
+  if (pins.length) {
+    lines.push(`Pins: ${pins.map((p) => `${p.label || p.pin} ${p.edges ? `${p.edges} edges${p.hz ? `, about ${Number(p.hz).toFixed(1)} Hz` : ''}` : 'held HIGH'}`).join('; ')}`);
+  } else {
+    lines.push('No pin changed while it ran.');
+  }
   lines.push(hasCircuit ? `Wired on the canvas:\n${wiring}` : 'Nothing is wired on the simulator canvas, so anything the sketch expects from a sensor or a button cannot happen there.');
   lines.push(hasCircuit
     ? 'Decide what is actually wrong: the code, or a check that cannot pass with this wiring. Fix the code if it is the code; if the wiring or the check is the problem, say so plainly and change the check instead of the logic.'

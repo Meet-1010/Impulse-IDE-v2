@@ -74,6 +74,46 @@ describe('what provides a header', () => {
   });
 });
 
+describe('well-known headers', () => {
+  it('goes to the library that owns a famous header, not to one that ships a copy', async () => {
+    const { lib } = service();
+    // The index above has no provides for "Adafruit GFX Library", and a stranger provides a copy.
+    lib._index = { at: Date.now(), libraries: [
+      { name: 'PL_microEPD', version: '1', provides: ['Adafruit_GFX.h'], architectures: ['*'], sentence: '', paragraph: '', versions: [] },
+      { name: 'Adafruit GFX Library', version: '1.11.11', provides: [], architectures: ['*'], sentence: '', paragraph: '', versions: [] },
+      { name: 'InkyBoard', version: '1', provides: ['Servo.h'], architectures: ['*'], sentence: '', paragraph: '', versions: [] },
+      { name: 'Servo', version: '1.2.2', provides: [], architectures: ['avr', 'samd'], sentence: '', paragraph: '', versions: [] },
+    ] };
+    expect((await lib.providersOf('Adafruit_GFX.h')).map((l) => l.name)).toEqual(['Adafruit GFX Library']);
+    expect((await lib.providersOf('Servo.h')).map((l) => l.name)).toEqual(['Servo']);
+  });
+
+  it('knows the core provides Wire.h, WiFi.h and friends: nothing to install', async () => {
+    const { lib, runCli } = service();
+    expect(await lib.providersOf('Wire.h')).toEqual([]);
+    expect(await lib.providersOf('WiFi.h')).toEqual([]);
+    expect(await lib.providersOf('utility/Wire.h')).toEqual([]);
+    const missing = await lib.missingFor('#include <WiFi.h>\n#include <Wire.h>\n', { fqbn: 'esp32:esp32:esp32' });
+    expect(missing).toEqual([]);
+    expect(runCli.mock.calls.some((c) => c[0][1] === 'install')).toBe(false);
+  });
+
+  it('prefers a library named like the header over one that merely provides it', async () => {
+    const { lib } = service();
+    // Headers the curated table does not know: the index decides, name first.
+    lib._index = { at: Date.now(), libraries: [
+      { name: 'BigBundle', version: '1', provides: ['Foo_Client.h', 'BigBundle.h'], architectures: ['*'], sentence: '', paragraph: '', versions: [] },
+      { name: 'Foo Client', version: '2.8', provides: [], architectures: ['*'], sentence: '', paragraph: '', versions: [] },
+      { name: 'SomethingElse', version: '1', provides: ['Unknown_Thing.h'], architectures: ['*'], sentence: '', paragraph: '', versions: [] },
+    ] };
+    expect((await lib.providersOf('Foo_Client.h')).map((l) => l.name)).toEqual(['Foo Client', 'BigBundle']);
+    expect((await lib.providersOf('Unknown_Thing.h')).map((l) => l.name)).toEqual(['SomethingElse']);
+    // A famous header goes straight to its owner, alone.
+    lib._index.libraries.push({ name: 'PubSubClient', version: '2.8', provides: [], architectures: ['*'], sentence: '', paragraph: '', versions: [] });
+    expect((await lib.providersOf('PubSubClient.h')).map((l) => l.name)).toEqual(['PubSubClient']);
+  });
+});
+
 describe('installing', () => {
   it('installs what the build was missing and reports it', async () => {
     const { lib, calls } = service();

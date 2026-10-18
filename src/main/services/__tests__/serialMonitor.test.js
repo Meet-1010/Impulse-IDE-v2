@@ -102,6 +102,18 @@ describe('the port around an upload', () => {
     expect(monitor.recent(5).some((l) => /Reconnected to .* after the upload/.test(l.text))).toBe(true);
   });
 
+  it('finds the port again under its other macOS name (cu. chosen, tty. listed)', async () => {
+    await monitor.connect('/dev/cu.usbmodem1101', 115200);
+    await monitor.holdForUpload();
+    // The serialport library lists only the tty. name on macOS.
+    listed.ports = [{ path: '/dev/tty.usbmodem1101' }];
+    await expect(monitor.resumeAfterUpload({ timeoutMs: 3000 })).resolves.toBe(true);
+    expect(monitor.isConnected).toBe(true);
+    expect(SerialMonitor.samePort('/dev/cu.usbmodem1101', '/dev/tty.usbmodem1101')).toBe(true);
+    expect(SerialMonitor.samePort('/dev/cu.usbmodem1101', '/dev/cu.usbmodem1102')).toBe(false);
+    expect(SerialMonitor.samePort('COM3', 'COM3')).toBe(true);
+  });
+
   it('does nothing when the monitor was closed before the upload', async () => {
     expect(await monitor.holdForUpload()).toBe(false);
     await expect(monitor.resumeAfterUpload()).resolves.toBe(false);

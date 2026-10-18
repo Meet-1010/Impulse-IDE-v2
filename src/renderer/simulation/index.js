@@ -1583,6 +1583,8 @@ export class SimulationManager {
   }
 
   _setState(state) {
+    /** 'idle' | 'compiling' | 'running' | 'paused': what the toolbar shows. */
+    this.state = state;
     const running = state === 'running' || state === 'paused';
     this.playBtn.innerHTML = iconSvg(running ? 'restart' : 'play', running ? 16 : 18);
     this.playBtn.title = running ? 'Restart the simulation' : 'Start the simulation';

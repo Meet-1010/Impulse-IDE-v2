@@ -25,8 +25,10 @@ export function refillWhen(periodEnd, hours, now = Date.now()) {
   if (!(Number(hours) > 0)) return `on ${new Date(end).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
   const ms = end - now;
   if (ms <= 60_000) return 'in a minute';
-  const h = Math.floor(ms / 3_600_000);
-  const m = Math.round((ms % 3_600_000) / 60_000);
+  // Whole minutes first, then split: rounding the remainder alone can say "4 h 60 min".
+  const total = Math.round(ms / 60_000);
+  const h = Math.floor(total / 60);
+  const m = total % 60;
   if (h && m) return `in ${h} h ${m} min`;
   if (h) return `in ${h} h`;
   return `in ${m} min`;

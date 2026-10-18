@@ -12,6 +12,16 @@ const FLUSH_MS = 40;
 const PARTIAL_IDLE_MS = 150;
 const MAX_PARTIAL = 4096;
 
+/**
+ * Whether two port names are the same device. macOS gives every serial device
+ * two names, /dev/cu.X and /dev/tty.X; arduino-cli lists the cu. one and the
+ * serialport library the tty. one, so a plain string comparison never matches.
+ */
+function samePort(a, b) {
+  const norm = (v) => String(v || '').replace(/^\/dev\/(cu|tty)\./, '/dev/');
+  return !!a && !!b && norm(a) === norm(b);
+}
+
 class SerialMonitor extends EventEmitter {
   constructor() {
     super();
@@ -310,7 +320,7 @@ class SerialMonitor extends EventEmitter {
       await new Promise((r) => setTimeout(r, 400));
       let here = false;
       try {
-        here = (await SerialPort.list()).some((p) => p.path === path);
+        here = (await SerialPort.list()).some((p) => samePort(p.path, path));
       } catch { /* listing failed; try again */ }
       if (!here) continue;
       try {
@@ -349,7 +359,7 @@ class SerialMonitor extends EventEmitter {
       try {
         // Check if the port has reappeared
         const ports = await SerialPort.list();
-        const found = ports.some(p => p.path === this._lastPortPath);
+        const found = ports.some(p => samePort(p.path, this._lastPortPath));
 
         if (found) {
           this._stopReconnect();
@@ -403,4 +413,5 @@ class SerialMonitor extends EventEmitter {
 }
 
 module.exports = SerialMonitor;
+module.exports.samePort = samePort;
 

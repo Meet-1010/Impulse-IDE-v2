@@ -130,6 +130,10 @@ try {
   // through its hidden input, so its scroller is excluded from that one rule.
   const audit = async (label) => {
     await evaluate(`if (!window.axe) { ${axeSource} }`);
+    // A menu or dialog still fading in is translucent, and on a busy machine the
+    // audit can land mid-animation and report a contrast failure that is not
+    // there. Let finite animations finish first (the LED pulses never do).
+    await evaluate(`Promise.all(document.getAnimations().filter(a => a.effect?.getTiming?.().iterations !== Infinity).map(a => a.finished.catch(() => {})))`);
     const found = await evaluate(`axe.run({ exclude: [['.CodeMirror-scroll']] }, { resultTypes: ['violations'] })
       .then(r => r.violations.filter(v => v.impact === 'serious' || v.impact === 'critical')
       .map(v => v.id + ' (' + v.nodes.length + '): ' + v.nodes.slice(0, 2).map(n => n.target.join(' ')).join(', ')))`);
@@ -351,6 +355,14 @@ try {
       await audit(`the ${action} dialog`);
       await evaluate(`document.querySelector('${selector} ${close}').click()`);
     }
+  });
+
+  await step('Tools › Serial Plotter shows the plotter tab (the serial panel used to override it)', async () => {
+    await menu('tools-serial-plotter');
+    await waitFor(`document.querySelector('.output-tab[data-tab="plotter"]')?.classList.contains('active') && document.getElementById('plotterOutput')?.classList.contains('active')`, 3000, 'the plotter tab to be the active output tab');
+    // Back to where the earlier steps left things: the console tab and the explorer panel.
+    await evaluate(`document.querySelector('.output-tab[data-tab="console"]').click()`);
+    await evaluate(`document.querySelector('.activity-icon[data-panel="explorer"]').click()`);
   });
 
   // Real clicks, where a person would click: the pill's glow layers once

@@ -16,6 +16,8 @@ describe('credits-text', () => {
     const now = Date.parse('2026-06-01T09:00:00Z');
     expect(refillWhen('2026-06-01T11:10:00Z', 5, now)).toBe('in 2 h 10 min');
     expect(refillWhen('2026-06-01T12:00:00Z', 5, now)).toBe('in 3 h');
+    // 4 h 59 min 50 s rounds to five whole hours, never "4 h 60 min".
+    expect(refillWhen('2026-06-01T13:59:50Z', 5, now)).toBe('in 5 h');
     expect(refillWhen('2026-06-01T09:20:00Z', 5, now)).toBe('in 20 min');
     expect(refillWhen('2026-06-01T09:00:30Z', 5, now)).toBe('in a minute');
     expect(refillWhen('2026-07-01T09:00:00Z', null, now)).toMatch(/^on /);

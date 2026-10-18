@@ -6,7 +6,7 @@ const RAN = {
             { raw: '// @expect pin 13 toggles', pass: true, detail: '' }],
   parseErrors: [],
   serial: 'boot\nsetup done\n',
-  pins: [{ pin: 13, label: 'D13', changes: 6, summary: 'toggled 6×' }],
+  pins: [{ pin: 13, label: 'D13', edges: 6, hz: 2.0, high: false }],
 };
 
 describe('what a failed simulator run tells the agent', () => {
@@ -23,7 +23,7 @@ describe('what a failed simulator run tells the agent', () => {
     expect(text).toMatch(/- \/\/ @expect serial contains "ready": the serial output never contained "ready"/);
     expect(text).not.toMatch(/pin 13 toggles/); // a check that passed is not evidence of a problem
     expect(text).toMatch(/What it printed:\nboot\nsetup done/);
-    expect(text).toMatch(/Pins: D13 toggled 6×/);
+    expect(text).toMatch(/Pins: D13 6 edges, about 2\.0 Hz/);
     expect(text).toMatch(/Wired on the canvas:\nD13 → LED led1:A/);
     expect(text).toMatch(/Decide what is actually wrong/);
   });

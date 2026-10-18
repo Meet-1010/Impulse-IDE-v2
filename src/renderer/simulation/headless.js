@@ -94,6 +94,10 @@ export async function runHeadless(hex, options = {}) {
     const timer = setInterval(() => engine?.frame(), 10);
     try {
       await runner.waitUntil(seconds, { signal: options.signal });
+      // The firmware's serial text and pin events travel through the emulator's
+      // bridge a little behind its clock; give what is in flight a moment to land
+      // before the run is read, or a check can miss the last line it printed.
+      await new Promise((resolve) => setTimeout(resolve, 400));
       options.beforeStop?.(runner, engine, { serial, trace });
     } catch (err) {
       err.serial = serial; // what the firmware printed before it crashed or hung

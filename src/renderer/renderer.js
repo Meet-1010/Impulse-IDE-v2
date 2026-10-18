@@ -15,6 +15,7 @@ import { attachBreakpoints } from './breakpoints.js';
 import { setupSourceControl } from './source-control.js';
 import { detectBaud, diffSerial, captureBoardSerial, renderCompareReport } from './compare.js';
 import { runHeadless } from './simulation/headless.js';
+import { EXAMPLES } from './simulation/examples.js';
 import { sketchBlockFrom } from './answer-code.js';
 import { programOf } from './simulation/runners.js';
 import { createChatOrb, COPY as ORB_COPY } from './morph-orb/morph-orb.js';
@@ -626,9 +627,11 @@ async function handleMenuAction(action, payload) {
             switchPanel('serial');
             break;
         case 'tools-serial-plotter':
-            document.querySelector('.output-tab[data-tab="plotter"]')?.click();
+            // The serial panel first (it brings its own output tab to the
+            // front), then the plotter tab, so the plotter is what stays shown.
             if (state.sidebarCollapsed) toggleSidebar();
             switchPanel('serial');
+            showOutputTab('plotter');
             break;
         case 'tools-board':
             document.getElementById('boardPortDropdown')?.click();
@@ -1307,6 +1310,7 @@ async function getBoardInfo() {
     const port = state.selectedPort || document.getElementById('portSelectSidebar')?.value;
     if (!port) {
         logToConsole('Select a port first (Board Manager or Tools > Port)', 'warning');
+        window.notifications?.warning?.('Plug the board in and choose its port first, then ask for its info.');
         document.getElementById('boardPortDropdown')?.click();
         return;
     }
@@ -5095,6 +5099,7 @@ async function openBoardOptions() {
     const base = baseFqbn(state.selectedBoard || document.getElementById('boardSelectSidebar')?.value);
     if (!base) {
         logToConsole('Select a board first.', 'warning');
+        window.notifications?.warning?.('Choose a board first, then open its options.');
         document.getElementById('boardPortDropdown')?.click();
         return;
     }
@@ -5723,11 +5728,25 @@ Object.assign(window.impulse, {
         facts: () => simManager?.circuitFacts?.() || null,
         /** The gallery of ready-made sketches with their circuits. */
         examples: () => simManager?.gallery?.open?.(),
+        /** The examples, for a menu or a test: id, title, board, category. */
+        listExamples: () => EXAMPLES.map((e) => ({ id: e.id, title: e.title, board: e.board, category: e.category, libraries: e.libraries || [] })),
+        /** Open one example (its sketch and circuit) by id. */
+        async openExample(id) {
+            const example = EXAMPLES.find((e) => e.id === id);
+            if (!example || !simManager) return false;
+            await simManager.openExample(example);
+            return true;
+        },
         /** Start the simulation (compiles first); no-op while it runs. */
         run() {
             if (simManager && !simManager.running) simManager.run();
         },
+        stop() {
+            simManager?.stop?.();
+        },
         get running() { return !!simManager?.running; },
+        /** 'idle' | 'compiling' | 'running' | … as the simulator's toolbar shows it. */
+        get state() { return simManager?.state || (simManager?.running ? 'running' : 'idle'); },
     },
     tools: {
         open(name) {

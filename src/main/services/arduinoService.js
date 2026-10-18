@@ -610,22 +610,15 @@ class ArduinoService {
         cwd: path.dirname(sketchPath), idleMs: this.timeouts.compileIdleMs, maxMs: this.timeouts.compileMaxMs,
       });
     };
-    let { code, output, reason } = await run();
-    const installedLibraries = [];
-    // The compiler names the header it could not find; the library index says
-    // which library provides it. Install it and build again, once.
-    if (code !== 0 && !reason && this.autoInstallLibraries && this.libraries) {
-      job.line('A library is missing: looking it up…');
-      const found = await this.libraries.installForMissingHeaders(output, {
-        fqbn: boardFQBN,
-        onOutput: (text) => String(text).split('\n').forEach((l) => l.trim() && job.line(l)),
-      }).catch((error) => ({ installed: [], unresolved: [error.message] }));
-      if (found.installed.length) {
-        for (const lib of found.installed) job.line(`Installed ${lib.name}${lib.version ? ` ${lib.version}` : ''} for ${lib.header}.`);
-        installedLibraries.push(...found.installed);
-        ({ code, output, reason } = await run());
-      }
-    }
+    // Libraries the sketch needs are installed first (from the index), and any
+    // the compiler still misses are installed and the build run again.
+    const attempt = async () => {
+      const r = await run();
+      return { success: r.code === 0 && !r.reason, error: r.output, ...r };
+    };
+    const built = await this._withLibraries(attempt, { fqbn: boardFQBN, sketchPath, onLine: (text) => job.line(text) });
+    const installedLibraries = built.installedLibraries || [];
+    const { code, output, reason } = built;
     const memory = parseMemory(output);
     const diagnostics = parseDiagnostics(output);
     const warnings = diagnostics.filter((d) => d.level === 'warning').map((d) => `${path.basename(d.file)}:${d.line}: ${d.message}`);
@@ -739,6 +732,12 @@ class ArduinoService {
    * @param {{ properties?: Record<string, string> }} [options]  build properties the simulator
    *   needs (only build.f_cpu: 8 MHz boards compile for its 16 MHz clock)
    */
+  /**
+   * Compile for the simulator (a hex, a UF2 or an ESP32 flash image). Like a
+   * build for the board, it installs the libraries the sketch needs and
+   * compiles again, so a sketch that needs DHT.h simulates on the first try
+   * instead of failing a check with "No such file or directory".
+   */
   async compileHex(sketchPath, boardFQBN, options = {}) {
     const pioRoot = this.platformioRoot(sketchPath);
     if (pioRoot) {
@@ -746,16 +745,61 @@ class ArduinoService {
       if (!res.success) return { success: false, error: res.error };
       return res.hex ? { success: true, hex: res.hex } : { success: false, error: 'PlatformIO produced no firmware.hex' };
     }
-    const os = require('os');
-    const fs = require('fs');
     if (!this.validateFQBN(boardFQBN)) {
       return { success: false, error: `Invalid board: "${boardFQBN}"` };
     }
+    return this._withLibraries(() => this._compileHexOnce(sketchPath, boardFQBN, options), { fqbn: boardFQBN, sketchPath });
+  }
+
+  /**
+   * Run a compile; when it fails on a header some library provides, install
+   * the library and compile again. The sketch's own #includes are checked
+   * against the index first, so several missing libraries install in one go;
+   * the compiler's "No such file" then catches what a secondary file includes.
+   * @param {() => Promise<{ success: boolean, error?: string }>} compile
+   * @returns {Promise<object>} the compile result, with `installedLibraries` when any were
+   */
+  async _withLibraries(compile, { fqbn, sketchPath, onLine = null } = {}) {
+    const installed = [];
+    const say = (text) => { if (onLine) onLine(text); };
+    const canInstall = this.autoInstallLibraries && this.libraries;
+    if (canInstall && sketchPath) {
+      try {
+        const code = await fs.readFile(sketchPath, 'utf8');
+        const missing = await this.libraries.missingFor(code, { fqbn });
+        for (const m of missing.slice(0, 6)) {
+          say(`Installing ${m.suggestion.name} for ${m.header}…`);
+          try {
+            await this.libraries.install(m.suggestion.name);
+            installed.push({ header: m.header, name: m.suggestion.name, version: m.suggestion.version });
+          } catch (error) {
+            say(`Could not install ${m.suggestion.name}: ${error.message}`);
+          }
+        }
+      } catch { /* the index or the sketch could not be read: the compiler decides */ }
+    }
+    let result = await compile();
+    for (let round = 0; round < 3 && canInstall && result && !result.success; round++) {
+      const found = await this.libraries.installForMissingHeaders(result.error || '', { fqbn, max: 2, onOutput: onLine || undefined })
+        .catch(() => ({ installed: [], unresolved: [] }));
+      if (!found.installed.length) break;
+      for (const lib of found.installed) say(`Installed ${lib.name}${lib.version ? ` ${lib.version}` : ''} for ${lib.header}.`);
+      installed.push(...found.installed);
+      result = await compile();
+    }
+    return installed.length && result ? { ...result, installedLibraries: installed } : result;
+  }
+
+  /** One compile for the simulator, no library handling. */
+  _compileHexOnce(sketchPath, boardFQBN, options = {}) {
+    const os = require('os');
+    const fs = require('fs');
     // ESP32 boards run in Espressif's QEMU: a flash image built with the simulator bridge.
     if (/^(esp32|arduino):esp32:/.test(boardFQBN) && this.esp32sim) {
-      const res = await this.esp32sim.build(this.sketchDir(sketchPath), boardFQBN);
-      if (res.success || !res.missingCore) return res;
-      return { ...res, error: ArduinoService.explainToolchainError(res.error) || res.error, missingCore: extraCoreFor(boardFQBN) || undefined };
+      return this.esp32sim.build(this.sketchDir(sketchPath), boardFQBN).then((res) => {
+        if (res.success || !res.missingCore) return res;
+        return { ...res, error: ArduinoService.explainToolchainError(res.error) || res.error, missingCore: extraCoreFor(boardFQBN) || undefined };
+      });
     }
     const outputDir = path.join(os.tmpdir(), `impulse-hex-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
     fs.mkdirSync(outputDir, { recursive: true });

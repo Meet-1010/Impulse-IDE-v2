@@ -36,6 +36,51 @@ function missingHeadersOf(output) {
 
 const lower = (v) => String(v || '').toLowerCase();
 
+/**
+ * Headers everyone uses → the library that owns them. The index does not say
+ * who provides Adafruit_GFX.h (and a stray library that ships a copy would
+ * win), so the well-known ones are spelled out. `null` means the board's own
+ * core provides the header: there is nothing to install.
+ */
+const KNOWN_HEADERS = {
+  // the core's own
+  'Arduino.h': null, 'Wire.h': null, 'SPI.h': null, 'EEPROM.h': null, 'SoftwareSerial.h': null, 'WiFi.h': null,
+  'WiFiClient.h': null, 'WiFiClientSecure.h': null, 'WiFiUdp.h': null, 'HTTPClient.h': null, 'WebServer.h': null,
+  'ESPmDNS.h': null, 'Update.h': null, 'Preferences.h': null, 'SPIFFS.h': null, 'LittleFS.h': null, 'FS.h': null,
+  'BLEDevice.h': null, 'BLEServer.h': null, 'BLEUtils.h': null, 'esp_now.h': null, 'ESP8266WiFi.h': null,
+  'ESP8266WebServer.h': null, 'ESP8266HTTPClient.h': null, 'ArduinoOTA.h': null, 'Ticker.h': null, 'HardwareSerial.h': null,
+  'USB.h': null, 'USBHIDKeyboard.h': null, 'USBHIDMouse.h': null, 'Keyboard.h': null, 'Mouse.h': null, 'avr/sleep.h': null,
+  // displays
+  'Adafruit_GFX.h': 'Adafruit GFX Library', 'Adafruit_SSD1306.h': 'Adafruit SSD1306', 'Adafruit_SH110X.h': 'Adafruit SH110X',
+  'Adafruit_ST7735.h': 'Adafruit ST7735 and ST7789 Library', 'Adafruit_ST7789.h': 'Adafruit ST7735 and ST7789 Library',
+  'Adafruit_ILI9341.h': 'Adafruit ILI9341', 'Adafruit_BusIO_Register.h': 'Adafruit BusIO', 'Adafruit_I2CDevice.h': 'Adafruit BusIO',
+  'U8g2lib.h': 'U8g2', 'U8x8lib.h': 'U8g2', 'TFT_eSPI.h': 'TFT_eSPI', 'LiquidCrystal.h': 'LiquidCrystal',
+  'LiquidCrystal_I2C.h': 'LiquidCrystal I2C', 'hd44780.h': 'hd44780', 'TM1637Display.h': 'TM1637', 'TM1637.h': 'TM1637',
+  'LedControl.h': 'LedControl', 'MD_MAX72xx.h': 'MD_MAX72XX', 'MD_Parola.h': 'MD_Parola', 'SevSeg.h': 'SevSeg',
+  'Adafruit_NeoPixel.h': 'Adafruit NeoPixel', 'FastLED.h': 'FastLED', 'Adafruit_LEDBackpack.h': 'Adafruit LED Backpack Library',
+  // sensors
+  'DHT.h': 'DHT sensor library', 'DHT_U.h': 'DHT sensor library', 'DHTesp.h': 'DHT sensor library for ESPx',
+  'Adafruit_Sensor.h': 'Adafruit Unified Sensor', 'Adafruit_BMP280.h': 'Adafruit BMP280 Library', 'Adafruit_BME280.h': 'Adafruit BME280 Library',
+  'Adafruit_BME680.h': 'Adafruit BME680 Library', 'Adafruit_MPU6050.h': 'Adafruit MPU6050', 'MPU6050.h': 'MPU6050',
+  'Adafruit_AHTX0.h': 'Adafruit AHTX0', 'Adafruit_SGP30.h': 'Adafruit SGP30 Sensor', 'Adafruit_TCS34725.h': 'Adafruit TCS34725',
+  'Adafruit_VL53L0X.h': 'Adafruit_VL53L0X', 'VL53L0X.h': 'VL53L0X', 'BH1750.h': 'BH1750', 'Adafruit_ADS1X15.h': 'Adafruit ADS1X15',
+  'Adafruit_INA219.h': 'Adafruit INA219', 'Adafruit_MAX31865.h': 'Adafruit MAX31865 library', 'max6675.h': 'MAX6675 library',
+  'OneWire.h': 'OneWire', 'DallasTemperature.h': 'DallasTemperature', 'HX711.h': 'HX711', 'NewPing.h': 'NewPing',
+  'Ultrasonic.h': 'Ultrasonic', 'MFRC522.h': 'MFRC522', 'TinyGPS++.h': 'TinyGPSPlus', 'TinyGPSPlus.h': 'TinyGPSPlus',
+  'Adafruit_Fingerprint.h': 'Adafruit Fingerprint Sensor Library', 'IRremote.h': 'IRremote', 'IRremote.hpp': 'IRremote',
+  'IRremoteESP8266.h': 'IRremoteESP8266', 'RTClib.h': 'RTClib', 'Keypad.h': 'Keypad', 'Encoder.h': 'Encoder',
+  'ESP32Encoder.h': 'ESP32Encoder', 'Bounce2.h': 'Bounce2', 'OneButton.h': 'OneButton', 'ezButton.h': 'ezButton',
+  // actuators
+  'Servo.h': 'Servo', 'ESP32Servo.h': 'ESP32Servo', 'Stepper.h': 'Stepper', 'AccelStepper.h': 'AccelStepper',
+  'Adafruit_PWMServoDriver.h': 'Adafruit PWM Servo Driver Library', 'Adafruit_MotorShield.h': 'Adafruit Motor Shield V2 Library',
+  'AFMotor.h': 'Adafruit Motor Shield library', 'L298N.h': 'L298N', 'DFRobotDFPlayerMini.h': 'DFRobotDFPlayerMini',
+  // comms and data
+  'PubSubClient.h': 'PubSubClient', 'ArduinoJson.h': 'ArduinoJson', 'NTPClient.h': 'NTPClient', 'TimeLib.h': 'Time',
+  'ArduinoBLE.h': 'ArduinoBLE', 'WiFiNINA.h': 'WiFiNINA', 'Ethernet.h': 'Ethernet', 'LoRa.h': 'LoRa', 'RF24.h': 'RF24',
+  'WiFiManager.h': 'WiFiManager', 'ESPAsyncWebServer.h': 'ESP Async WebServer', 'AsyncTCP.h': 'Async TCP',
+  'ThingSpeak.h': 'ThingSpeak', 'SD.h': 'SD', 'TaskScheduler.h': 'TaskScheduler', 'Adafruit_LiquidCrystal.h': 'Adafruit LiquidCrystal',
+};
+
 class LibraryService {
   /** @param {(args: string[], opts?: object) => Promise<{ success: boolean, stdout: string, stderr: string }>} runCli */
   constructor(runCli) {
@@ -151,28 +196,39 @@ class LibraryService {
       }));
   }
 
-  /** The library that provides a header, best first (installed ones first). */
+  /**
+   * The library that provides a header, best first. A well-known header goes
+   * to the library that owns it; otherwise a library named like the header
+   * beats one that merely ships a copy, and one that fits the board beats one
+   * that does not. A header the core provides has no providers at all.
+   */
   async providersOf(header, { fqbn = '' } = {}) {
+    const key = Object.keys(KNOWN_HEADERS).find((h) => lower(h) === lower(String(header).split('/').pop()));
     const want = lower(header);
     const bare = want.replace(/\.(h|hpp)$/, '');
     const arch = String(fqbn || '').split(':')[1] || '';
     const libraries = await this.index();
     const installed = new Set((await this.installed().catch(() => [])).map((l) => lower(l.name)));
     const squash = (v) => lower(v).replace(/[^a-z0-9]/g, '');
-    const hits = libraries.filter((lib) => lib.provides.some((h) => lower(h) === want) || lower(lib.name) === bare);
+    const decorate = (lib) => ({
+      ...lib,
+      installed: installed.has(lower(lib.name)),
+      exactHeader: lib.provides.some((h) => lower(h) === want),
+      fitsBoard: !arch || !lib.architectures.length || lib.architectures.includes('*') || lib.architectures.includes(arch),
+      nameMatch: squash(lib.name) === squash(bare) ? 2 : squash(lib.name).startsWith(squash(bare)) ? 1 : 0,
+    });
+    if (key !== undefined) {
+      const owner = KNOWN_HEADERS[key];
+      if (owner === null) return []; // the core's own header
+      const lib = libraries.find((l) => lower(l.name) === lower(owner));
+      if (lib) return [decorate(lib)];
+    }
+    const hits = libraries.filter((lib) => lib.provides.some((h) => lower(h) === want) || squash(lib.name) === squash(bare));
     return hits
-      .map((lib) => ({
-        ...lib,
-        installed: installed.has(lower(lib.name)),
-        exactHeader: lib.provides.some((h) => lower(h) === want),
-        fitsBoard: !arch || !lib.architectures.length || lib.architectures.includes('*') || lib.architectures.includes(arch),
-        // A library named like the header is the one the header belongs to
-        // (DHT.h → "DHT sensor library" before a library that merely ships a copy).
-        nameMatch: squash(lib.name) === squash(bare) ? 2 : squash(lib.name).startsWith(squash(bare)) ? 1 : 0,
-      }))
-      .sort((a, b) => Number(b.exactHeader) - Number(a.exactHeader)
+      .map(decorate)
+      .sort((a, b) => b.nameMatch - a.nameMatch
+        || Number(b.exactHeader) - Number(a.exactHeader)
         || Number(b.fitsBoard) - Number(a.fitsBoard)
-        || b.nameMatch - a.nameMatch
         || a.name.length - b.name.length
         || a.name.localeCompare(b.name));
   }
@@ -256,4 +312,4 @@ class LibraryService {
   }
 }
 
-module.exports = { LibraryService, includesOf, missingHeadersOf };
+module.exports = { LibraryService, includesOf, missingHeadersOf, KNOWN_HEADERS };
