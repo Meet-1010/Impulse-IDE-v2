@@ -681,6 +681,29 @@ names what is built and the decision behind it.
 
 ---
 
+## 11. Status after the first build day (2026-10-18, evening)
+
+Built and verified live in the app (each piece has unit tests; the cloud
+pieces have `node --test` coverage against Postgres):
+
+| Plan item | State | Where |
+|---|---|---|
+| Build jobs: one at a time, streamed, parsed, named failures (§2.2, decision 2) | **Built** | `src/main/services/buildJobs.js`, `buildOutput.js`, `arduinoService.js`; IDE console + footer; chat build card |
+| Auto-apply of answer code, Revert (decision 3) | **Built** | `src/renderer/answer-code.js`, renderer + chat mode |
+| Circuit facts for the agent (decision 1) | **Built** | `knowledge/circuitFacts.js`, simulator `circuitFacts()`, `get_circuit` |
+| Credits-only launch, hourly refills, admin access (decisions 5, 6) | **Built** | `cloud/src/credits.js`, `settings.js`, desktop `localModelsEnabled()`, `cloud/README.md` |
+| Knowledge layer: 100-board catalog, family notes, records, core drift (§5, decision 7) | **Built** (68 of 100 FQBNs checked against installed cores; the rest from the board indexes) | `knowledge/boards/`, `knowledge/cores.json`, `boardRecords.js`, probes + `npm run knowledge:probe` |
+| Self-learning loop (decision 4) | **Built**: local fix capture, cloud store, known fixes in tool results, manifest, admin page, privacy text | `ai/learning/fixCapture.js`, `cloud/src/learning.js`, migration 002 |
+| Harness core: tool tiers + packs, serial fold, bounded results, verify guard, cost per task (§3.3, §3.4) | **Built** (tool schemas ~2,450 → ~1,670 tokens; verify guard; `usage_event.task_id`) | `tools/toolSchema.js`, `agent.js`, migration 003 |
+| Event-sourced chat log (§3.5) | Not yet | the saved chat keeps messages and build/verify cards, not a JSONL event log |
+| Token-pressure compaction with pruning (§3.4) | Partly: the renderer compacts at 70K tokens; no pruning step | `renderer.js` AI_COMPACT_THRESHOLD |
+| Harness manifest from the cloud (§3.2) | Partly: the learning manifest exists; prompt and knowledge are still bundled only | `cloud/src/learning.js` |
+| Multi-device projects (§4) | Not started | — |
+| Diagnosis algorithm L0–L3, signature library, Impulse Probe (§6) | Partly: failure codes + known fixes exist; no evidence sheet, no probe firmware | `buildOutput.js` classifyFailure |
+| Eval set (§7 phase 0) | Not started | — |
+
+---
+
 ## 9. Sources
 
 - DeepSeek Harness: github.com/deepseek-ai/deepseek-harness (MIT; branch
