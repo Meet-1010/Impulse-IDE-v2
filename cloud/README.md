@@ -46,8 +46,51 @@ Point the desktop app at it from the repository root:
 IMPULSE_CLOUD_URL=http://localhost:8787 npm run dev
 ```
 
-The first address in `ADMIN_EMAILS` becomes an admin once it signs in with a
+Every address in `ADMIN_EMAILS` becomes an admin once it signs in with a
 verified email; the console is at `/admin/`.
+
+## The admin console
+
+`/admin/` has five pages: **Overview** (users, active users, paid plans,
+today's upstream spend against the daily cap, open upgrade requests, request
+and cost charts, cost by model, top users), **Users** (search, plan, credits,
+grants, suspend, sign out everywhere), **Upgrade requests** (approve or decline
+Pro/Max requests until a payment provider is connected), **Settings** (welcome
+credits, credits per dollar and markup, each plan's name, credits per period,
+refill period in hours or a calendar month, price and models; the enabled and
+default models; rate limit and daily budget; maintenance mode and an
+announcement; "This server" lists what is configured) and the **Audit log**.
+
+To reach it:
+
+1. Add your address to `ADMIN_EMAILS` (comma-separated) in the server's
+   environment (Vercel › Settings › Environment Variables for production; the
+   `.env` file for a local server) and restart or redeploy.
+2. Open `<cloud URL>/sign-in/?next=/admin/` and sign in with that address:
+   Google, GitHub, or an email account you create there (the code arrives by
+   email in production; a local server prints it to its log as
+   `[email] … code for …`). The address must be verified: Google and GitHub
+   addresses are, an email account is once its code is entered.
+3. You land on `/admin/`. The role is granted on that first verified sign-in
+   and stays; signing out and back in is not needed later. Admin writes carry
+   an `x-impulse-admin` header and a same-origin `Origin`, and every change is
+   written to the audit log.
+
+Locally, with Postgres on `127.0.0.1:55432` and `cd cloud && npm run dev`,
+that is `http://localhost:8787/sign-in/?next=/admin/`.
+
+## Credits and refills
+
+Each plan has an allowance per period (`monthlyCredits`) and a period:
+`periodHours` for plans that refill every few hours, or empty for a calendar
+month. The defaults give the **Free** plan 25 credits every 5 hours plus the
+200 welcome credits that never expire; **Pro** and **Max** refill monthly. A
+refill happens lazily, on the first request after the period ends (an hourly
+plan's clock then restarts from that request); nothing runs on a schedule.
+Unused plan credits do not roll over; a small overdraft from a request that
+cost more than was left is repaid from the next refill. The app shows "refills
+in 2 h 10 min" for hourly plans and the date for monthly ones. Change any of
+this on the Settings page.
 
 ## Tests
 

@@ -6,6 +6,7 @@
 import { add, avatar, fill, fmtCredits, h, icon, led, toast } from './dom.js';
 import { ICON } from './icons.js';
 import { closePopover, menu, popover } from './menu.js';
+import { periodNoun, periodWords, refillWhen } from './credits-text.js';
 
 const TRACE = '<svg class="v-trace" viewBox="0 0 400 40" preserveAspectRatio="none" aria-hidden="true"><path class="grid" d="M0 20H400M50 0V40M100 0V40M150 0V40M200 0V40M250 0V40M300 0V40M350 0V40"/><path class="wave" d="M0 27H178L186 27L192 7L198 35L203 23L208 27H400"/></svg>';
 
@@ -102,7 +103,7 @@ export function createAccount({ api, onSignedIn, onUseLocal }) {
     const err = errorBox();
 
     const welcome = status.welcomeCredits
-      ? `New accounts get ${status.welcomeCredits} free credits, then ${status.freeMonthlyCredits} more every month.`
+      ? `New accounts get ${status.welcomeCredits} free credits, then ${status.freeMonthlyCredits} more ${periodWords(status.freePeriodHours)}.`
       : 'Free to start. No card needed.';
     const note = pendingPrompt
       ? h('div', { class: 'v-pending-note' }, icon(ICON.checkSmall), h('span', {}, 'Your message is kept and sends as soon as you\'re in: ', h('q', { text: pendingPrompt.length > 90 ? `${pendingPrompt.slice(0, 88)}…` : pendingPrompt })))
@@ -323,7 +324,7 @@ export function createAccount({ api, onSignedIn, onUseLocal }) {
     const render = (pending) => {
       fill(d.body, 
         h('h2', { text: 'Choose a plan' }),
-        h('p', { class: 'v-sub', text: 'Credits pay for the AI. A short question uses little; building and fixing a project uses more. Plan credits refill every month.' }),
+        h('p', { class: 'v-sub', text: 'Credits pay for the AI. A short question uses little; building and fixing a project uses more. Each plan refills on its own schedule.' }),
         h('div', { class: 'v-plans' }, plans.map((p) => {
           const isCurrent = p.id === current;
           const requested = pending?.plan === p.id;
@@ -350,7 +351,7 @@ export function createAccount({ api, onSignedIn, onUseLocal }) {
             h('div', { class: 'v-readout' }, h('span', { class: 'v-label', text: p.name }), isCurrent ? led('green') : null),
             h('div', { class: 'v-plan-price' }, h('strong', { text: p.priceUsd ? `$${p.priceUsd}` : '$0' }), h('span', { text: p.priceUsd ? 'a month' : 'forever' })),
             h('ul', {},
-              h('li', {}, icon(ICON.checkSmall), `${p.monthlyCredits.toLocaleString()} credits every month`),
+              h('li', {}, icon(ICON.checkSmall), `${p.monthlyCredits.toLocaleString()} credits ${periodWords(p.periodHours)}`),
               h('li', {}, icon(ICON.checkSmall), p.models.join(', ')),
               h('li', {}, icon(ICON.checkSmall), 'Simulator, uploads and the IDE included')),
             cta);
@@ -369,14 +370,14 @@ export function createAccount({ api, onSignedIn, onUseLocal }) {
     }
     const share = c.monthly > 0 ? Math.max(0, Math.min(1, c.planCredits / c.monthly)) : 0;
     const level = c.remaining <= 0 ? 'empty' : c.remaining < Math.max(10, c.monthly * 0.15) ? 'low' : '';
-    const renews = new Date(c.periodEnd).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    const renews = refillWhen(c.periodEnd, c.periodHours);
     const body = h('div', { class: 'v-usage' },
       h('div', { class: 'v-usage-top' }, h('span', { class: 'v-label', text: 'Credits left' }), h('span', { class: 'v-label', text: `${c.planName} plan` })),
       h('div', { class: 'v-usage-num', text: fmtCredits(c.remaining) }),
-      h('div', { class: 'v-meter', dataset: { level }, role: 'meter', 'aria-valuemin': '0', 'aria-valuemax': String(c.monthly), 'aria-valuenow': String(Math.max(0, c.planCredits)), 'aria-label': 'This month\'s plan credits' },
+      h('div', { class: 'v-meter', dataset: { level }, role: 'meter', 'aria-valuemin': '0', 'aria-valuemax': String(c.monthly), 'aria-valuenow': String(Math.max(0, c.planCredits)), 'aria-label': `Plan credits ${c.periodHours ? 'this period' : 'this month'}` },
         h('span', { style: `width:${share * 100}%` })),
       h('dl', {},
-        h('dt', { text: 'This month' }), h('dd', { text: `${fmtCredits(Math.max(0, c.planCredits))} of ${c.monthly}` }),
+        h('dt', { text: periodNoun(c.periodHours) }), h('dd', { text: `${fmtCredits(Math.max(0, c.planCredits))} of ${c.monthly}` }),
         h('dt', { text: 'Bonus (never expire)' }), h('dd', { text: fmtCredits(c.bonusCredits) }),
         h('dt', { text: 'Refills' }), h('dd', { text: renews })),
       h('div', { class: 'v-answer-actions' },

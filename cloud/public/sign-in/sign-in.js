@@ -225,7 +225,9 @@ async function init() {
   $('#signInForm').hidden = !email;
   for (const link of document.querySelectorAll('[data-go="signup"], [data-go="forgot"]')) link.hidden = !email;
   if (config.welcomeCredits) {
-    $('#signupSub').textContent = `${config.welcomeCredits} free credits to start, then ${config.freeMonthlyCredits} every month. No card needed.`;
+    const h = Number(config.freePeriodHours);
+    const every = h > 0 ? (h === 1 ? 'every hour' : h % 24 === 0 ? (h === 24 ? 'every day' : `every ${h / 24} days`) : `every ${h} hours`) : 'every month';
+    $('#signupSub').textContent = `${config.welcomeCredits} free credits to start, then ${config.freeMonthlyCredits} ${every}. No card needed.`;
   }
   $('#getApp').href = config.website || '/';
   $('#desktopNote').hidden = !desktop;

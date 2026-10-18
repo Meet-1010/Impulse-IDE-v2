@@ -150,9 +150,10 @@ function register(ipcMain, ctx) {
       const list = aiAgent.getUnifiedModelList();
       const OllamaProvider = require('../services/ai/providers/ollamaProvider');
       // Recommended downloads that aren't installed yet, best first.
+      const enabled = aiAgent.localModelsEnabled();
       const installed = new Set(local.models.map((m) => m.name));
-      const downloads = OllamaProvider.recommendedModels().filter((m) => !installed.has(m.name));
-      return { success: true, data: list ?? [], local: { running: local.running, count: local.models.length, downloads } };
+      const downloads = enabled ? OllamaProvider.recommendedModels().filter((m) => !installed.has(m.name)) : [];
+      return { success: true, data: list ?? [], local: { enabled, running: local.running, count: local.models.length, downloads } };
     } catch (error) {
       return { success: false, error: error?.message ?? 'Get models failed' };
     }
@@ -217,6 +218,7 @@ function register(ipcMain, ctx) {
   }));
 
   ipcMain.handle('ai:start-local', withDebugLog('ai:start-local', async () => {
+    if (!aiAgent.localModelsEnabled()) return { success: false, error: 'This build of Impulse runs its AI through Impulse Cloud only.' };
     try {
       const OllamaProvider = require('../services/ai/providers/ollamaProvider');
       const started = await OllamaProvider.start();
@@ -229,6 +231,7 @@ function register(ipcMain, ctx) {
   }));
 
   ipcMain.handle('ai:pull-local-model', withDebugLog('ai:pull-local-model', async (event, model) => {
+    if (!aiAgent.localModelsEnabled()) return { success: false, error: 'This build of Impulse runs its AI through Impulse Cloud only.' };
     const OllamaProvider = require('../services/ai/providers/ollamaProvider');
     const name = typeof model === 'string' && /^[\w.:/-]{1,100}$/.test(model) ? model : OllamaProvider.recommendedModel().name;
     try {

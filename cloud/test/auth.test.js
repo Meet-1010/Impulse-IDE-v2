@@ -1,6 +1,10 @@
 import { after, before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { BASE, setup } from './helpers.js';
+import { DEFAULTS } from '../src/settings.js';
+
+// What a fresh account holds: the Free plan's allowance plus the welcome bonus.
+const NEW_ACCOUNT_CREDITS = DEFAULTS.plans.free.monthlyCredits + DEFAULTS.signupBonusCredits;
 
 describe('accounts', () => {
   let t;
@@ -51,8 +55,8 @@ describe('accounts', () => {
     const body = await me.json();
     assert.equal(body.user.email, email);
     assert.equal(body.needsVerification, false);
-    // Free plan (100) + welcome bonus (200).
-    assert.equal(body.credits.remaining, 300);
+    // The Free plan's allowance plus the welcome bonus.
+    assert.equal(body.credits.remaining, NEW_ACCOUNT_CREDITS);
     assert.equal(body.credits.plan, 'free');
   });
 
@@ -70,7 +74,7 @@ describe('accounts', () => {
   test('the welcome bonus is granted once, however often /v1/me is read', async () => {
     const { token } = await t.signUp('once@impulse.test');
     const reads = await Promise.all([1, 2, 3, 4].map(() => t.request('/v1/me', { headers: t.bearer(token) })));
-    for (const r of reads) assert.equal((await r.json()).credits.remaining, 300);
+    for (const r of reads) assert.equal((await r.json()).credits.remaining, NEW_ACCOUNT_CREDITS);
     const { rows } = await t.pool.query(
       `select count(*)::int as n from credit_ledger l join "user" u on u.id = l.user_id where u.email = $1 and kind = 'signup_bonus'`,
       ['once@impulse.test'],

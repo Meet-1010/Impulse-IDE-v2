@@ -1,8 +1,8 @@
 import { after, before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { setup } from './helpers.js';
-import { DEFAULTS } from '../src/settings.js';
-import { MC, addMonths, charge, getAccount, setPlan } from '../src/credits.js';
+import { DEFAULTS as HOURLY_DEFAULTS } from '../src/settings.js';
+import { MC, addMonths, charge, getAccount, setPlan, periodEnd, describe as describeAccount } from '../src/credits.js';
 import { costMicros, relativeCost, toMillicredits } from '../src/pricing.js';
 
 describe('pricing', () => {
@@ -55,6 +55,8 @@ describe('credit accounts', () => {
   after(async () => { await t.close(); });
 
   const start = new Date('2026-01-31T12:00:00Z');
+  // These tests are about month arithmetic: a Free plan that refills monthly.
+  const DEFAULTS = { ...HOURLY_DEFAULTS, plans: { ...HOURLY_DEFAULTS.plans, free: { ...HOURLY_DEFAULTS.plans.free, monthlyCredits: 100, periodHours: null } } };
 
   test('a new account gets the Free allowance and the welcome bonus', async () => {
     const acct = await getAccount(t.pool, userId, DEFAULTS, start);
@@ -98,5 +100,54 @@ describe('credit accounts', () => {
     const last = rows.at(-1);
     assert.equal(last.plan_after, 1500 * MC);
     assert.equal(rows.reduce((sum, r) => sum + r.delta, 0), last.plan_after + last.bonus_after, 'deltas add up to the balance');
+  });
+});
+
+describe('hourly refills (the Free plan)', () => {
+  let t;
+  const userId = 'hourly-user';
+  before(async () => {
+    t = await setup();
+    await t.pool.query(
+      `insert into "user" (id, name, email, "emailVerified", "createdAt", "updatedAt") values ($1, 'Hourly', 'hourly@impulse.test', true, now(), now())`,
+      [userId],
+    );
+  });
+  after(async () => { await t.close(); });
+
+  const start = new Date('2026-06-01T09:00:00Z');
+
+  test('the default Free plan refills a small allowance every few hours', async () => {
+    assert.equal(HOURLY_DEFAULTS.plans.free.periodHours, 5);
+    const acct = await getAccount(t.pool, userId, HOURLY_DEFAULTS, start);
+    assert.equal(acct.plan_credits, 25 * MC);
+    assert.equal(acct.bonus_credits, 200 * MC);
+    assert.equal(new Date(acct.period_end).toISOString(), '2026-06-01T14:00:00.000Z');
+    assert.equal(periodEnd(start, HOURLY_DEFAULTS.plans.free).toISOString(), '2026-06-01T14:00:00.000Z');
+    assert.equal(periodEnd(start, HOURLY_DEFAULTS.plans.pro).toISOString(), '2026-07-01T09:00:00.000Z');
+  });
+
+  test('nothing refills before the period ends; afterwards the clock restarts from the next request', async () => {
+    await charge(t.pool, userId, 25 * MC);
+    let acct = await getAccount(t.pool, userId, HOURLY_DEFAULTS, new Date('2026-06-01T13:59:00Z'));
+    assert.equal(acct.plan_credits, 0);
+    const later = new Date('2026-06-01T16:30:00Z');
+    acct = await getAccount(t.pool, userId, HOURLY_DEFAULTS, later);
+    assert.equal(acct.plan_credits, 25 * MC);
+    assert.equal(new Date(acct.period_start).toISOString(), later.toISOString());
+    assert.equal(new Date(acct.period_end).toISOString(), '2026-06-01T21:30:00.000Z');
+    const d = describeAccount(acct, HOURLY_DEFAULTS);
+    assert.equal(d.periodHours, 5);
+    assert.equal(d.refillCredits, 25);
+    assert.equal(d.monthly, 25);
+    const { rows } = await t.pool.query('select note from credit_ledger where user_id = $1 order by id desc limit 1', [userId]);
+    assert.equal(rows[0].note, 'Free plan, new period');
+  });
+
+  test('moving to a monthly plan starts a month-long period', async () => {
+    const now = new Date('2026-06-02T00:00:00Z');
+    const acct = await setPlan(t.pool, userId, 'pro', HOURLY_DEFAULTS, { now });
+    assert.equal(new Date(acct.period_end).toISOString(), '2026-07-02T00:00:00.000Z');
+    assert.equal(describeAccount(acct, HOURLY_DEFAULTS).periodHours, null);
   });
 });

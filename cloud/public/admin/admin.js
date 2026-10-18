@@ -353,7 +353,8 @@ async function settings(main) {
   const exampleLine = h('p', { class: 'muted', style: 'margin:0;font-size:12.5px' });
   function example() {
     const used = 0.1 * s.creditsPerUsd * s.markup;
-    exampleLine.textContent = `A request that costs us $0.10 uses ${Math.round(used * 10) / 10} credits. Free users get ${whole.format(s.signupBonusCredits)} welcome credits plus ${whole.format(s.plans.free.monthlyCredits)} a month.`;
+    const every = s.plans.free.periodHours ? `every ${s.plans.free.periodHours} hour${s.plans.free.periodHours === 1 ? '' : 's'}` : 'a month';
+    exampleLine.textContent = `A request that costs us $0.10 uses ${Math.round(used * 10) / 10} credits. Free users get ${whole.format(s.signupBonusCredits)} welcome credits plus ${whole.format(s.plans.free.monthlyCredits)} ${every}.`;
   }
 
   const planCols = ['free', 'pro', 'max'].map((id) => {
@@ -364,6 +365,8 @@ async function settings(main) {
     monthly.addEventListener('input', () => { p.monthlyCredits = Math.round(Number(monthly.value)); dirty(); example(); });
     const price = h('input', { class: 'input', type: 'number', step: '1', min: '0', value: String(p.priceUsd), 'aria-label': `${id} price` });
     price.addEventListener('input', () => { p.priceUsd = Number(price.value); dirty(); });
+    const period = h('input', { class: 'input', type: 'number', step: '1', min: '0', max: '720', value: String(p.periodHours || 0), 'aria-label': `${id} refill period in hours` });
+    period.addEventListener('input', () => { p.periodHours = Math.round(Number(period.value)) || null; dirty(); example(); });
     const checks = h('div', { class: 'checks' }, models.map((m) => {
       const box = h('input', { type: 'checkbox', checked: p.models.includes(m.id) });
       box.addEventListener('change', () => {
@@ -374,7 +377,8 @@ async function settings(main) {
     }));
     return h('div', { class: 'plan-col' }, h('span', { class: 'label', text: id }),
       h('label', { class: 'field' }, h('span', { text: 'Name' }), name),
-      h('label', { class: 'field' }, h('span', { text: 'Credits each month' }), monthly),
+      h('label', { class: 'field' }, h('span', { text: 'Credits each period' }), monthly),
+      h('label', { class: 'field' }, h('span', { text: 'Refills every (hours; 0 = calendar month)' }), period),
       h('label', { class: 'field' }, h('span', { text: 'Price (USD a month)' }), price),
       h('div', { class: 'field' }, h('span', { text: 'Models' }), checks));
   });

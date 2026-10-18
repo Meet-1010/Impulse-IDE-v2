@@ -3812,6 +3812,7 @@ async function readyAIModel() {
     if (!status?.configured) {
         const local = state.aiUnifiedModels.find(m => m.provider === 'ollama');
         if (local && await selectModelProgrammatically(local.id)) return { ok: true, provider: 'ollama' };
+        if (state.aiLocal?.enabled === false) return { ok: false, error: 'This build of Impulse has no cloud address, so its AI is off.' };
         return { ok: false, error: 'Pick a free model on this computer in the model menu.' };
     }
     if (!status.signedIn) return { ok: false, needsSignIn: true };
@@ -3840,7 +3841,8 @@ async function loadAIUnifiedModels() {
         const select = document.getElementById('aiModelSelect');
         if (select) {
             select.innerHTML = '<option value="">Model…</option>';
-            for (const provider of ['impulse', 'ollama']) {
+            // A credits-only build (a cloud address, no local models) lists Impulse Cloud alone.
+            for (const provider of state.aiLocal?.enabled === false ? ['impulse'] : ['impulse', 'ollama']) {
                 const group = document.createElement('optgroup');
                 group.label = PROVIDER_LABELS[provider];
                 for (const m of result.data.filter(x => x.provider === provider)) {

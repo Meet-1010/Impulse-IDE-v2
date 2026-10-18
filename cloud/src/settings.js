@@ -18,10 +18,13 @@ export const DEFAULTS = Object.freeze({
   dailyBudgetUsd: 25,
   maintenance: false,
   announcement: '',
+  // monthlyCredits is the allowance per period; periodHours null means a
+  // calendar month. The free plan refills a small allowance every few hours,
+  // so a student who runs out waits rather than paying; paid plans are monthly.
   plans: {
-    free: { name: 'Free', monthlyCredits: 100, priceUsd: 0, models: ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'] },
-    pro: { name: 'Pro', monthlyCredits: 1500, priceUsd: 20, models: ALL_MODELS },
-    max: { name: 'Max', monthlyCredits: 6000, priceUsd: 60, models: ALL_MODELS },
+    free: { name: 'Free', monthlyCredits: 25, periodHours: 5, priceUsd: 0, models: ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'] },
+    pro: { name: 'Pro', monthlyCredits: 1500, periodHours: null, priceUsd: 20, models: ALL_MODELS },
+    max: { name: 'Max', monthlyCredits: 6000, periodHours: null, priceUsd: 60, models: ALL_MODELS },
   },
 });
 
@@ -46,7 +49,8 @@ const RULES = {
       const p = v[id];
       if (!p) return `plan "${id}" is required`;
       if (typeof p.name !== 'string' || !p.name.trim() || p.name.length > 40) return `plan "${id}" needs a name`;
-      if (!isInt(p.monthlyCredits, 0, 10_000_000)) return `plan "${id}" monthly credits must be a whole number`;
+      if (!isInt(p.monthlyCredits, 0, 10_000_000)) return `plan "${id}" credits per period must be a whole number`;
+      if (p.periodHours !== null && p.periodHours !== undefined && !isInt(p.periodHours, 1, 720)) return `plan "${id}" refill period must be 1 to 720 hours, or empty for a month`;
       if (!isNum(p.priceUsd, 0, 100_000)) return `plan "${id}" price must be a number`;
       if (!Array.isArray(p.models) || !p.models.length || !p.models.every((m) => ALL_MODELS.includes(m))) return `plan "${id}" needs at least one known model`;
     }
@@ -70,7 +74,8 @@ export function validateSettings(patch) {
     if (problem) return { ok: false, error: `${key} must be ${problem}.` };
     value[key] = key === 'plans'
       ? Object.fromEntries(PLAN_IDS.map((id) => [id, {
-        name: v[id].name.trim(), monthlyCredits: v[id].monthlyCredits, priceUsd: v[id].priceUsd, models: [...new Set(v[id].models)],
+        name: v[id].name.trim(), monthlyCredits: v[id].monthlyCredits, periodHours: Number.isInteger(v[id].periodHours) ? v[id].periodHours : null,
+        priceUsd: v[id].priceUsd, models: [...new Set(v[id].models)],
       }]))
       : v;
   }

@@ -1,6 +1,7 @@
 import { after, before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { setup } from './helpers.js';
+import { DEFAULTS } from '../src/settings.js';
 
 describe('admin API', () => {
   let t;
@@ -39,7 +40,7 @@ describe('admin API', () => {
     assert.equal((await t.json(path, { credits: 50 }, { headers: write(owner.token) })).status, 400);
     const res = await t.json(path, { credits: 50, note: 'Hackathon prize' }, { headers: write(owner.token) });
     assert.equal(res.status, 200);
-    assert.equal((await res.json()).credits.remaining, 350);
+    assert.equal((await res.json()).credits.remaining, DEFAULTS.plans.free.monthlyCredits + DEFAULTS.signupBonusCredits + 50);
     const detail = await (await t.request(`/admin/api/users/${member.user.id}`, { headers: t.bearer(owner.token) })).json();
     assert.equal(detail.ledger[0].kind, 'admin_grant');
     assert.equal(detail.ledger[0].note, 'Hackathon prize');

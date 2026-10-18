@@ -23,7 +23,7 @@ const SerialMonitor = require('./services/serialMonitor');
 const ErrorMemory = require('./services/errorMemory');
 const AIAgent = require('./services/ai/agent');
 const { CloudAccount } = require('./services/cloud/account');
-const { cloudURL } = require('./services/cloud/config');
+const { cloudURL, localModelsEnabled } = require('./services/cloud/config');
 const ChatStore = require('./services/chatStore');
 const { registerAllIpc } = require('./ipc');
 const { debug } = require('./utils/logger');
@@ -453,7 +453,8 @@ app.whenReady().then(() => {
     version: app.getVersion(),
   });
   chatStore = new ChatStore(path.join(app.getPath('userData'), 'chats'));
-  aiAgent = new AIAgent(arduinoService, serialMonitor, errorMemory);
+  // A build with a cloud address is credits-only: no models on this computer.
+  aiAgent = new AIAgent(arduinoService, serialMonitor, errorMemory, { localModels: localModelsEnabled() });
   aiAgent.initializeProviders();
   // Gateway requests say which app version sent them.
   aiAgent.providerOptions = { impulse: { version: app.getVersion() } };

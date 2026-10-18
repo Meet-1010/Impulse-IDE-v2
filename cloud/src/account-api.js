@@ -36,6 +36,7 @@ export function createAccountApi({ pool, auth, settings, config }) {
       id,
       name: s.plans[id].name,
       monthlyCredits: s.plans[id].monthlyCredits,
+      periodHours: s.plans[id].periodHours || null,
       priceUsd: s.plans[id].priceUsd,
       models: s.plans[id].models.filter((m) => s.enabledModels.includes(m)).map((m) => MODELS[m].name),
     }));
@@ -48,6 +49,7 @@ export function createAccountApi({ pool, auth, settings, config }) {
         auth: { google: !!config.google, github: !!config.github, email: config.email.enabled },
         welcomeCredits: s.signupBonusCredits,
         freeMonthlyCredits: s.plans.free.monthlyCredits,
+        freePeriodHours: s.plans.free.periodHours || null,
         website: config.websiteURL,
       });
     },

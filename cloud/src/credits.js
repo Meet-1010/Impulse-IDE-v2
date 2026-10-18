@@ -1,8 +1,10 @@
 // Credit accounts and the append-only ledger. Two buckets per user:
-// plan credits (the monthly allowance, refilled each period; unused ones don't
-// roll over, a small overdraft does) and bonus credits (welcome, granted and
-// bought credits that never expire). Spending takes plan credits first.
-// Every change is one row in credit_ledger with the balances after it.
+// plan credits (the allowance per period, refilled each period; unused ones
+// don't roll over, a small overdraft does) and bonus credits (welcome, granted
+// and bought credits that never expire). Spending takes plan credits first.
+// A period is a calendar month, or `periodHours` for plans that refill every
+// few hours (the free plan). Every change is one row in credit_ledger with the
+// balances after it.
 
 import { tx } from './db.js';
 
@@ -19,6 +21,13 @@ export function addMonths(date, months) {
   // Jan 31 + 1 month is the last day of February, not March 3.
   if (d.getUTCDate() < day) d.setUTCDate(0);
   return d;
+}
+
+/** When a period that starts at `start` ends for `plan`. */
+export function periodEnd(start, plan) {
+  const hours = Number(plan?.periodHours);
+  if (Number.isInteger(hours) && hours > 0) return new Date(new Date(start).getTime() + hours * 3_600_000);
+  return addMonths(start, 1);
 }
 
 async function ledger(client, e) {
@@ -41,7 +50,7 @@ async function create(client, userId, settings, now) {
   const { rows } = await client.query(
     `insert into credit_account (user_id, plan, plan_credits, bonus_credits, period_start, period_end)
      values ($1, 'free', $2, $3, $4, $5) on conflict (user_id) do nothing returning *`,
-    [userId, monthly, bonus, now, addMonths(now, 1)],
+    [userId, monthly, bonus, now, periodEnd(now, plan)],
   );
   // Another request created it first: use that one.
   if (!rows[0]) return lock(client, userId);
@@ -55,9 +64,15 @@ async function refill(client, acct, settings, now) {
   const plan = settings.plans[acct.plan] || settings.plans.free;
   let start = new Date(acct.period_start);
   let end = new Date(acct.period_end);
-  while (end <= now) {
-    start = end;
-    end = addMonths(start, 1);
+  if (plan.periodHours) {
+    // Hourly plans restart from now: the clock runs from the first request after the refill.
+    start = now;
+    end = periodEnd(now, plan);
+  } else {
+    while (end <= now) {
+      start = end;
+      end = addMonths(start, 1);
+    }
   }
   const planCredits = plan.monthlyCredits * MC + Math.min(0, acct.plan_credits);
   const { rows } = await client.query(
@@ -67,7 +82,7 @@ async function refill(client, acct, settings, now) {
   );
   await ledger(client, {
     userId: acct.user_id, kind: 'monthly_grant', delta: planCredits - acct.plan_credits,
-    planAfter: planCredits, bonusAfter: acct.bonus_credits, note: `${plan.name} plan, new month`,
+    planAfter: planCredits, bonusAfter: acct.bonus_credits, note: `${plan.name} plan, new ${plan.periodHours ? 'period' : 'month'}`,
   });
   return rows[0];
 }
@@ -145,7 +160,7 @@ export async function setPlan(pool, userId, planId, settings, { actorId = null, 
     const { rows } = await client.query(
       `update credit_account set plan = $2, plan_credits = $3, period_start = $4, period_end = $5, updated_at = now()
        where user_id = $1 returning *`,
-      [userId, planId, planCredits, now, addMonths(now, 1)],
+      [userId, planId, planCredits, now, periodEnd(now, plan)],
     );
     await ledger(client, {
       userId, kind: 'plan_change', delta: planCredits - acct.plan_credits, planAfter: planCredits,
@@ -166,6 +181,8 @@ export function describe(acct, settings) {
     plan: acct.plan,
     planName: plan.name,
     monthly: plan.monthlyCredits,
+    refillCredits: plan.monthlyCredits,
+    periodHours: plan.periodHours || null,
     planCredits: round(acct.plan_credits),
     bonusCredits: round(acct.bonus_credits),
     remaining: round(Math.max(0, spendable(acct))),

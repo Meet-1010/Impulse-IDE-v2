@@ -11,6 +11,7 @@ import './vibe.css';
 import { CharField } from './char-field.js';
 import { createChats, projectNameFrom } from './chats.js';
 import { createAccount } from './account.js';
+import { refillWhen } from './credits-text.js';
 import { createBench } from './bench.js';
 import { closePopover, menu, popover } from './menu.js';
 import { ICON } from './icons.js';
@@ -483,7 +484,11 @@ async function send(textArg, { mode: modeArg } = {}) {
   const cloud = ready.provider === 'impulse';
   const credits = account.status.credits;
   if (cloud && credits && credits.remaining <= 0) {
-    append(noticeCard({ id: 'out', state: 'red', title: 'You\'re out of credits', text: `Your ${credits.planName} credits refill on ${new Date(credits.periodEnd).toLocaleDateString()}. Upgrade to keep building now, or switch to a free model on this computer.` }));
+    const localToo = impulse.ai.info().local?.enabled !== false;
+    append(noticeCard({
+      id: 'out', state: 'red', title: 'You\'re out of credits',
+      text: `Your ${credits.planName} credits refill ${refillWhen(credits.periodEnd, credits.periodHours)}. Upgrade to keep building now${localToo ? ', or switch to a free model on this computer' : ''}.`,
+    }));
     account.openPlans();
     return;
   }
@@ -643,14 +648,17 @@ function openModelMenu(anchor) {
     });
   }
   if (!signedIn) items.push({ label: 'Sign in to use these', icon: ICON.user, onSelect: () => account.openSignIn() });
-  items.push({ separator: true }, { heading: 'On this computer · free' });
-  const local = info.models.filter((m) => m.provider === 'ollama');
-  for (const m of local) items.push({ label: m.displayName, sub: 'Runs offline, slower', checked: info.modelId === m.id, onSelect: () => chooseModel(m.id) });
-  if (!local.length) {
-    if (info.local?.running) {
-      for (const d of (info.local.downloads || []).slice(0, 3)) items.push({ label: `Download ${d.displayName}`, sub: `${d.note} · ${d.size}`, onSelect: () => localModels(() => impulse.ai.pullLocal(d.name)) });
-    } else {
-      items.push({ label: 'Start Ollama…', sub: 'Free models that run on this computer', onSelect: () => localModels(() => impulse.ai.startLocal()) });
+  // Models on this computer exist only in builds without a cloud address (development).
+  if (info.local?.enabled !== false) {
+    items.push({ separator: true }, { heading: 'On this computer · free' });
+    const local = info.models.filter((m) => m.provider === 'ollama');
+    for (const m of local) items.push({ label: m.displayName, sub: 'Runs offline, slower', checked: info.modelId === m.id, onSelect: () => chooseModel(m.id) });
+    if (!local.length) {
+      if (info.local?.running) {
+        for (const d of (info.local.downloads || []).slice(0, 3)) items.push({ label: `Download ${d.displayName}`, sub: `${d.note} · ${d.size}`, onSelect: () => localModels(() => impulse.ai.pullLocal(d.name)) });
+      } else {
+        items.push({ label: 'Start Ollama…', sub: 'Free models that run on this computer', onSelect: () => localModels(() => impulse.ai.startLocal()) });
+      }
     }
   }
   menu(anchor, items, { label: 'Model', side: 'top' });

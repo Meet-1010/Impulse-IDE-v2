@@ -81,7 +81,12 @@ class AIAgent {
    */
   initializeProviders() {
     this.providers.set('impulse', ImpulseProvider);
-    this.providers.set('ollama', OllamaProvider);
+    if (this.localModelsEnabled()) this.providers.set('ollama', OllamaProvider);
+  }
+
+  /** Whether models on this computer (Ollama) are offered in this build. */
+  localModelsEnabled() {
+    return this.config.localModels !== false;
   }
 
   /** Whether a provider works without an API key (models on this computer). */
@@ -94,6 +99,7 @@ class AIAgent {
    * @returns {Promise<{ running: boolean, models: Array<object>, error?: string }>}
    */
   async refreshLocalModels() {
+    if (!this.localModelsEnabled()) return { running: false, models: [] };
     return OllamaProvider.listModels();
   }
 

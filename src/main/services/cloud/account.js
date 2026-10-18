@@ -8,6 +8,7 @@
  */
 
 const fs = require('fs');
+const { localModelsEnabled } = require('./config');
 const path = require('path');
 const { EventEmitter } = require('events');
 const { pkcePair, listenForCode } = require('./loopback');
@@ -152,6 +153,8 @@ class CloudAccount extends EventEmitter {
       auth: this.serverConfig?.auth || null,
       welcomeCredits: this.serverConfig?.welcomeCredits ?? null,
       freeMonthlyCredits: this.serverConfig?.freeMonthlyCredits ?? null,
+      freePeriodHours: this.serverConfig?.freePeriodHours ?? null,
+      localModels: localModelsEnabled(),
       adminURL: this.baseURL ? `${this.baseURL}/admin/` : null,
       signingIn: this.pendingSignIn ? this.pendingSignIn.provider : null,
     };
