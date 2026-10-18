@@ -1721,60 +1721,78 @@ function setupEventListeners() {
 // Serial Monitor Listeners
 // ============================================
 
-// The serial layer streams raw chunks, not whole lines. We buffer here and
-// split on newlines so the monitor shows clean lines and the plotter parses
-// complete numeric samples (a value split across two chunks won't corrupt).
-let serialLineBuffer = '';
-let serialFlushTimer = null;
-const SERIAL_BUFFER_MAX = 16384; // force-flush a never-terminated stream
+// Lines arrive whole and batched from the main process (serialMonitor.js
+// assembles them), so the pane keeps up with a fast sketch and loses nothing
+// while another view is on screen.
+let serialAtBottom = true;
 const SERIAL_MAX_LINES = 5000;
 
-function resetSerialBuffer() {
-    serialLineBuffer = '';
-    if (serialFlushTimer) {
-        clearTimeout(serialFlushTimer);
-        serialFlushTimer = null;
+/** The scrollable area of the Serial Monitor pane, made on first use. */
+function serialContentArea() {
+    const outputEl = document.getElementById('serialOutput');
+    if (!outputEl) return null;
+    let area = outputEl.querySelector('.serial-output-content');
+    if (!area) {
+        area = document.createElement('div');
+        area.className = 'serial-output-content';
+        area.tabIndex = 0;
+        outputEl.appendChild(area);
+        area.addEventListener('scroll', () => {
+            serialAtBottom = area.scrollHeight - area.scrollTop - area.clientHeight < 24;
+        });
     }
+    return area;
 }
 
-function emitSerialLine(line, timestamp) {
-    appendSerialOutput(line, timestamp);
-    feedPlotterData(line);
+const SERIAL_PREFIX = { tx: '[TX]', error: '[ERR]', info: '[INFO]', rx: '[RX]' };
+
+/**
+ * Render a batch of lines in one go: one fragment, one trim and one scroll,
+ * so a sketch printing at 115200 cannot make the window fall behind.
+ * @param {{ at?: string, text: string, kind?: 'rx'|'tx'|'info'|'error' }[]} lines
+ */
+function renderSerialLines(lines) {
+    if (!lines?.length) return;
+    const area = serialContentArea();
+    if (!area) return;
+    const fragment = document.createDocumentFragment();
+    for (const entry of lines) {
+        const kind = entry.kind || 'rx';
+        const time = new Date(entry.at || Date.now()).toLocaleTimeString();
+        const row = document.createElement('div');
+        row.className = `serial-line ${kind === 'rx' ? '' : kind === 'tx' ? 'sent' : kind}`.trim();
+        row.textContent = `[${time}] ${SERIAL_PREFIX[kind] || SERIAL_PREFIX.rx} ${entry.text}`;
+        fragment.appendChild(row);
+        if (kind === 'rx') feedPlotterData(entry.text);
+    }
+    area.appendChild(fragment);
+    while (area.childElementCount > SERIAL_MAX_LINES) area.firstElementChild.remove();
+    if (serialAtBottom) area.scrollTop = area.scrollHeight;
 }
 
-function handleSerialChunk(chunk, timestamp) {
-    serialLineBuffer += chunk;
-
-    let nl;
-    while ((nl = serialLineBuffer.indexOf('\n')) !== -1) {
-        const line = serialLineBuffer.slice(0, nl).replace(/\r$/, '');
-        serialLineBuffer = serialLineBuffer.slice(nl + 1);
-        emitSerialLine(line, timestamp);
-    }
-
-    // Force-flush if a device streams without newlines so output isn't stuck.
-    if (serialLineBuffer.length > SERIAL_BUFFER_MAX) {
-        emitSerialLine(serialLineBuffer, timestamp);
-        serialLineBuffer = '';
-    }
-
-    // Idle-flush any trailing partial line so slow/no-newline output still shows.
-    if (serialFlushTimer) clearTimeout(serialFlushTimer);
-    if (serialLineBuffer.length > 0) {
-        serialFlushTimer = setTimeout(() => {
-            if (serialLineBuffer.length > 0) {
-                emitSerialLine(serialLineBuffer, new Date().toISOString());
-                serialLineBuffer = '';
-            }
-            serialFlushTimer = null;
-        }, 150);
-    }
+/** Everything chat mode's serial pane listens to goes through one event. */
+function publishSerialLines(lines) {
+    if (!lines?.length) return;
+    window.dispatchEvent(new CustomEvent('impulse:serial-lines', { detail: lines }));
 }
 
 function setupSerialListeners() {
-    window.electronAPI.serial.onData((data) => {
-        handleSerialChunk(data.data, data.timestamp);
+    // Whole lines, batched by the main process.
+    window.electronAPI.serial.onLines((batch) => {
+        renderSerialLines(batch);
+        publishSerialLines(batch);
     });
+    window.electronAPI.serial.onCleared(() => {
+        serialContentArea()?.replaceChildren();
+        window.dispatchEvent(new CustomEvent('impulse:serial-cleared'));
+    });
+    // What the board printed before this window was ready (or while another view had the pane).
+    window.electronAPI.serial.history(500).then((res) => {
+        if (res?.success && res.data?.length) {
+            renderSerialLines(res.data);
+            publishSerialLines(res.data);
+        }
+    }).catch(() => {});
 
     window.electronAPI.serial.onError((error) => {
         appendSerialOutput(`Error: ${error}`, new Date().toISOString(), 'error');
@@ -1784,7 +1802,7 @@ function setupSerialListeners() {
     window.electronAPI.serial.onConnected(() => {
         state.serialConnected = true;
         state.context.serialConnected = true;
-        resetSerialBuffer();
+        serialAtBottom = true;
         updateSerialUI(true);
         updateAIContext();
         appendSerialOutput('Connected to serial port', new Date().toISOString(), 'info');
@@ -1794,7 +1812,6 @@ function setupSerialListeners() {
     window.electronAPI.serial.onDisconnected(() => {
         state.serialConnected = false;
         state.context.serialConnected = false;
-        resetSerialBuffer();
         updateSerialUI(false);
         updateAIContext();
         appendSerialOutput('Disconnected from serial port', new Date().toISOString(), 'info');
@@ -2931,12 +2948,8 @@ async function uploadSketch() {
         return { ok: false, error: 'The sketch could not be saved, so the upload would use old code.' };
     }
 
-    const reopenMonitor = state.serialConnected;
-    if (state.serialConnected) {
-        logToConsole('Disconnecting serial for upload...', 'info');
-        await window.electronAPI.serial.disconnect();
-    }
-
+    // The main process closes the port for the upload and reopens it afterwards
+    // (serialMonitor.holdForUpload / resumeAfterUpload), like Arduino IDE.
     setButtonState('uploadBtn', true, 'Uploading...');
     clearProblems();
 
@@ -2944,13 +2957,11 @@ async function uploadSketch() {
         const result = await window.electronAPI.arduino.upload(state.currentSketch, pio ? PIO_FQBN : await fqbnFor(boardFQBN), port);
 
         if (result.success) {
-            if (reopenMonitor) reconnectSerialAfterUpload(port);
             return { ok: true, port, summary: result.data?.summary || [] };
         } else {
             if (result.code === 'BUSY') {
                 // Another build is running: its result arrives on its own.
                 logToConsole(result.error, 'warning');
-                if (reopenMonitor) connectSerial();
                 return { ok: false, busy: true, code: 'BUSY', error: result.error, port };
             }
             if (result.error) showProblem(problemText(result));
@@ -3011,24 +3022,6 @@ async function connectSerial() {
     }
 }
 
-/**
- * Reopen the Serial Monitor after an upload, like Arduino IDE 2. Boards with
- * native USB (ESP32-S3, Leonardo…) reset and re-enumerate, so the port may
- * take a moment to come back.
- */
-async function reconnectSerialAfterUpload(port) {
-    const baudRate = parseInt(document.getElementById('baudRate')?.value || '115200', 10);
-    for (let attempt = 0; attempt < 8; attempt++) {
-        await new Promise(r => setTimeout(r, attempt === 0 ? 400 : 750));
-        if (state.serialConnected) return;
-        const res = await window.electronAPI.serial.connect(port, baudRate).catch(() => null);
-        if (res?.success) {
-            appendSerialOutput(`Reconnected to ${port} after upload`, new Date().toISOString(), 'info');
-            return;
-        }
-    }
-    appendSerialOutput(`${port} didn't come back after the upload. Open the Serial Monitor again when the board is ready.`, new Date().toISOString(), 'info');
-}
 
 async function disconnectSerial() {
     try {
@@ -3081,31 +3074,15 @@ function updateSerialUI(connected) {
     // if (baudSelect) baudSelect.disabled = connected;
 }
 
+/**
+ * A line the window itself has to say (connecting, an upload note). Lines from
+ * the board are assembled in the main process and arrive through onLines.
+ */
 function appendSerialOutput(data, timestamp, type = 'received') {
-    window.dispatchEvent(new CustomEvent('impulse:serial-line', { detail: { text: String(data), type } }));
-    const outputEl = document.getElementById('serialOutput');
-    if (!outputEl) return;
-
-    // Find the scrollable content area (or create it if it doesn't exist)
-    let contentArea = outputEl.querySelector('.serial-output-content');
-    if (!contentArea) {
-        contentArea = document.createElement('div');
-        contentArea.className = 'serial-output-content';
-        contentArea.tabIndex = 0;
-        outputEl.appendChild(contentArea);
-    }
-
-    const time = new Date(timestamp).toLocaleTimeString();
-    const prefix = type === 'sent' ? '[TX]' : type === 'error' ? '[ERR]' : type === 'info' ? '[INFO]' : '[RX]';
-    const className = type === 'error' ? 'error' : type === 'sent' ? 'sent' : type === 'info' ? 'info' : '';
-
-    const line = document.createElement('div');
-    line.className = `serial-line ${className}`;
-    line.textContent = `[${time}] ${prefix} ${data}`;
-    contentArea.appendChild(line);
-    // Keep the newest lines so a long session can't grow without bound.
-    while (contentArea.childElementCount > SERIAL_MAX_LINES) contentArea.firstElementChild.remove();
-    contentArea.scrollTop = contentArea.scrollHeight;
+    const kind = type === 'sent' ? 'tx' : type === 'error' ? 'error' : type === 'info' ? 'info' : 'rx';
+    const lines = [{ at: timestamp || new Date().toISOString(), text: String(data), kind }];
+    renderSerialLines(lines);
+    publishSerialLines(lines);
 }
 
 // ============================================
@@ -5739,6 +5716,8 @@ Object.assign(window.impulse, {
     },
     editor: {
         currentFile: () => state.currentFile,
+        /** What the editor holds right now (chat mode reads it for library checks). */
+        value: () => (state.editor ? state.editor.getValue() : ''),
         /** A second editor on the same document (edits and undo show in both). */
         createLinked(host) {
             const CodeMirror = getCodeMirror();
@@ -5786,16 +5765,27 @@ Object.assign(window.impulse, {
             select.value = String(baud);
             select.dispatchEvent(new Event('change'));
         },
-        onLine(fn) {
-            const port = (e) => fn({ text: e.detail.text, type: e.detail.type });
-            const sim = (e) => fn({ text: String(e.detail), type: 'received', source: 'SIM' });
-            window.addEventListener('impulse:serial-line', port);
+        /** Batches of lines from the board, and single lines from the simulator. */
+        onLines(fn) {
+            const port = (e) => fn(e.detail);
+            const sim = (e) => fn([{ text: String(e.detail), kind: 'rx', source: 'SIM', at: new Date().toISOString() }]);
+            window.addEventListener('impulse:serial-lines', port);
             window.addEventListener('impulse:sim-serial-line', sim);
             return () => {
-                window.removeEventListener('impulse:serial-line', port);
+                window.removeEventListener('impulse:serial-lines', port);
                 window.removeEventListener('impulse:sim-serial-line', sim);
             };
         },
+        onCleared(fn) {
+            window.addEventListener('impulse:serial-cleared', fn);
+            return () => window.removeEventListener('impulse:serial-cleared', fn);
+        },
+        /** What the board printed before this pane existed. */
+        async history(lines = 500) {
+            const res = await window.electronAPI.serial.history(lines).catch(() => null);
+            return res?.success ? res.data : [];
+        },
+        clear: () => window.electronAPI.serial.clear().catch(() => {}),
         onState(fn) {
             const handler = () => fn(serialState());
             window.addEventListener('impulse:serial-state', handler);

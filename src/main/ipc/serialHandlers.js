@@ -48,6 +48,18 @@ function register(ipcMain, ctx) {
     }
   }));
 
+  // The last lines the main process assembled: a pane that opens later, or a
+  // view that was switched away, shows what it missed.
+  ipcMain.handle('serial:history', withDebugLog('serial:history', async (event, lines) => {
+    const n = Number.isFinite(lines) ? Math.max(1, Math.min(5000, Math.floor(lines))) : 500;
+    return { success: true, data: serialMonitor.recent(n), connected: serialMonitor.isConnected };
+  }));
+
+  ipcMain.handle('serial:clear', withDebugLog('serial:clear', async () => {
+    serialMonitor.clearLines();
+    return { success: true };
+  }));
+
   ipcMain.handle('serial:list-ports', withDebugLog('serial:list-ports', async () => {
     try {
       const ports = await serialMonitor.listPorts();

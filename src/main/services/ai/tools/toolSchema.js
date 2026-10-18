@@ -83,6 +83,23 @@ const TOOL_SCHEMA = {
     }
   },
 
+  // Libraries: the index decides what exists, not the model's memory.
+  LIBRARIES: {
+    name: 'libraries',
+    description: 'Arduino libraries. action: "search" (query) returns matching libraries from the index with what each provides and whether it is installed; "installed" lists what this computer has; "missing" (code, or the open sketch when omitted) says which of the sketch\'s #includes nothing installed provides and what would provide them; "install" (name, version) installs one. Never name a library you have not seen in search or installed: if search finds nothing, say so instead of guessing. A build installs a missing library by itself, so prefer compiling over installing by hand.',
+    parameters: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['search', 'installed', 'missing', 'install'], description: 'What to do' },
+        query: { type: 'string', description: 'What to search for: a library name or a header like DHT.h' },
+        name: { type: 'string', description: 'Library name, exactly as search returned it (install)' },
+        version: { type: 'string', description: 'Optional version (install); the newest is used when omitted' },
+        code: { type: 'string', description: 'Sketch to check (missing); the open sketch is used when omitted' }
+      },
+      required: ['action']
+    }
+  },
+
   // Tool packs the model loads when it needs them (see TOOL_PACKS): the standing set stays small.
   LOAD_TOOLS: {
     name: 'load_tools',
@@ -375,7 +392,7 @@ const TOOL_SCHEMA = {
  */
 const CORE_TOOL_NAMES = [
   'get_current_state', 'get_editor_code', 'set_editor_code', 'edit_code', 'replace_in_code', 'search_code',
-  'compile_sketch', 'upload_sketch', 'serial', 'get_board_info', 'get_component_guide', 'get_circuit', 'load_tools',
+  'compile_sketch', 'upload_sketch', 'serial', 'libraries', 'get_board_info', 'get_component_guide', 'get_circuit', 'load_tools',
 ];
 
 const TOOL_PACKS = {
@@ -392,7 +409,7 @@ const DEBUG_TOOL_NAMES = [...CORE_TOOL_NAMES, ...TOOL_PACKS.memory];
 const PLAN_TOOL_NAMES = [
   'get_editor_code', 'get_current_sketch_path', 'search_code', 'get_current_state', 'list_boards', 'list_ports',
   'get_board_info', 'get_mcu_guide', 'get_component_guide', 'search_boards', 'search_memory',
-  'get_circuit',
+  'get_circuit', 'libraries',
 ];
 
 /**

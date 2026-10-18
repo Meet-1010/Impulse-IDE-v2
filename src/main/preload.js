@@ -59,6 +59,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
     disconnect: () => ipcRenderer.invoke('serial:disconnect'),
     send: (data) => ipcRenderer.invoke('serial:send', data),
     listPorts: () => ipcRenderer.invoke('serial:list-ports'),
+    history: (lines) => ipcRenderer.invoke('serial:history', lines),
+    clear: () => ipcRenderer.invoke('serial:clear'),
+    // Whole lines, batched by the main process (nothing is lost while a view is away).
+    onLines: (callback) => {
+      const handler = (event, batch) => callback(batch);
+      ipcRenderer.on('serial:lines', handler);
+      return () => ipcRenderer.removeListener('serial:lines', handler);
+    },
+    onCleared: (callback) => {
+      const handler = () => callback();
+      ipcRenderer.on('serial:cleared', handler);
+      return () => ipcRenderer.removeListener('serial:cleared', handler);
+    },
     onData: (callback) => {
       const handler = (event, data) => callback(data);
       ipcRenderer.on('serial:data', handler);
@@ -135,7 +148,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // File operations
   file: {
     read: (filePath) => ipcRenderer.invoke('file:read', filePath),
-    save: (filePath, content) => ipcRenderer.invoke('file:save', filePath, content)
+    save: (filePath, content) => ipcRenderer.invoke('file:save', filePath, content),
+    create: (dirPath, name) => ipcRenderer.invoke('file:new', dirPath, name),
+    rename: (filePath, name) => ipcRenderer.invoke('file:rename', filePath, name),
+    remove: (filePath) => ipcRenderer.invoke('file:delete', filePath)
   },
 
   // Library Manager (Arduino CLI lib)
@@ -332,6 +348,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
   learning: {
     status: () => ipcRenderer.invoke('learning:status'),
     setShare: (share) => ipcRenderer.invoke('learning:set-share', !!share),
+  },
+
+  // Libraries: the index with what each library provides, installs with progress.
+  libraries: {
+    find: (query, fqbn) => ipcRenderer.invoke('lib:find', query, fqbn),
+    installed: () => ipcRenderer.invoke('lib:installed'),
+    missing: (code, fqbn) => ipcRenderer.invoke('lib:missing', code, fqbn),
+    add: (name, version) => ipcRenderer.invoke('lib:add', name, version),
+    remove: (name) => ipcRenderer.invoke('lib:remove', name),
+    onProgress: (callback) => {
+      const handler = (event, progress) => callback(progress);
+      ipcRenderer.on('lib:progress', handler);
+      return () => ipcRenderer.removeListener('lib:progress', handler);
+    },
   },
 
   // Notification system

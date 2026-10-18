@@ -8,6 +8,8 @@
 const { readDefinitions, pinFacts, variantHeaders } = require('./pinsHeader');
 const { familyOf, familyById, guideText } = require('./mcuGuide');
 const records = require('./boardRecords');
+const { pinsText } = require('./pinCheck');
+const { mapFor } = require('./pinMap');
 
 const CACHE_LIMIT = 40;
 
@@ -153,6 +155,14 @@ class BoardKnowledge {
     if (pin('SDA') !== null) parts.push(`I2C SDA ${pin('SDA')}, SCL ${pin('SCL')}`);
     if (pin('MOSI') !== null) parts.push(`SPI MOSI ${pin('MOSI')}, MISO ${pin('MISO')}, SCK ${pin('SCK')}, SS ${pin('SS')}`);
     if (pin('TX') !== null) parts.push(`Serial pins TX ${pin('TX')}, RX ${pin('RX')}`);
+    // Which pins the chip has at all: the one fact that stops invented GPIOs.
+    const map = mapFor(info.family);
+    if (map) {
+      const ranges = pinsText(info.family);
+      const inputOnly = map.inputOnly?.length ? ` Pins ${map.inputOnly.map(([lo, hi]) => (lo === hi ? lo : `${lo}–${hi}`)).join(', ')} are input-only.` : '';
+      const flash = map.flash?.length ? ` Pins ${map.flash.map(([lo, hi]) => (lo === hi ? lo : `${lo}–${hi}`)).join(', ')} are the flash: never use them.` : '';
+      parts.push(`pins ${ranges} and no others${inputOnly}${flash}`);
+    }
     const text = [`[BOARD FACTS, from the installed core] ${parts.join('; ')}.`, ...info.notes.slice(0, 3)];
     text.push('Use the core\'s constants (LED_BUILTIN, SDA, A0…); call get_board_info, get_mcu_guide or get_component_guide before guessing a pin, voltage or I2C address.');
     const notes = records.notesText(info.fqbn, { familyId: info.family, coreVersion: (info.core.split(' ')[1] || '') });

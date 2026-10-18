@@ -1,6 +1,7 @@
 const { validateToolCall } = require('./toolSchema');
 const { boundedOutput } = require('./retain');
 const { circuitToolResult } = require('../knowledge/circuitFacts');
+const { checkSketchPins, pinReport } = require('../knowledge/pinCheck');
 const BoardKnowledge = require('../knowledge/boardKnowledge');
 const { findComponents, componentText, COMPONENTS } = require('../knowledge/components');
 
@@ -15,8 +16,6 @@ class ToolExecutor {
     this.serialMonitor = serialMonitor;
     this.errorMemory = errorMemory;
     this.aiMemory = aiMemory;
-    this.serialBuffer = []; // Buffer for serial output
-    this.maxBufferSize = 1000; // Maximum lines to buffer
 
     // UI state callbacks - set by the main process
     this.uiCallbacks = null;
@@ -151,6 +150,9 @@ class ToolExecutor {
           break;
 
         // State Operations
+        case 'libraries':
+          result = await this.executeLibraries(toolCall.arguments || {});
+          break;
         case 'serial':
           result = await this.executeSerial(toolCall.arguments || {});
           break;
@@ -271,10 +273,7 @@ class ToolExecutor {
     if (!approved) {
       return { success: false, error: 'The user declined the upload. Do not retry unless they ask.' };
     }
-    // Disconnect serial monitor to free the port (upload uses the same port)
-    if (this.serialMonitor && this.serialMonitor.isConnected) {
-      await this.serialMonitor.disconnect();
-    }
+    // The port is freed and reopened by the upload itself (arduinoService).
     // Save editor content before uploading
     if (this.uiCallbacks && this.uiCallbacks.saveSketch) {
       await this.uiCallbacks.saveSketch(sketchPath);
@@ -317,6 +316,26 @@ class ToolExecutor {
     return failure;
   }
 
+  /**
+   * The pins the open sketch uses, checked against the selected board: a pin
+   * the chip does not have, a flash pin, an input-only pin driven as an
+   * output, a pin the board already uses. Deterministic, so the harness can
+   * correct the model with it.
+   * @returns {Promise<{ issues: object[], report: string|null, board: string }>}
+   */
+  async checkPins(code = null) {
+    if (!this.boardKnowledge) return { issues: [], report: null, board: '' };
+    const fqbn = await this.selectedFqbn().catch(() => '');
+    if (!fqbn) return { issues: [], report: null, board: '' };
+    const sketch = code ?? (this.uiCallbacks?.getEditorCode ? await this.uiCallbacks.getEditorCode() : '');
+    if (!sketch) return { issues: [], report: null, board: '' };
+    const info = await this.boardKnowledge.boardInfo(fqbn).catch(() => null);
+    if (!info) return { issues: [], report: null, board: '' };
+    const taken = info.pinsTaken || [];
+    const issues = checkSketchPins(sketch, info, { taken, boardName: `the ${info.name}` });
+    return { issues, report: pinReport(issues, { boardName: `the ${info.name}` }), board: info.name };
+  }
+
   async executeListBoards() {
     const boards = await this.arduinoService.listBoards();
     return { boards };
@@ -325,6 +344,52 @@ class ToolExecutor {
   async executeListPorts() {
     const ports = await this.arduinoService.listPorts();
     return { ports };
+  }
+
+  /**
+   * Libraries by action. The index is the authority on what exists, so the
+   * model can check before it recommends, and `missing` says exactly what a
+   * sketch needs that this computer does not have.
+   */
+  async executeLibraries(args = {}) {
+    const libraries = this.arduinoService?.libraries;
+    if (!libraries) return { success: false, error: 'Libraries need arduino-cli.' };
+    const action = String(args.action || '').toLowerCase();
+    const fqbn = (await this.selectedFqbn().catch(() => '')) || '';
+    const short = (lib) => ({
+      name: lib.name, version: lib.version, installed: !!lib.installed, provides: (lib.provides || []).slice(0, 6),
+      about: String(lib.sentence || '').slice(0, 160), fitsBoard: lib.fitsBoard !== false,
+    });
+    try {
+      if (action === 'search') {
+        const query = String(args.query || '').trim();
+        if (!query) return { success: false, error: 'Say what to search for (a library name or a header like DHT.h).' };
+        const hits = await libraries.search(query, { fqbn, limit: 8 });
+        return hits.length
+          ? { success: true, libraries: hits.map(short) }
+          : { success: true, libraries: [], note: `Nothing in the Arduino library index matches "${query}". Do not tell the user to install it: look for another library, or write the code without one.` };
+      }
+      if (action === 'installed') {
+        const list = await libraries.installed({ refresh: true });
+        return { success: true, libraries: list.slice(0, 60).map((l) => ({ name: l.name, version: l.version, provides: (l.provides || []).slice(0, 4) })) };
+      }
+      if (action === 'missing') {
+        const code = args.code || (this.uiCallbacks?.getEditorCode ? await this.uiCallbacks.getEditorCode() : '');
+        const missing = await libraries.missingFor(code, { fqbn });
+        return missing.length
+          ? { success: true, missing: missing.map((m) => ({ header: m.header, install: short(m.suggestion), alternatives: m.alternatives.map((a) => a.name) })), note: 'Compiling installs these by itself; say what you are adding and why.' }
+          : { success: true, missing: [], note: 'Every header the sketch includes is provided by an installed library or by the board\'s core.' };
+      }
+      if (action === 'install') {
+        const name = String(args.name || '').trim();
+        if (!name) return { success: false, error: 'Name the library exactly as search returned it.' };
+        const res = await libraries.install(name, { version: String(args.version || '').trim() });
+        return { success: true, installed: res.name, version: res.version, note: 'Compile again now.' };
+      }
+      return { success: false, error: `Unknown libraries action "${args.action}". Use search, installed, missing or install.` };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
   }
 
   // Serial Monitor Operation Implementations
@@ -356,22 +421,7 @@ class ToolExecutor {
   async executeConnectSerial(args) {
     const { port, baudRate = 115200 } = args;
     await this.serialMonitor.connect(port, baudRate);
-
-    // Remove previous listener to prevent duplicates/leaks
-    if (this._serialDataHandler) {
-      this.serialMonitor.removeListener('data', this._serialDataHandler);
-    }
-    // Set up listener to buffer serial data
-    this._serialDataHandler = (data) => {
-      this.addToBuffer(data);
-    };
-    this.serialMonitor.on('data', this._serialDataHandler);
-
-    return {
-      port,
-      baudRate,
-      connected: true
-    };
+    return { port, baudRate, connected: true };
   }
 
   async executeDisconnectSerial() {
@@ -386,16 +436,15 @@ class ToolExecutor {
   }
 
   async executeReadSerial(args) {
-    // Bounded: at most 200 lines of 300 characters, so a chatty sketch cannot flood the request.
-    const lines = Math.max(1, Math.min(200, Number(args?.lines) || 50));
-    const recentLines = this.serialBuffer.slice(-lines).map((e) => {
-      const text = typeof e === 'string' ? e : String(e?.data ?? '');
-      return typeof e === 'string' ? text.slice(0, 300) : { ...e, data: text.slice(0, 300) };
-    });
+    // The main process keeps one history for the whole app, so the agent sees
+    // what the board printed even when the user opened the monitor.
+    const want = Math.max(1, Math.min(200, Number(args?.lines) || 50));
+    const history = this.serialMonitor?.recent ? this.serialMonitor.recent(want) : [];
     return {
-      lines: recentLines,
-      totalBuffered: this.serialBuffer.length,
+      lines: history.map((l) => ({ at: l.at, kind: l.kind, text: String(l.text).slice(0, 300) })),
+      totalBuffered: this.serialMonitor?.lines?.length ?? 0,
       connected: !!this.serialMonitor?.isConnected,
+      note: history.length ? undefined : 'Nothing has been printed. Connect the monitor (serial action connect) after an upload, and give the board a moment to start.',
     };
   }
 
@@ -725,7 +774,7 @@ class ToolExecutor {
   async executeGetCurrentState() {
     const state = {
       serialConnected: this.serialMonitor ? this.serialMonitor.isConnected : false,
-      serialBufferSize: this.serialBuffer.length,
+      serialLines: this.serialMonitor?.lines?.length ?? 0,
       availableBaudRates: this.availableBaudRates,
       currentSerialBaudRate: this.serialMonitor ? this.serialMonitor.currentBaudRate : null
     };
@@ -768,25 +817,6 @@ class ToolExecutor {
     return { success: false, error: 'Unable to update playground - UI callback not available' };
   }
 
-  // Helper Methods
-  addToBuffer(data) {
-    const entry = {
-      timestamp: data.timestamp || new Date().toISOString(),
-      data: data.data || data,
-      baudRate: data.baudRate
-    };
-
-    this.serialBuffer.push(entry);
-
-    // Maintain buffer size
-    if (this.serialBuffer.length > this.maxBufferSize) {
-      this.serialBuffer.shift();
-    }
-  }
-
-  clearBuffer() {
-    this.serialBuffer = [];
-  }
 }
 
 /**

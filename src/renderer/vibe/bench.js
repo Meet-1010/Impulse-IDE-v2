@@ -2,8 +2,9 @@
 // IDE's, moved in while shown), the serial monitor, and the code (a second
 // editor on the same document as the IDE's, so edits show in both).
 
-import { h, icon, led } from './dom.js';
+import { fill, h, icon, led, toast } from './dom.js';
 import { ICON } from './icons.js';
+import { askText, confirmAsk } from './ask.js';
 
 const WIDTH_KEY = 'impulse-vibe-bench-width';
 const BAUDS = [9600, 19200, 38400, 57600, 74880, 115200, 230400];
@@ -20,7 +21,12 @@ export function createBench({ host, impulse, onChange }) {
     type: 'button', class: 'v-tab', role: 'tab', id: `vTab-${id}`, 'aria-controls': `vPane-${id}`, 'aria-selected': 'false',
     onclick: () => open(id),
   }, icon(svg), label);
-  const tabs = { sim: tabButton('sim', 'Simulator', ICON.sim), serial: tabButton('serial', 'Serial', ICON.terminal), code: tabButton('code', 'Code', ICON.code) };
+  const tabs = {
+    sim: tabButton('sim', 'Simulator', ICON.sim),
+    serial: tabButton('serial', 'Serial', ICON.terminal),
+    code: tabButton('code', 'Code', ICON.code),
+    files: tabButton('files', 'Files', ICON.folder),
+  };
 
   // ── Serial ─────────────────────────────────────────────────────────────
   const serialLed = led(null);
@@ -35,11 +41,19 @@ export function createBench({ host, impulse, onChange }) {
   let atBottom = true;
   out.addEventListener('scroll', () => { atBottom = out.scrollHeight - out.scrollTop - out.clientHeight < 24; });
 
-  function line(text, kind = 'rx', source = '') {
+  const KIND_CLASS = { tx: 'tx', info: 'info', error: 'err', rx: 'rx' };
+
+  /** A batch of lines: one fragment, one trim, one scroll. */
+  function lines(batch) {
+    if (!batch?.length) return;
     empty.hidden = true;
-    const time = new Date().toLocaleTimeString(undefined, { hour12: false });
-    const row = h('div', { class: kind }, h('span', { class: 't', text: source ? `${time} ${source}` : time }), text);
-    out.append(row);
+    const fragment = document.createDocumentFragment();
+    for (const entry of batch) {
+      const time = new Date(entry.at || Date.now()).toLocaleTimeString(undefined, { hour12: false });
+      fragment.append(h('div', { class: KIND_CLASS[entry.kind] || 'rx' },
+        h('span', { class: 't', text: entry.source ? `${time} ${entry.source}` : time }), entry.text));
+    }
+    out.append(fragment);
     while (out.childElementCount > MAX_LINES) out.firstElementChild.remove();
     if (atBottom) out.scrollTop = out.scrollHeight;
   }
@@ -65,6 +79,7 @@ export function createBench({ host, impulse, onChange }) {
   clearBtn.addEventListener('click', () => {
     out.replaceChildren();
     empty.hidden = false;
+    impulse.serial.clear();
   });
   sendForm.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -72,8 +87,11 @@ export function createBench({ host, impulse, onChange }) {
     if (!text) return;
     if (await impulse.serial.send(text)) sendInput.value = '';
   });
-  impulse.serial.onLine(({ text, type, source }) => line(text, { sent: 'tx', info: 'info', error: 'err' }[type] || 'rx', source));
+  impulse.serial.onLines(lines);
+  impulse.serial.onCleared(() => { out.replaceChildren(); empty.hidden = false; });
   impulse.serial.onState(syncSerial);
+  // What the board printed before this pane existed.
+  impulse.serial.history(500).then(lines).catch(() => {});
 
   const serialPane = h('div', { class: 'v-pane', id: 'vPane-serial', role: 'tabpanel', 'aria-labelledby': 'vTab-serial', hidden: true },
     h('div', { class: 'v-serial-bar' }, h('span', { class: 'v-serial-status' }, serialLed, serialText), baud, connectBtn, clearBtn),
@@ -101,13 +119,107 @@ export function createBench({ host, impulse, onChange }) {
     if (codeEditor) requestAnimationFrame(() => codeEditor.refresh());
   }
 
+  // ── Files ──────────────────────────────────────────────────────────────
+  // The project's files, with the things every editor has: open, rename, add,
+  // delete (to the Trash). No trip through the IDE for any of it.
+  const fileList = h('div', { class: 'v-files' });
+  const filesEmpty = h('div', { class: 'v-code-empty', text: 'No project yet. Ask Impulse to build something and its files show up here.' });
+  const newFileBtn = h('button', { type: 'button', class: 'v-btn', 'aria-label': 'New file' }, icon(ICON.plus), 'New file');
+  const revealBtn = h('button', { type: 'button', class: 'v-btn ghost', text: 'Show in Finder' });
+  const filesPane = h('div', { class: 'v-pane', id: 'vPane-files', role: 'tabpanel', 'aria-labelledby': 'vTab-files', hidden: true },
+    h('div', { class: 'v-files-head' }, h('span', { class: 'v-files-folder' }), h('span', { class: 'v-spacer' }), newFileBtn, revealBtn),
+    filesEmpty, fileList);
+
+  async function syncFiles() {
+    const project = impulse.project.current();
+    const head = filesPane.querySelector('.v-files-folder');
+    head.textContent = project ? project.name : '';
+    filesEmpty.hidden = !!project;
+    newFileBtn.hidden = !project;
+    revealBtn.hidden = !project;
+    fill(fileList);
+    if (!project) return;
+    const files = await impulse.project.files(project.folder);
+    const open = impulse.editor.currentFile();
+    for (const file of files) {
+      const isOpen = open === file.path;
+      const isSketch = /\.ino$/i.test(file.name);
+      const row = h('div', { class: `v-file${isOpen ? ' open' : ''}` },
+        h('button', {
+          type: 'button', class: 'v-file-name', title: file.path,
+          onclick: () => impulse.project.openFile(file.path).then(() => { syncFiles(); syncCode(); }),
+        }, icon(ICON.file), file.name, isOpen ? h('span', { class: 'v-file-tag', text: 'open' }) : null),
+        h('button', {
+          type: 'button', class: 'v-icon-btn', 'aria-label': `Rename ${file.name}`, title: 'Rename', html: ICON.file,
+          onclick: () => renameFile(file),
+        }),
+        h('button', {
+          type: 'button', class: 'v-icon-btn', 'aria-label': `Delete ${file.name}`, title: isSketch && files.filter((f) => /\.ino$/i.test(f.name)).length === 1 ? 'The sketch itself cannot be deleted here' : 'Delete', html: ICON.trash,
+          disabled: isSketch && files.filter((f) => /\.ino$/i.test(f.name)).length === 1,
+          onclick: () => deleteFile(file),
+        }));
+      fileList.append(row);
+    }
+  }
+
+  async function renameFile(file) {
+    const name = await askText({ title: `Rename ${file.name}`, label: 'New name', value: file.name, confirmLabel: 'Rename' });
+    if (!name || name === file.name) return;
+    const res = await window.electronAPI.file.rename(file.path, name).catch((e) => ({ success: false, error: e.message }));
+    if (!res?.success) {
+      toast(res?.error || 'Could not rename the file');
+      return;
+    }
+    // The open file moved: reopen it under its new name.
+    if (impulse.editor.currentFile() === file.path) await impulse.project.openFile(res.path);
+    toast(`Renamed to ${name}`);
+    await syncFiles();
+    syncCode();
+  }
+
+  async function deleteFile(file) {
+    const ok = await confirmAsk({
+      title: `Delete ${file.name}?`,
+      text: 'It goes to the Trash, so you can put it back.',
+      confirmLabel: 'Delete',
+      danger: true,
+    });
+    if (!ok) return;
+    const res = await window.electronAPI.file.remove(file.path).catch((e) => ({ success: false, error: e.message }));
+    if (!res?.success) {
+      toast(res?.error || 'Could not delete the file');
+      return;
+    }
+    toast(`${file.name} moved to the Trash`);
+    await syncFiles();
+  }
+
+  newFileBtn.addEventListener('click', async () => {
+    const project = impulse.project.current();
+    if (!project) return;
+    const name = await askText({ title: 'New file', label: 'Name', value: '', placeholder: 'helpers.h', confirmLabel: 'Create' });
+    if (!name) return;
+    const res = await window.electronAPI.file.create(project.folder, name).catch((e) => ({ success: false, error: e.message }));
+    if (!res?.success) {
+      toast(res?.error || 'Could not make the file');
+      return;
+    }
+    await impulse.project.openFile(res.path);
+    await syncFiles();
+    syncCode();
+  });
+  revealBtn.addEventListener('click', () => {
+    const project = impulse.project.current();
+    if (project) window.electronAPI.shell?.showItemInFolder?.(project.file || project.folder);
+  });
+
   // ── Frame ──────────────────────────────────────────────────────────────
   const close = h('button', { type: 'button', class: 'v-icon-btn', 'aria-label': 'Close the panel', title: 'Close', html: ICON.close, onclick: () => hide() });
   const resize = h('div', { class: 'v-bench-resize', 'aria-hidden': 'true' });
   const el = h('aside', { class: 'v-bench', hidden: true, 'aria-label': 'Workbench' },
     resize,
-    h('div', { class: 'v-bench-head' }, h('div', { class: 'v-tabs', role: 'tablist', 'aria-label': 'Workbench' }, tabs.sim, tabs.serial, tabs.code), close),
-    h('div', { class: 'v-bench-body' }, simPane, serialPane, codePane));
+    h('div', { class: 'v-bench-head' }, h('div', { class: 'v-tabs', role: 'tablist', 'aria-label': 'Workbench' }, tabs.sim, tabs.serial, tabs.code, tabs.files), close),
+    h('div', { class: 'v-bench-body' }, simPane, serialPane, codePane, filesPane));
   host.append(el);
 
   try {
@@ -139,19 +251,21 @@ export function createBench({ host, impulse, onChange }) {
   });
 
   function open(id) {
-    if (!['sim', 'serial', 'code'].includes(id)) return;
+    if (!['sim', 'serial', 'code', 'files'].includes(id)) return;
     el.hidden = false;
     tab = id;
     for (const [key, button] of Object.entries(tabs)) button.setAttribute('aria-selected', String(key === id));
     simPane.hidden = id !== 'sim';
     serialPane.hidden = id !== 'serial';
     codePane.hidden = id !== 'code';
+    filesPane.hidden = id !== 'files';
     if (id === 'sim') impulse.sim.mountInto(simPane);
     if (id === 'serial') {
       syncSerial();
       requestAnimationFrame(() => { out.scrollTop = out.scrollHeight; });
     }
     if (id === 'code') syncCode();
+    if (id === 'files') syncFiles();
     onChange?.(tab);
   }
 
@@ -174,6 +288,7 @@ export function createBench({ host, impulse, onChange }) {
     /** The sketch changed (a new project, another file). */
     refreshCode() {
       if (tab === 'code') syncCode();
+      if (tab === 'files') syncFiles();
     },
     /** Leaving chat mode: hand the simulator back to the IDE. */
     release() {
@@ -183,6 +298,7 @@ export function createBench({ host, impulse, onChange }) {
     reclaim() {
       if (tab === 'sim') impulse.sim.mountInto(simPane);
       if (tab === 'code') syncCode();
+      if (tab === 'files') syncFiles();
     },
   };
 }

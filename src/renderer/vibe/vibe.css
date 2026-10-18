@@ -889,3 +889,88 @@
     .vibe-root *, .v-dialog *, .v-pop, .v-overlay { animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; }
     .v-signal::after { left: 35%; animation: none; }
 }
+
+/* ── Verify and Upload, beside the board they act on ──────────────────── */
+.v-board-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 30px;
+    flex: none;
+    padding: 0 10px;
+    border: 1px solid var(--v-line);
+    border-radius: 3px;
+    background: var(--v-raised);
+    color: var(--v-text);
+    font: inherit;
+    font-size: 12.5px;
+    cursor: pointer;
+    transition: background var(--v-state) var(--v-ease-out), border-color var(--v-state) var(--v-ease-out);
+}
+.v-board-action:hover:not(:disabled) { background: var(--v-raised-2); }
+.v-board-action:disabled { opacity: 0.4; cursor: default; }
+.v-board-action svg { width: 15px; height: 15px; flex: none; }
+.v-board-action.upload { border-color: color-mix(in srgb, var(--v-trace) 40%, var(--v-line)); color: var(--v-trace); }
+.v-board-action.upload:hover:not(:disabled) { background: color-mix(in srgb, var(--v-trace) 12%, var(--v-raised)); }
+@media (max-width: 900px) {
+    .v-board-action.upload span { display: none; }
+}
+
+/* ── Files: the project's files, with the usual things ────────────────── */
+.v-files-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--v-line); font-size: 12.5px; color: var(--v-text-2); }
+.v-files-folder { font-weight: 500; color: var(--v-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.v-files { flex: 1; min-height: 0; overflow: auto; padding: 6px; display: grid; gap: 2px; align-content: start; }
+.v-file { display: flex; align-items: center; gap: 2px; border-radius: 4px; }
+.v-file:hover { background: var(--v-hover); }
+.v-file.open { background: color-mix(in srgb, var(--v-trace) 10%, transparent); }
+.v-file-name {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 30px;
+    padding: 0 8px;
+    border: 0;
+    border-radius: 4px;
+    background: none;
+    color: var(--v-text);
+    font: inherit;
+    font-size: 13px;
+    text-align: left;
+    cursor: pointer;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.v-file-name svg { width: 14px; height: 14px; flex: none; color: var(--v-text-3); }
+.v-file-tag { margin-left: auto; color: var(--v-text-3); font-size: 11px; }
+.v-file .v-icon-btn { opacity: 0; }
+.v-file:hover .v-icon-btn, .v-file .v-icon-btn:focus-visible { opacity: 1; }
+.v-file .v-icon-btn:disabled { opacity: 0; }
+
+/* ── Libraries ────────────────────────────────────────────────────────── */
+.v-input-line {
+    width: 100%;
+    height: 34px;
+    padding: 0 12px;
+    border: 1px solid var(--v-line);
+    border-radius: 4px;
+    background: var(--v-panel);
+    color: var(--v-text);
+    font: inherit;
+    font-size: 13px;
+}
+.v-input-line:focus-visible { outline: none; border-color: color-mix(in srgb, var(--v-trace) 55%, var(--v-line)); }
+.v-lib-list { display: grid; gap: 2px; max-height: min(52vh, 440px); overflow: auto; margin-top: 4px; }
+.v-lib-head { padding: 12px 4px 4px; font-size: 11.5px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--v-text-3); }
+.v-lib { display: flex; align-items: center; gap: 12px; padding: 8px 10px; border-radius: 5px; }
+.v-lib:hover { background: var(--v-hover); }
+.v-lib-text { flex: 1; min-width: 0; display: grid; gap: 3px; }
+.v-lib-name { font-size: 13px; color: var(--v-text); }
+.v-lib-ver { color: var(--v-text-3); font: 11.5px var(--v-mono); }
+.v-lib-about { font-size: 12px; color: var(--v-text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.v-lib-warn { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--v-text-3); }
+.v-lib .v-btn { flex: none; }
+.v-btn.danger { background: var(--v-led-red); border-color: var(--v-led-red); color: var(--v-canvas); }
+.v-btn.danger:hover { background: color-mix(in srgb, var(--v-led-red) 86%, var(--v-canvas)); }

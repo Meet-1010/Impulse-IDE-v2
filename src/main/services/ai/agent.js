@@ -444,6 +444,18 @@ class AIAgent {
             iteration++;
             continue;
           }
+          // It compiles, which says nothing about whether the pins exist on
+          // this board: a wrong GPIO compiles happily and fails on the bench.
+          const pins = await this.toolExecutor.checkPins?.().catch(() => null);
+          const pinErrors = (pins?.issues || []).filter((i) => i.level === 'error');
+          if (pinErrors.length) {
+            toolResults.push({ success: false, tool: 'check_pins', verify: true, issues: pins.issues });
+            messages.push({ role: 'assistant', content: response.content || '' });
+            messages.push({ role: 'user', content: `${pins.report}\nChange those pins to ones the board has, then tell the user what you changed and why.` });
+            iteration++;
+            continue;
+          }
+          if (pins?.issues?.length) response.content = `${response.content || ''}\n\n${pins.report}`.trim();
           if (check && check.success && Array.isArray(check.summary) && check.summary.length) {
             response.content = `${response.content || ''}\n\n${check.summary[0]}`.trim();
           }

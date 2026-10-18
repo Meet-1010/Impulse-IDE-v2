@@ -496,7 +496,7 @@
   "onboard": [
    "SX1276/78 LoRa: SCK 5, MISO 19, MOSI 27, CS 18, RST 14 (23 on some), DIO0 26",
    "0.96″ SSD1306 OLED: SDA 21, SCL 22 (V1: SDA 4, SCL 15, RST 16)",
-   "LED on GPIO25 (V2) or GPIO2",
+   "LED on the pin the core calls LED_BUILTIN: GPIO2 on V1, GPIO25 on V2/V2.1",
    "microSD on 13/15/2/14 (V2.1)"
   ],
   "taken": [
@@ -1032,7 +1032,8 @@
    "Through an Uno with its chip removed (RX→RX, TX→TX, RESET→RESET), or a USB-serial adapter with DTR through a 100 nF capacitor to RESET; or ISP with Burn Bootloader first."
   ],
   "notes": [
-   "Minimal circuit: 16 MHz crystal with two 22 pF caps on pins 9/10, 10 kΩ pull-up on RESET (pin 1), 100 nF decoupling on VCC/AVCC; Arduino pin 13 = chip pin 19, A0 = pin 23, D0/D1 = pins 2/3."
+   "Minimal circuit: 16 MHz crystal with two 22 pF caps on the chip's legs 9 and 10, 10 kΩ pull-up on RESET (leg 1), 100 nF on VCC/AVCC.",
+   "Arduino pin 13 is the chip's leg 19, A0 is leg 23, and Arduino pins 0 and 1 are legs 2 and 3. Write Arduino pin numbers in code, not leg numbers."
   ]
  },
  "atmega2560-bare": {

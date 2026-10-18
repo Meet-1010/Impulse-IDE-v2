@@ -529,6 +529,14 @@ app.whenReady().then(() => {
     });
   }
 
+  arduinoService.serialMonitor = serialMonitor;
+  // Lines are assembled in the main process and pushed in batches.
+  serialMonitor.on('lines', (batch) => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('serial:lines', batch);
+  });
+  serialMonitor.on('cleared', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('serial:cleared');
+  });
   serialMonitor.on('data', (data) => {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('serial:data', data);
   });

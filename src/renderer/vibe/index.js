@@ -11,6 +11,7 @@ import './vibe.css';
 import { CharField } from './char-field.js';
 import { createChats, projectNameFrom } from './chats.js';
 import { createAccount } from './account.js';
+import { openLibraries } from './libraries.js';
 import { refillWhen } from './credits-text.js';
 import { createBench } from './bench.js';
 import { closePopover, menu, popover } from './menu.js';
@@ -58,6 +59,9 @@ const side = h('aside', { class: 'v-side', 'aria-label': 'Chats and projects' },
 // Top bar
 const boardChip = h('button', { type: 'button', class: 'v-board-chip', 'aria-haspopup': 'menu', 'aria-expanded': 'false', title: 'Board and port' });
 const sideToggle = h('button', { type: 'button', class: 'v-icon-btn', 'aria-label': 'Show the sidebar', title: 'Show the sidebar', html: ICON.sidebar, hidden: true, onclick: () => setSide(true) });
+// Upload sits next to the board it uploads to; Verify beside it.
+const uploadButton = h('button', { type: 'button', class: 'v-board-action upload', 'aria-label': 'Upload to the board', title: 'Upload to the board (⌘U)' }, icon(ICON.upload), h('span', { text: 'Upload' }));
+const verifyButton = h('button', { type: 'button', class: 'v-board-action', 'aria-label': 'Verify (compile)', title: 'Verify: compile without uploading (⌘R)' }, icon(ICON.verify));
 const switchChat = h('button', { type: 'button', 'aria-pressed': 'true', text: 'Chat' });
 const switchIde = h('button', { type: 'button', 'aria-pressed': 'false', text: 'IDE', title: 'The full IDE: files, editor, tools (⌘E)' });
 const serialButton = h('button', { type: 'button', class: 'v-icon-btn', 'aria-label': 'Serial monitor', title: 'Serial monitor', 'aria-pressed': 'false', html: ICON.terminal });
@@ -69,6 +73,8 @@ const updateChip = h('button', { type: 'button', class: 'v-update', hidden: true
 const top = h('header', { class: 'v-top' },
   sideToggle,
   boardChip,
+  uploadButton,
+  verifyButton,
   h('div', { class: 'v-top-right' },
     updateChip,
     h('div', { class: 'v-switch', role: 'group', 'aria-label': 'View' }, switchChat, switchIde),
@@ -694,9 +700,10 @@ function openPlusMenu(anchor) {
   const board = impulse.board.current();
   menu(anchor, [
     { heading: 'Add to your project' },
-    { label: 'Library Manager', sub: 'Find and install Arduino libraries', icon: ICON.library, onSelect: () => impulse.tools.open('libraries') },
+    { label: 'Libraries', sub: 'What this sketch needs, and anything else to add', icon: ICON.library, onSelect: () => openLibraries({ impulse }) },
+    { label: 'Files', sub: 'Open, add, rename or delete the project\'s files', icon: ICON.folder, onSelect: () => bench.open('files') },
     { label: 'Examples', sub: 'Open a ready-made sketch and circuit', icon: ICON.examples, onSelect: () => impulse.tools.open('examples') },
-    { label: 'Open a folder…', sub: 'Work on a sketch you already have', icon: ICON.folder, onSelect: () => openExistingFolder() },
+    { label: 'Open a folder…', sub: 'Work on a sketch you already have', icon: ICON.folderPlus, onSelect: () => openExistingFolder() },
     { separator: true },
     { heading: 'Board' },
     { label: 'Verify (compile)', meta: '⌘R', icon: ICON.verify, disabled: !impulse.project.current(), onSelect: () => boardAction('verify') },
@@ -851,8 +858,10 @@ async function boardAction(kind) {
     return;
   }
   boardBusy = true;
+  renderBoard();
   const res = await (kind === 'upload' ? impulse.board.upload() : impulse.board.verify());
   boardBusy = false;
+  renderBoard();
   renderAccount();
   if (!res) return;
   if (res.needsBoard) {
@@ -873,6 +882,11 @@ function setAnnounce(message, state = 'amber', { pulse = false } = {}) {
 
 function renderBoard() {
   const b = impulse.board.current();
+  const hasProject = !!impulse.project.current();
+  uploadButton.disabled = boardBusy || !hasProject || !b.portPresent;
+  uploadButton.title = !hasProject ? 'Ask Impulse to build something first'
+    : b.portPresent ? `Upload to ${b.name || 'the board'} on ${b.port} (⌘U)` : 'Connect a board and pick its port to upload';
+  verifyButton.disabled = boardBusy || !hasProject;
   const state = b.portPresent ? 'green' : b.fqbn ? 'amber' : null;
   fill(boardChip, 
     led(state),
@@ -1259,6 +1273,8 @@ function wire() {
   modelChip.addEventListener('click', () => openModelMenu(modelChip));
   plusButton.addEventListener('click', () => openPlusMenu(plusButton));
   boardChip.addEventListener('click', () => openBoardMenu(boardChip));
+  uploadButton.addEventListener('click', () => boardAction('upload'));
+  verifyButton.addEventListener('click', () => boardAction('verify'));
   folderChip.addEventListener('click', () => openFolderMenu(folderChip));
   creditsButton.addEventListener('click', () => (account.status.signedIn ? account.creditsPopover(creditsButton) : account.openSignIn()));
   meButton.addEventListener('click', () => account.accountMenu(meButton));

@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs').promises;
 const ErrorHandler = require('../utils/errorHandler');
 const { BuildJobs } = require('./buildJobs');
+const { LibraryService } = require('./libraryService');
 const { parseMemory, summaryLines, parseDiagnostics, classifyFailure, firstErrorLine } = require('./buildOutput');
 const { PlatformIO, projectRoot } = require('./platformio');
 const { extraCoreFor } = require('./toolchain');
@@ -46,6 +47,12 @@ class ArduinoService {
     // GUI-launched apps on macOS don't inherit the shell PATH, so the
     // toolchain service resolves an absolute path; PATH lookup is the fallback.
     this.cliPath = cliPath || 'arduino-cli';
+    /** Set by the main process: the upload closes and reopens this monitor's port. */
+    this.serialMonitor = null;
+    /** Libraries: search, install, and what provides a header the compiler missed. */
+    this.libraries = new LibraryService((args, opts) => this.runCommand(args, opts));
+    /** A build that fails on a missing header installs what provides it and builds again. */
+    this.autoInstallLibraries = true;
     /** One compile or upload at a time, watched live (see buildJobs.js). */
     this.jobs = new BuildJobs();
     /** How long a build may stay silent, and run in all (tests shorten these). */
@@ -595,22 +602,41 @@ class ArduinoService {
       throw coded('Arduino CLI is not available. Impulse installs it on first start; open Tools › Toolchain setup to repair it.', 'TOOLCHAIN');
     }
     await this.ensureCoreIndexed();
-    job.stage('compiling');
-    const { code, output, reason } = await this._runStreaming(job, ['compile', '--fqbn', boardFQBN, '--verbose', sketchPath], {
-      cwd: path.dirname(sketchPath), idleMs: this.timeouts.compileIdleMs, maxMs: this.timeouts.compileMaxMs,
-    });
+    const run = async () => {
+      job.stage('compiling');
+      return this._runStreaming(job, ['compile', '--fqbn', boardFQBN, '--verbose', sketchPath], {
+        cwd: path.dirname(sketchPath), idleMs: this.timeouts.compileIdleMs, maxMs: this.timeouts.compileMaxMs,
+      });
+    };
+    let { code, output, reason } = await run();
+    const installedLibraries = [];
+    // The compiler names the header it could not find; the library index says
+    // which library provides it. Install it and build again, once.
+    if (code !== 0 && !reason && this.autoInstallLibraries && this.libraries) {
+      job.line('A library is missing: looking it up…');
+      const found = await this.libraries.installForMissingHeaders(output, {
+        fqbn: boardFQBN,
+        onOutput: (text) => String(text).split('\n').forEach((l) => l.trim() && job.line(l)),
+      }).catch((error) => ({ installed: [], unresolved: [error.message] }));
+      if (found.installed.length) {
+        for (const lib of found.installed) job.line(`Installed ${lib.name}${lib.version ? ` ${lib.version}` : ''} for ${lib.header}.`);
+        installedLibraries.push(...found.installed);
+        ({ code, output, reason } = await run());
+      }
+    }
     const memory = parseMemory(output);
     const diagnostics = parseDiagnostics(output);
     const warnings = diagnostics.filter((d) => d.level === 'warning').map((d) => `${path.basename(d.file)}:${d.line}: ${d.message}`);
     if (code === 0) {
       const summary = summaryLines(memory);
+      if (installedLibraries.length) summary.unshift(`Installed ${installedLibraries.map((l) => l.name).join(', ')} to build this sketch.`);
       return {
-        success: true, output, warnings, memory, summary, diagnostics,
+        success: true, output, warnings, memory, summary, diagnostics, installedLibraries,
         programSize: memory?.flash?.used ?? null, usagePercent: memory?.flash?.percent ?? null,
         message: summary[0] || 'Compiled.',
       };
     }
-    throw this._failure(output, 'compile', { reason, code, memory, diagnostics });
+    throw this._failure(output, 'compile', { reason, code, memory, diagnostics, installedLibraries });
   }
 
   /** The upload half of a job (the sketch is compiled already). Throws a coded Error on failure. */
@@ -653,7 +679,7 @@ class ArduinoService {
    * A coded Error for a failed job: what went wrong (title), what to do
    * (hint), the first line worth quoting, the diagnostics and the output.
    */
-  _failure(output, kind, { reason = null, code = null, memory = null, diagnostics = null, override = null, errors = null } = {}) {
+  _failure(output, kind, { reason = null, code = null, memory = null, diagnostics = null, override = null, errors = null, installedLibraries = [] } = {}) {
     let f;
     if (reason === 'CANCELLED') f = { code: 'CANCELLED', title: 'Stopped', hint: '' };
     else if (reason === 'IDLE') f = { code: 'TIMEOUT', title: kind === 'upload' ? 'The upload stopped responding' : 'The build stopped responding', hint: `Nothing was printed for ${Math.max(1, Math.round((kind === 'upload' ? this.timeouts.uploadIdleMs : this.timeouts.compileIdleMs) / 60000))} minutes, so Impulse stopped it. Try again; if it happens again, check the cable and the port.` };
@@ -674,6 +700,7 @@ class ArduinoService {
     err.output = String(output || '').trim();
     err.memory = memory;
     err.summary = summaryLines(memory);
+    err.installedLibraries = installedLibraries;
     return err;
   }
 
@@ -999,7 +1026,14 @@ class ArduinoService {
     try {
       return await this.jobs.run({ kind: 'upload', sketchPath, fqbn: boardFQBN, port }, async (job) => {
         const compiled = this.platformioRoot(sketchPath) ? null : await this._compileJob(job, sketchPath, boardFQBN);
-        return this._uploadJob(job, sketchPath, boardFQBN, port, compiled);
+        // The monitor holds the same port: close it here and reopen afterwards,
+        // so every upload path (IDE, chat, agent) behaves like Arduino IDE.
+        const held = this.serialMonitor ? await this.serialMonitor.holdForUpload() : false;
+        try {
+          return await this._uploadJob(job, sketchPath, boardFQBN, port, compiled);
+        } finally {
+          if (held) this.serialMonitor.resumeAfterUpload({ port }).catch(() => {});
+        }
       });
     } catch (error) {
       return this._handled(error, 'Arduino Upload', { sketchPath, boardFQBN, port });

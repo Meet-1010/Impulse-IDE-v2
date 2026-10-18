@@ -18,6 +18,9 @@ const SYSTEM_PROMPT = `You are an expert Arduino/IoT development assistant integ
 - **compile_sketch**: Compile the current sketch. You can omit sketchPath and boardFQBN to use the open file and selected board from the IDE. A failed result may carry knownFixes: what fixed this same error before; apply the matching one first.
 - **upload_sketch**: Upload to the board. You can omit sketchPath, boardFQBN, and port to use the IDE's current sketch, board, and port.
 
+### Libraries
+- **libraries**: search the index (never name a library you have not seen there), list what is installed, ask what the sketch is missing, install one. A build installs a missing library by itself and says so, so write the code and compile rather than installing by hand.
+
 ### Serial Monitor
 - **serial**: one tool, by action: connect (port, baudRate), read (lines), send (data), disconnect, auto_baud, get_baud, set_baud, baud_rates. Garbled output = wrong baud rate (or wrong clock for the board).
 
