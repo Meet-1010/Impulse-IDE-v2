@@ -5,10 +5,10 @@ const SimpleMemory = require('./memory/simpleMemory');
 const ModelPreferences = require('./config/modelPreferences');
 const { getCoreTools, getDebugTools, getPlanTools, getPackTools } = require('./tools/toolSchema');
 const ImpulseProvider = require('./providers/impulseProvider');
-const OllamaProvider = require('./providers/ollamaProvider');
+const ImpulseOpenAIProvider = require('./providers/impulseOpenAIProvider');
+const cloudModels = require('./providers/cloudModels');
 
 /** Providers that run locally and need no API key. */
-const KEYLESS = new Set(['ollama']);
 
 /**
  * AI Agent
@@ -93,32 +93,16 @@ class AIAgent {
   }
 
   /**
-   * The two ways the agent runs: Impulse Cloud (the account's credits) and
-   * Ollama (free models on this computer).
+   * The agent runs through Impulse Cloud (the account's credits), on one of
+   * two lanes: OpenAI models and Claude models. Both take the session token.
    */
   initializeProviders() {
+    this.providers.set('impulse-openai', ImpulseOpenAIProvider);
     this.providers.set('impulse', ImpulseProvider);
-    if (this.localModelsEnabled()) this.providers.set('ollama', OllamaProvider);
   }
 
-  /** Whether models on this computer (Ollama) are offered in this build. */
-  localModelsEnabled() {
-    return this.config.localModels !== false;
-  }
-
-  /** Whether a provider works without an API key (models on this computer). */
-  static isKeyless(providerName) {
-    return KEYLESS.has(providerName);
-  }
-
-  /**
-   * Look for local models (Ollama). Quick, and never throws.
-   * @returns {Promise<{ running: boolean, models: Array<object>, error?: string }>}
-   */
-  async refreshLocalModels() {
-    if (!this.localModelsEnabled()) return { running: false, models: [] };
-    return OllamaProvider.listModels();
-  }
+  /** The providers that run through Impulse Cloud on the account's credits. */
+  static CLOUD_PROVIDERS = ['impulse-openai', 'impulse'];
 
   /**
    * Get available providers
@@ -148,7 +132,7 @@ class AIAgent {
   static getProviderFromModel(modelId) {
     if (!modelId || typeof modelId !== 'string') return null;
     const id = modelId.toLowerCase();
-    if (OllamaProvider.isModelId(id)) return 'ollama';
+    if (ImpulseOpenAIProvider.isModelId(id)) return 'impulse-openai';
     if (ImpulseProvider.isModelId(id)) return 'impulse';
     return null;
   }
@@ -167,7 +151,7 @@ class AIAgent {
       models.forEach((modelId, idx) => {
         list.push({
           id: modelId,
-          displayName: providerName === 'ollama' ? OllamaProvider.displayName(modelId) : ImpulseProvider.displayName(modelId),
+          displayName: cloudModels.displayName(modelId),
           provider: providerName,
           latest: idx === 0
         });

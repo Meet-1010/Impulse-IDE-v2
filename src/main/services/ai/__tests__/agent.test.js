@@ -56,13 +56,24 @@ describe('AIAgent', () => {
       expect(AIAgent.getProviderFromModel('impulse:claude-opus-5-5')).toBe('impulse');
     });
 
-    it('should detect local (Ollama) models', () => {
-      expect(AIAgent.getProviderFromModel('ollama:qwen2.5-coder:7b')).toBe('ollama');
+    it('should detect the OpenAI lane of Impulse Cloud', () => {
+      expect(AIAgent.getProviderFromModel('impulse:gpt-5.4')).toBe('impulse-openai');
+      expect(AIAgent.getProviderFromModel('impulse:gpt-5.4-nano')).toBe('impulse-openai');
     });
 
-    it('should not take bare provider model ids (no API keys of your own)', () => {
+    it('should not take bare provider model ids (no API keys of your own), nor local models', () => {
       expect(AIAgent.getProviderFromModel('claude-opus-5-5')).toBeNull();
-      expect(AIAgent.getProviderFromModel('gpt-4o')).toBeNull();
+      expect(AIAgent.getProviderFromModel('gpt-5.4')).toBeNull();
+      expect(AIAgent.getProviderFromModel('ollama:qwen2.5-coder:7b')).toBeNull();
+    });
+
+    it('registers both cloud lanes and nothing that runs on this computer', () => {
+      const agent = createAgent();
+      agent.initializeProviders();
+      expect(agent.getAvailableProviders()).toEqual(['impulse-openai', 'impulse']);
+      const list = agent.getUnifiedModelList();
+      expect(list[0]).toMatchObject({ id: 'impulse:gpt-5.4', displayName: 'GPT-5.4', provider: 'impulse-openai', latest: true });
+      expect(list.some((m) => m.provider === 'ollama')).toBe(false);
     });
 
     it('should return null for unknown models', () => {

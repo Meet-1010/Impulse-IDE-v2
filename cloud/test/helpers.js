@@ -1,5 +1,5 @@
 // Test harness: a scratch Postgres (TEST_DATABASE_URL), the app called in
-// process through app.fetch, and a fake Anthropic API on a local port.
+// process through app.fetch, and fake Anthropic and OpenAI APIs on local ports.
 
 import http from 'node:http';
 import { createPool } from '../src/db.js';
@@ -69,6 +69,64 @@ export async function startFakeAnthropic() {
   return fake;
 }
 
+/** A fake /v1/responses. `reply` decides each response from the request body. */
+export async function startFakeOpenAI() {
+  const calls = [];
+  const fake = {
+    calls,
+    usage: { input_tokens: 10000, input_tokens_details: { cached_tokens: 8000 }, output_tokens: 300, output_tokens_details: { reasoning_tokens: 100 }, total_tokens: 10300 },
+    // Override per test: return { status, json } or { events: [...] } or undefined for the default.
+    reply: null,
+    url: '',
+    close: () => {},
+  };
+  const server = http.createServer(async (req, res) => {
+    let raw = '';
+    for await (const chunk of req) raw += chunk;
+    const body = JSON.parse(raw || '{}');
+    calls.push({ url: req.url, headers: req.headers, body });
+    if (req.headers.authorization !== 'Bearer test-openai-key') {
+      res.writeHead(401, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ error: { message: 'Incorrect API key provided', type: 'invalid_request_error', code: 'invalid_api_key' } }));
+      return;
+    }
+    const custom = fake.reply?.(body);
+    if (custom?.status) {
+      res.writeHead(custom.status, { 'content-type': 'application/json' });
+      res.end(JSON.stringify(custom.json));
+      return;
+    }
+    const usage = custom?.usage || fake.usage;
+    const served = `${body.model}-2026-03-05`;
+    const message = { type: 'message', id: 'msg_test', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: 'Hello from the fake API.', annotations: [] }] };
+    const response = { id: 'resp_test', object: 'response', model: served, status: 'completed', output: [message], usage };
+    if (!body.stream) {
+      res.writeHead(200, { 'content-type': 'application/json', 'x-request-id': 'req_openai_test' });
+      res.end(JSON.stringify(response));
+      return;
+    }
+    res.writeHead(200, { 'content-type': 'text/event-stream', 'x-request-id': 'req_openai_test' });
+    const events = custom?.events || [
+      { type: 'response.created', response: { ...response, status: 'in_progress', output: [], usage: null } },
+      { type: 'response.output_item.added', output_index: 0, item: { ...message, status: 'in_progress', content: [] } },
+      { type: 'response.output_text.delta', output_index: 0, content_index: 0, delta: 'Hello ' },
+      { type: 'response.output_text.delta', output_index: 0, content_index: 0, delta: 'from the fake API.' },
+      { type: 'response.output_item.done', output_index: 0, item: message },
+      { type: 'response.completed', response },
+    ];
+    for (const event of events) {
+      if (event === 'hang') return; // leave the stream open (abort tests)
+      res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
+      await new Promise((r) => setTimeout(r, 2));
+    }
+    res.end();
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  fake.url = `http://127.0.0.1:${server.address().port}`;
+  fake.close = () => new Promise((r) => { server.closeAllConnections?.(); server.close(r); });
+  return fake;
+}
+
 export function testConfig(overrides = {}) {
   return {
     baseURL: BASE,
@@ -76,6 +134,7 @@ export function testConfig(overrides = {}) {
     secret: 'test-secret-that-is-long-enough-for-better-auth-0123456789',
     databaseURL: DATABASE_URL,
     anthropic: { apiKey: 'test-anthropic-key', baseURL: 'http://127.0.0.1:9' },
+    openai: { apiKey: 'test-openai-key', baseURL: 'http://127.0.0.1:9' },
     google: null,
     github: null,
     email: { resendKey: '', from: 'Impulse <test@impulse.test>', enabled: true },
@@ -87,11 +146,14 @@ export function testConfig(overrides = {}) {
 }
 
 /** A fresh database and app for one test file. */
-export async function setup({ fake } = {}) {
+export async function setup({ fake, fakeOpenAI } = {}) {
   const pool = createPool(DATABASE_URL, { max: 4 });
   await pool.query('drop schema if exists public cascade');
   await pool.query('create schema public');
-  const config = testConfig(fake ? { anthropic: { apiKey: 'test-anthropic-key', baseURL: fake.url } } : {});
+  const config = testConfig({
+    ...(fake ? { anthropic: { apiKey: 'test-anthropic-key', baseURL: fake.url } } : {}),
+    ...(fakeOpenAI ? { openai: { apiKey: 'test-openai-key', baseURL: fakeOpenAI.url } } : {}),
+  });
   await migrate({ config, pool });
   const logs = [];
   const background = [];

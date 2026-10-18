@@ -3676,12 +3676,6 @@ async function restoreAIPreferences() {
         state.aiModelId = prefs.modelId;
         const modelSelect = document.getElementById('aiModelSelect');
         if (modelSelect) modelSelect.value = prefs.modelId;
-        // A local model needs Ollama running; don't claim it's ready when it isn't.
-        if (providerOfModel(prefs.modelId) === 'ollama' && !state.aiUnifiedModels.some(m => m.id === prefs.modelId)) {
-            state.aiProviderConfigured = false;
-            refreshAIStatus();
-            return;
-        }
         const result = await window.electronAPI.ai.setModel(prefs.modelId).catch(() => null);
         state.aiProviderConfigured = !!result?.success;
         refreshAIStatus();
@@ -3690,78 +3684,18 @@ async function restoreAIPreferences() {
     }
 }
 
-/** The cloud model chat mode starts with. */
-const DEFAULT_CLOUD_MODEL = 'impulse:claude-opus-5-5';
+/** The cloud model to start with: the server's default once the catalog loaded, else GPT-5.4. */
+let cloudDefaultModel = 'impulse:gpt-5.4';
+const defaultCloudModel = () => cloudDefaultModel;
 
-// Map a model id to its provider (mirrors AIAgent.getProviderFromModel).
+// Map a model id to its lane (mirrors AIAgent.getProviderFromModel): every
+// model runs through Impulse Cloud; the model's vendor decides the lane.
 function providerOfModel(modelId) {
-    if (!modelId || typeof modelId !== 'string') return null;
-    if (modelId.startsWith('ollama:')) return 'ollama';
-    if (modelId.startsWith('impulse:')) return 'impulse';
+    if (!modelId || typeof modelId !== 'string' || !modelId.startsWith('impulse:')) return null;
+    const bare = modelId.slice('impulse:'.length);
+    if (/^(gpt-|o\d|chatgpt-)/.test(bare)) return 'impulse-openai';
+    if (/^claude-/.test(bare)) return 'impulse';
     return null;
-}
-
-const PROVIDER_LABELS = { impulse: 'Impulse Cloud · uses credits', ollama: 'On this computer · free' };
-// Menu entries that are actions, not models (Ollama isn't running or has no models).
-const OLLAMA_START = '__ollama_start__';
-const OLLAMA_PULL = '__ollama_pull__';
-
-/**
- * Start Ollama from a model menu, then use its first model.
- * @returns {Promise<{ ok: boolean, notInstalled?: boolean, error?: string }>}
- */
-async function startLocalModels() {
-    updateAIStatus('Starting Ollama…');
-    const res = await window.electronAPI.ai.startLocal().catch((e) => ({ success: false, error: e?.message }));
-    if (res?.notInstalled) {
-        window.electronAPI.openExternal?.('https://ollama.com/download');
-        await loadAIUnifiedModels();
-        return { ok: false, notInstalled: true, error: 'Ollama runs AI models on your own computer, free and offline. Install it from ollama.com/download (now open in your browser), then choose "Start Ollama…" again.' };
-    }
-    if (!res?.success) {
-        await loadAIUnifiedModels();
-        updateAIStatus(res?.error || 'Could not start Ollama');
-        return { ok: false, error: res?.error || 'Could not start Ollama.' };
-    }
-    await loadAIUnifiedModels();
-    if (!res.count) return pullLocalModel();
-    const first = state.aiUnifiedModels.find(m => m.provider === 'ollama');
-    if (first && await selectModelProgrammatically(first.id)) return { ok: true };
-    return { ok: false, error: 'Ollama is running, but none of its models could be used.' };
-}
-
-/**
- * Download a free model through Ollama (the first recommended one by default).
- * Progress goes to the IDE's status line and to chat mode ('impulse:local-progress').
- * @returns {Promise<{ ok: boolean, canceled?: boolean, error?: string }>}
- */
-async function pullLocalModel(name) {
-    const downloads = state.aiLocal?.downloads || [];
-    const rec = downloads.find(m => m.name === name) || downloads[0];
-    if (!rec) return { ok: false, error: 'No model to download. Start Ollama first.' };
-    const ok = await confirmDialog(`Download ${rec.displayName}?`,
-        `A free AI model that runs on this computer: a one-time download of ${rec.size} through Ollama. Answers take longer than a cloud model's, and nothing leaves your computer.`,
-        { confirmLabel: 'Download' });
-    if (!ok) return { ok: false, canceled: true };
-    const progress = (detail) => window.dispatchEvent(new CustomEvent('impulse:local-progress', { detail: { name: rec.displayName, ...detail } }));
-    progress({ percent: 0, status: 'starting' });
-    const stop = window.electronAPI.ai.onLocalProgress?.((p) => {
-        updateAIStatus(p.percent === null ? `${rec.displayName}: ${p.status}` : `Downloading ${rec.displayName}… ${p.percent}%`);
-        progress({ percent: p.percent, status: p.status });
-    });
-    const res = await window.electronAPI.ai.pullLocal(rec.name).catch((e) => ({ success: false, error: e?.message }));
-    stop?.();
-    progress({ done: true, ok: !!res?.success });
-    await loadAIUnifiedModels();
-    if (!res?.success) {
-        updateAIStatus(res?.error || 'The download failed');
-        return { ok: false, error: res?.error || 'The download failed.' };
-    }
-    if (await selectModelProgrammatically(res.id)) {
-        window.notifications?.info?.(`${rec.displayName} is ready. It runs on your computer, free.`);
-        return { ok: true };
-    }
-    return { ok: false, error: `${rec.displayName} downloaded, but it could not be selected.` };
 }
 
 const modelName = (id) => (state.aiUnifiedModels.find(m => m.id === id) || {}).displayName || id;
@@ -3769,31 +3703,22 @@ const modelName = (id) => (state.aiUnifiedModels.find(m => m.id === id) || {}).d
 /** The line under the IDE composer: which model answers, or what to do first. */
 function refreshAIStatus() {
     if (state.aiProviderConfigured && state.aiModelId) updateAIStatus(`Ready · ${modelName(state.aiModelId)}`);
-    else if (providerOfModel(state.aiModelId) === 'ollama') updateAIStatus('Ollama isn\'t running: choose "Start Ollama…" in the model menu');
-    else updateAIStatus('Sign in to Impulse (the person icon), or pick a free model on this computer');
+    else updateAIStatus('Sign in to Impulse (the person icon) to use the AI');
 }
 
 /**
  * Before sending: make sure a model can answer. Signed in: the chosen cloud
- * model (or the default one). Signed out: a chosen local model.
+ * model, or the server's default one.
  * @returns {Promise<{ ok: boolean, provider?: string, needsSignIn?: boolean, error?: string }>}
  */
 async function readyAIModel() {
     const provider = providerOfModel(state.aiModelId);
     if (state.aiProviderConfigured && provider) return { ok: true, provider };
-    if (provider === 'ollama') {
-        if (await selectModelProgrammatically(state.aiModelId)) return { ok: true, provider };
-        return { ok: false, error: 'Ollama isn\'t running. Start it from the model menu, or sign in to use Impulse Cloud.' };
-    }
     const status = await window.electronAPI.cloud.status().catch(() => null);
-    if (!status?.configured) {
-        const local = state.aiUnifiedModels.find(m => m.provider === 'ollama');
-        if (local && await selectModelProgrammatically(local.id)) return { ok: true, provider: 'ollama' };
-        if (state.aiLocal?.enabled === false) return { ok: false, error: 'This build of Impulse has no cloud address, so its AI is off.' };
-        return { ok: false, error: 'Pick a free model on this computer in the model menu.' };
-    }
+    if (!status?.configured) return { ok: false, error: 'This build of Impulse has no cloud address, so its AI is off.' };
     if (!status.signedIn) return { ok: false, needsSignIn: true };
-    if (await selectModelProgrammatically(provider === 'impulse' ? state.aiModelId : DEFAULT_CLOUD_MODEL)) return { ok: true, provider: 'impulse' };
+    const id = provider ? state.aiModelId : defaultCloudModel();
+    if (await selectModelProgrammatically(id)) return { ok: true, provider: providerOfModel(id) };
     return { ok: false, error: 'Impulse AI isn\'t available right now.' };
 }
 
@@ -3809,7 +3734,6 @@ async function ensureAIModel({ quiet = false, pendingPrompt = null } = {}) {
 async function loadAIUnifiedModels() {
     try {
         const result = await window.electronAPI.ai.getUnifiedModels();
-        if (result.success) state.aiLocal = result.local || { running: false, count: 0 };
         if (!result.success || !result.data) {
             updateAIStatus('Could not load models');
             return;
@@ -3818,31 +3742,15 @@ async function loadAIUnifiedModels() {
         const select = document.getElementById('aiModelSelect');
         if (select) {
             select.innerHTML = '<option value="">Model…</option>';
-            // A credits-only build (a cloud address, no local models) lists Impulse Cloud alone.
-            for (const provider of state.aiLocal?.enabled === false ? ['impulse'] : ['impulse', 'ollama']) {
-                const group = document.createElement('optgroup');
-                group.label = PROVIDER_LABELS[provider];
-                for (const m of result.data.filter(x => x.provider === provider)) {
-                    const opt = document.createElement('option');
-                    opt.value = m.id;
-                    opt.textContent = m.displayName || m.id;
-                    group.appendChild(opt);
-                }
-                if (provider === 'ollama' && state.aiLocal?.running) {
-                    for (const rec of state.aiLocal.downloads || []) {
-                        const opt = document.createElement('option');
-                        opt.value = OLLAMA_PULL + rec.name;
-                        opt.textContent = `Download ${rec.displayName} · ${rec.note} · ${rec.size}…`;
-                        group.appendChild(opt);
-                    }
-                } else if (provider === 'ollama') {
-                    const opt = document.createElement('option');
-                    opt.value = OLLAMA_START;
-                    opt.textContent = 'Start Ollama…';
-                    group.appendChild(opt);
-                }
-                select.appendChild(group);
+            const group = document.createElement('optgroup');
+            group.label = 'Impulse Cloud · uses credits';
+            for (const m of result.data) {
+                const opt = document.createElement('option');
+                opt.value = m.id;
+                opt.textContent = m.displayName || m.id;
+                group.appendChild(opt);
             }
+            select.appendChild(group);
             if (state.aiModelId) select.value = state.aiModelId;
         }
         refreshAIStatus();
@@ -3875,10 +3783,10 @@ async function selectModelProgrammatically(modelId) {
 /** Signing in picks the cloud model; signing out leaves the cloud model unusable. */
 function followAccount(status) {
     const provider = providerOfModel(state.aiModelId);
-    if (status?.signedIn && provider !== 'ollama') {
-        if (provider === 'impulse' && state.aiProviderConfigured) return;
-        selectModelProgrammatically(provider === 'impulse' ? state.aiModelId : DEFAULT_CLOUD_MODEL);
-    } else if (!status?.signedIn && provider === 'impulse' && state.aiProviderConfigured) {
+    if (status?.signedIn) {
+        if (provider && state.aiProviderConfigured) return;
+        selectModelProgrammatically(provider ? state.aiModelId : defaultCloudModel());
+    } else if (!status?.signedIn && provider && state.aiProviderConfigured) {
         state.aiProviderConfigured = false;
         refreshAIStatus();
         window.dispatchEvent(new CustomEvent('impulse:models-changed'));
@@ -3887,13 +3795,6 @@ function followAccount(status) {
 
 async function onAIModelChange(e) {
     const modelId = e.target.value;
-    if (modelId === OLLAMA_START || modelId.startsWith(OLLAMA_PULL)) {
-        e.target.value = state.aiModelId || '';
-        const res = modelId === OLLAMA_START ? await startLocalModels() : await pullLocalModel(modelId.slice(OLLAMA_PULL.length));
-        if (res.notInstalled) addAIMessage('assistant', res.error);
-        else if (!res.ok && !res.canceled) updateAIStatus(res.error);
-        return;
-    }
     if (!modelId) {
         e.target.value = state.aiModelId || '';
         return;
@@ -5634,7 +5535,6 @@ Object.assign(window.impulse, {
             modelId: state.aiModelId,
             mode: state.aiMode,
             ready: state.aiProviderConfigured,
-            local: state.aiLocal || { running: false, count: 0 },
         }),
         busy: () => !!chatOrb?.busy(),
         ensureModel: readyAIModel,
@@ -5657,8 +5557,10 @@ Object.assign(window.impulse, {
             saveAIPreferences();
         },
         refreshModels: loadAIUnifiedModels,
-        startLocal: startLocalModels,
-        pullLocal: pullLocalModel,
+        /** The server's default model (chat mode learns it from the catalog). */
+        setCloudDefault(id) {
+            if (typeof id === 'string' && providerOfModel(id)) cloudDefaultModel = id;
+        },
         context: buildAIContext,
         snapshot: takeCodeSnapshot,
         revert: revertToSnapshot,

@@ -1,39 +1,34 @@
 const { Anthropic } = require('@anthropic-ai/sdk');
 const ClaudeProvider = require('./claudeProvider');
 const { cloudURL } = require('../../cloud/config');
+const models = require('./cloudModels');
+const { friendlyCloudError } = require('./cloudErrors');
 
 /**
  * Claude through Impulse Cloud: the same requests as ClaudeProvider, sent to
  * the Impulse AI gateway with the account's session token. The gateway adds
  * Impulse's API key and charges the account's credits. Model ids carry an
- * "impulse:" prefix so they never mix with local (ollama:) models.
+ * "impulse:" prefix; the OpenAI models share it and take the other lane
+ * (impulseOpenAIProvider.js).
  */
 
-const PREFIX = 'impulse:';
-
-/** Shown until the server's catalog arrives (GET /v1/models). */
-const CATALOG = [
-  { id: 'claude-opus-5-5', name: 'Opus 5.5', tagline: 'Best for building', cost: 1 },
-  { id: 'claude-sonnet-5-5', name: 'Sonnet 5.5', tagline: 'Fast and capable', cost: 0.5 },
-  { id: 'claude-haiku-5-5', name: 'Haiku 5.5', tagline: 'Quickest, lowest cost', cost: 0.03 },
-  { id: 'claude-fable-5-1', name: 'Fable 5.1', tagline: 'Most capable', cost: 2.4 },
-];
+const PREFIX = models.PREFIX;
 
 class ImpulseProvider extends ClaudeProvider {
   static PREFIX = PREFIX;
   static DEFAULT_MODEL = `${PREFIX}claude-opus-5-5`;
 
   static isModelId(id) {
-    return typeof id === 'string' && id.startsWith(PREFIX);
+    return models.isCloudId(id) && models.vendorOf(id) === 'anthropic';
   }
 
+  /** Shown until the server's catalog arrives (GET /v1/models). */
   static catalog() {
-    return CATALOG;
+    return models.CATALOG.filter((m) => m.vendor === 'anthropic');
   }
 
   static displayName(id) {
-    const plain = String(id).replace(PREFIX, '');
-    return CATALOG.find((m) => m.id === plain)?.name || plain;
+    return models.displayName(id);
   }
 
   /**
@@ -56,7 +51,7 @@ class ImpulseProvider extends ClaudeProvider {
   }
 
   getAvailableModels() {
-    return CATALOG.map((m) => `${PREFIX}${m.id}`);
+    return models.modelsOf('anthropic');
   }
 
   async chat(messages, options = {}) {
@@ -69,19 +64,10 @@ class ImpulseProvider extends ClaudeProvider {
 
   /** ClaudeProvider already turned SDK errors into text; recover the status from the cause. */
   static toFriendly(error) {
-    const cause = error?.cause;
-    const status = cause?.status;
-    const serverMessage = cause?.error?.error?.message;
-    const make = (message, code) => Object.assign(new Error(message), { code });
-    if (cause instanceof Anthropic.APIConnectionError) return make('Can\'t reach Impulse. Check your internet connection.', 'offline');
-    if (status === 401) return make('Your Impulse session ended. Sign in again to keep building.', 'signed_out');
-    if (status === 402) return make(serverMessage || 'You\'re out of credits. Upgrade for more, or wait for your monthly refill.', 'insufficient_credits');
-    if (status === 403) return make(serverMessage || 'Your account can\'t use this right now.', 'forbidden');
-    if (status === 413) return make(serverMessage || 'This conversation is too long. Start a new chat.', 'too_long');
-    if (status === 429) return make(serverMessage || 'Too many requests at once. Wait a moment and try again.', 'rate_limited');
-    if (status === 503 || status === 529) return make(serverMessage || 'Impulse AI is busy right now. Try again soon.', 'unavailable');
-    if (status) return make(serverMessage || error.message, 'server');
-    return error;
+    if (error?.cause instanceof Anthropic.APIConnectionError) {
+      return friendlyCloudError(Object.assign(new Error(error.message), { cause: { offline: true } }));
+    }
+    return friendlyCloudError(error);
   }
 
   validateApiKey(token) {

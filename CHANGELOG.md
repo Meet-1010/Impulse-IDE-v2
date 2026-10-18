@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Paid models only.** The free models that ran on this computer through Ollama are gone, from the model menus, the sign-in dialog and the account footer. Every build is credits-only: a build without a cloud address has no AI (the simulator and the IDE still work).
+- **GPT-5 models through Impulse Cloud.** The gateway gained an OpenAI lane next to the Anthropic one: GPT-5.4 (the default), GPT-5.5, GPT-5.4 mini and GPT-5.4 nano, priced from OpenAI's list and charged in credits like the Claude models, with prompt caching, one answer per request and storage at the vendor turned off. A vendor without a key on the server is simply not offered, so the menu only shows models that work. The desktop app talks to that lane with its own small client for OpenAI's Responses API (streamed, tool calls assembled, the model's reasoning carried across the tool steps of a turn, retries that honour the server).
+
 ### Added
 
 - **The serial monitor keeps up and comes back by itself.** Lines are assembled in the main process, kept in one history of the last 5,000 and sent to the window in batches, so a sketch printing at 115200 no longer outruns the pane, a line that never ends in a newline still shows, and switching between chat mode and the IDE loses nothing (the pane fills in what it missed). An upload now hands the port over: the monitor closes, the upload runs, and the monitor reopens when the board comes back, from anywhere you upload. The AI reads the same history, so it can see what your board printed even when you opened the monitor yourself.

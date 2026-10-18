@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { setup } from './helpers.js';
 import { DEFAULTS as HOURLY_DEFAULTS } from '../src/settings.js';
 import { MC, addMonths, charge, getAccount, setPlan, periodEnd, describe as describeAccount } from '../src/credits.js';
-import { costMicros, relativeCost, toMillicredits } from '../src/pricing.js';
+import { costMicros, servableModels, tokensOf, vendorOf, relativeCost, toMillicredits } from '../src/pricing.js';
 
 describe('pricing', () => {
   test('cache reads, 5-minute and 1-hour writes are priced from the input rate', () => {
@@ -149,5 +149,51 @@ describe('hourly refills (the Free plan)', () => {
     const acct = await setPlan(t.pool, userId, 'pro', HOURLY_DEFAULTS, { now });
     assert.equal(new Date(acct.period_end).toISOString(), '2026-07-02T00:00:00.000Z');
     assert.equal(describeAccount(acct, HOURLY_DEFAULTS).periodHours, null);
+  });
+});
+
+describe('pricing: OpenAI models', () => {
+  test('OpenAI usage is read with the cached part taken out of the input, in both API shapes', () => {
+    // The Responses API: cached tokens inside input_tokens, reasoning inside output_tokens.
+    assert.deepEqual(tokensOf({ input_tokens: 100, input_tokens_details: { cached_tokens: 40 }, output_tokens: 20, output_tokens_details: { reasoning_tokens: 5 } }),
+      { input: 60, output: 20, cacheRead: 40, cacheWrite5m: 0, cacheWrite1h: 0 });
+    // Chat Completions, should it ever be used.
+    assert.deepEqual(tokensOf({ prompt_tokens: 100, completion_tokens: 20, prompt_tokens_details: { cached_tokens: 40 } }),
+      { input: 60, output: 20, cacheRead: 40, cacheWrite5m: 0, cacheWrite1h: 0 });
+    // Anthropic's shape is untouched.
+    assert.equal(tokensOf({ input_tokens: 100, output_tokens: 20, cache_read_input_tokens: 40 }).cacheRead, 40);
+    assert.equal(tokensOf({ input_tokens: 100, output_tokens: 20, cache_read_input_tokens: 40 }).input, 100);
+  });
+
+  test('GPT-5.4 at list price, with the served snapshot billed at the requested model\'s rates', () => {
+    // 2,000 fresh x $2.50 + 8,000 cached x $0.25 + 300 out x $15 = $0.0115.
+    const usage = { input_tokens: 10000, input_tokens_details: { cached_tokens: 8000 }, output_tokens: 300, output_tokens_details: { reasoning_tokens: 100 } };
+    assert.equal(costMicros('gpt-5.4', 'gpt-5.4-2026-03-05', usage), 11500);
+    assert.equal(costMicros('gpt-5.4-nano', null, { input_tokens: 1_000_000, input_tokens_details: { cached_tokens: 0 }, output_tokens: 0 }), 200_000);
+  });
+
+  test('a prompt over 272K tokens is billed on the long-context card', () => {
+    const at = (input, output = 0) => ({ input_tokens: input, input_tokens_details: { cached_tokens: 0 }, output_tokens: output });
+    assert.equal(costMicros('gpt-5.5', null, at(272_000)), 272_000 * 5);
+    assert.equal(costMicros('gpt-5.5', null, at(300_000, 1000)), 300_000 * 10 + 1000 * 45);
+    assert.equal(costMicros('gpt-5.4-mini', null, at(300_000)), 300_000 * 0.75, 'mini has one card');
+  });
+
+  test('every model names its vendor, and only vendors with a key are served', () => {
+    assert.equal(vendorOf('gpt-5.4'), 'openai');
+    assert.equal(vendorOf('claude-opus-5-5'), 'anthropic');
+    assert.equal(vendorOf('gpt-5.4-2026-03-05'), 'openai');
+    assert.equal(vendorOf('nothing'), null);
+    const settings = { enabledModels: ['gpt-5.4', 'gpt-5.4-nano', 'claude-opus-5-5'] };
+    assert.deepEqual(servableModels(settings, { openai: { apiKey: 'k' }, anthropic: { apiKey: '' } }), ['gpt-5.4', 'gpt-5.4-nano']);
+    assert.deepEqual(servableModels(settings, { openai: { apiKey: '' }, anthropic: { apiKey: 'k' } }), ['claude-opus-5-5']);
+    assert.deepEqual(servableModels({ enabledModels: ['gpt-5.4'] }, {}), []);
+  });
+
+  test('the menu\'s relative cost works across vendors', () => {
+    assert.equal(relativeCost('gpt-5.4', 'gpt-5.4'), 1);
+    assert.ok(relativeCost('gpt-5.4-nano', 'gpt-5.4') < 0.1);
+    assert.ok(relativeCost('gpt-5.5', 'gpt-5.4') > 1.5);
+    assert.ok(relativeCost('claude-opus-5-5', 'gpt-5.4') > 1);
   });
 });

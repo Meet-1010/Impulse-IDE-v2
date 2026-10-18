@@ -10,7 +10,7 @@ export const DEFAULTS = Object.freeze({
   // 1 credit = 1 cent of upstream list price, before markup.
   creditsPerUsd: 100,
   markup: 1,
-  defaultModel: 'claude-opus-5-5',
+  defaultModel: 'gpt-5.4',
   enabledModels: ALL_MODELS,
   maxOutputTokens: 32_000,
   rateLimitPerMinute: 40,
@@ -24,7 +24,10 @@ export const DEFAULTS = Object.freeze({
   // calendar month. The free plan refills a small allowance every few hours,
   // so a student who runs out waits rather than paying; paid plans are monthly.
   plans: {
-    free: { name: 'Free', monthlyCredits: 25, periodHours: 5, priceUsd: 0, models: ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'] },
+    free: {
+      name: 'Free', monthlyCredits: 25, periodHours: 5, priceUsd: 0,
+      models: ['gpt-5.4', 'gpt-5.5', 'gpt-5.4-mini', 'gpt-5.4-nano', 'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'],
+    },
     pro: { name: 'Pro', monthlyCredits: 1500, periodHours: null, priceUsd: 20, models: ALL_MODELS },
     max: { name: 'Max', monthlyCredits: 6000, periodHours: null, priceUsd: 60, models: ALL_MODELS },
   },

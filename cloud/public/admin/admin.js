@@ -389,7 +389,8 @@ async function settings(main) {
       s.enabledModels = box.checked ? [...s.enabledModels, m.id] : s.enabledModels.filter((x) => x !== m.id);
       dirty();
     });
-    return h('label', {}, box, `${m.name}`, h('span', { class: 'muted', text: ` · $${m.input} in / $${m.output} out per million tokens` }));
+    const noKey = data.server && m.vendor && data.server[m.vendor] === false;
+    return h('label', {}, box, `${m.name}`, h('span', { class: 'muted', text: ` · $${m.input} in / $${m.output} out per million tokens${noKey ? ` · no ${m.vendor === 'openai' ? 'OpenAI' : 'Anthropic'} key on this server, so it is not offered` : ''}` }));
   }));
   const defaultModel = h('select', { class: 'input' }, models.map((m) => h('option', { value: m.id, selected: s.defaultModel === m.id }, m.name)));
   defaultModel.addEventListener('change', () => { s.defaultModel = defaultModel.value; dirty(); });

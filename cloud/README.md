@@ -31,8 +31,9 @@ npm run dev                   # migrates, then serves http://localhost:8787
 ```
 
 Without `RESEND_API_KEY`, email codes are printed to the server log, which is
-fine for development. Without an Anthropic key you can still exercise the
-whole flow with the stand-in API:
+fine for development. With `OPENAI_API_KEY` set, the GPT models work locally
+(and cost real money, so keep `dailyBudgetUsd` low). Without any vendor key
+you can still exercise the whole flow with the stand-in Anthropic API:
 
 ```bash
 node scripts/fake-anthropic.js          # http://127.0.0.1:8799
@@ -112,9 +113,10 @@ runs the same suite against a Postgres service (job "Impulse Cloud").
    - `DATABASE_URL`, `BETTER_AUTH_SECRET` (`openssl rand -base64 32`)
    - `IMPULSE_CLOUD_URL` — the public URL of this deployment (OAuth redirects
      and sign-in links use it)
-   - `ANTHROPIC_API_KEY` — Impulse's own key; every user's requests are paid
-     from it (set a spending limit in the Anthropic console too; the gateway's
-     daily budget is a second guard)
+   - `OPENAI_API_KEY` and/or `ANTHROPIC_API_KEY` — Impulse's own keys; every
+     user's requests on that vendor's models are paid from them. A vendor
+     without a key is not offered. Set a spending limit in each vendor's
+     console too; the gateway's daily budget is a second guard.
    - `ADMIN_EMAILS` — comma-separated addresses that become admins
    - `RESEND_API_KEY` and `EMAIL_FROM` — codes by email (verify the sending
      domain in Resend first)

@@ -24,6 +24,11 @@ export function loadConfig(env = process.env) {
       production,
       secret: env.BETTER_AUTH_SECRET,
       databaseURL: env.DATABASE_URL,
+      // One key per vendor; a vendor without a key is simply not offered.
+      openai: {
+        apiKey: env.OPENAI_API_KEY || '',
+        baseURL: (env.OPENAI_BASE_URL || 'https://api.openai.com').replace(/\/+$/, ''),
+      },
       anthropic: {
         apiKey: env.ANTHROPIC_API_KEY || '',
         baseURL: (env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com').replace(/\/+$/, ''),

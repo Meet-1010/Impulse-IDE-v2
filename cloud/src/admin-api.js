@@ -267,8 +267,9 @@ export function createAdminApi({ pool, auth, settings, budget, config }) {
       const s = await settings.get();
       return json({
         settings: s,
-        models: Object.entries(MODELS).map(([id, m]) => ({ id, name: m.name, tagline: m.tagline, input: m.input, output: m.output, cacheRead: m.cacheRead })),
+        models: Object.entries(MODELS).map(([id, m]) => ({ id, vendor: m.vendor, name: m.name, tagline: m.tagline, input: m.input, output: m.output, cacheRead: m.cacheRead })),
         server: {
+          openai: !!config.openai?.apiKey,
           anthropic: !!config.anthropic.apiKey,
           google: !!config.google,
           github: !!config.github,

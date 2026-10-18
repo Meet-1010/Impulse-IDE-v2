@@ -16,18 +16,4 @@ function cloudURL(env = process.env) {
   return value.replace(/\/+$/, '');
 }
 
-/**
- * Whether this build offers models that run on this computer (Ollama).
- * IMPULSE_LOCAL_MODELS=1/0 decides for development and tests; otherwise
- * package.json "impulse.localModels" when set; otherwise local models exist
- * only in a build without a cloud address. A release with a cloud address is
- * credits-only.
- */
-function localModelsEnabled(env = process.env) {
-  const flag = env.IMPULSE_LOCAL_MODELS;
-  if (flag !== undefined && flag !== '') return !['0', 'false', 'no', 'off'].includes(String(flag).toLowerCase());
-  if (typeof pkg.impulse?.localModels === 'boolean') return pkg.impulse.localModels;
-  return cloudURL(env) === null;
-}
-
-module.exports = { cloudURL, localModelsEnabled };
+module.exports = { cloudURL };

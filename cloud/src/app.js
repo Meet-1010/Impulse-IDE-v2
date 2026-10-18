@@ -49,7 +49,9 @@ export function createApp({ config, pool, background, log = (m) => console.log(m
   app.get('/health', (c) => c.json({ ok: true }));
   app.on(['GET', 'POST'], '/api/auth/*', (c) => auth.handler(c.req.raw));
 
-  app.post('/ai/v1/messages', (c) => gateway(c.req.raw));
+  // Two lanes, one gate: the model's vendor decides which the app uses.
+  app.post('/ai/v1/messages', (c) => gateway.messages(c.req.raw));
+  app.post('/ai/openai/v1/responses', (c) => gateway.responses(c.req.raw));
 
   app.get('/v1/config', () => account.config());
   app.get('/v1/me', (c) => account.me(c.req.raw));

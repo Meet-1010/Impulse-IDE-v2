@@ -121,7 +121,6 @@ const account = createAccount({
     pending = null;
     if (queued) send(queued.text, { mode: queued.mode });
   },
-  onUseLocal: () => openModelMenu(modelChip),
 });
 let bench = null;
 let charField = null;
@@ -459,8 +458,8 @@ function shake() {
 
 function modelLabel(id) {
   if (!id) return null;
-  const local = impulse.ai.info().models.find((m) => m.id === id);
-  return local?.displayName || id.replace(/^impulse:/, '');
+  const known = impulse.ai.info().models.find((m) => m.id === id);
+  return known?.displayName || id.replace(/^impulse:/, '');
 }
 
 async function send(textArg, { mode: modeArg, autoFix = 0 } = {}) {
@@ -488,13 +487,11 @@ async function send(textArg, { mode: modeArg, autoFix = 0 } = {}) {
     openModelMenu(modelChip);
     return;
   }
-  const cloud = ready.provider === 'impulse';
   const credits = account.status.credits;
-  if (cloud && credits && credits.remaining <= 0) {
-    const localToo = impulse.ai.info().local?.enabled !== false;
+  if (credits && credits.remaining <= 0) {
     append(noticeCard({
       id: 'out', state: 'red', title: 'You\'re out of credits',
-      text: `Your ${credits.planName} credits refill ${refillWhen(credits.periodEnd, credits.periodHours)}. Upgrade to keep building now${localToo ? ', or switch to a free model on this computer' : ''}.`,
+      text: `Your ${credits.planName} credits refill ${refillWhen(credits.periodEnd, credits.periodHours)}. Upgrade to keep building now.`,
     }));
     account.openPlans();
     return;
@@ -529,7 +526,8 @@ async function send(textArg, { mode: modeArg, autoFix = 0 } = {}) {
   const live = liveMessage();
   append(live.el);
   const offStep = api.ai.onStep?.((step) => live.step(step));
-  const before = cloud ? account.status.credits?.remaining : null;
+  // Every model runs on the account's credits: show what this turn cost.
+  const before = account.status.credits?.remaining ?? null;
   let result;
   try {
     result = await api.ai.processQuery(text, impulse.ai.context(), useMode);
@@ -538,8 +536,8 @@ async function send(textArg, { mode: modeArg, autoFix = 0 } = {}) {
   }
   offStep?.();
   const { ms, steps } = live.finish();
-  if (cloud) await account.refresh();
-  const after = cloud ? account.status.credits?.remaining : null;
+  await account.refresh();
+  const after = account.status.credits?.remaining ?? null;
 
   const ok = !!result?.success;
   const record = chats.add({
@@ -637,7 +635,11 @@ function renderModelChip() {
 async function refreshModels() {
   if (account.status.signedIn) {
     const res = await api.cloud.models().catch(() => null);
-    if (res?.ok) models = { catalog: res.data, at: Date.now() };
+    if (res?.ok) {
+      models = { catalog: res.data, at: Date.now() };
+      // The server decides the model a new chat starts with.
+      if (res.data?.defaultModel) impulse.ai.setCloudDefault(`impulse:${res.data.defaultModel}`);
+    }
   } else {
     models = { catalog: null, at: 0 };
   }
@@ -651,7 +653,7 @@ function openModelMenu(anchor) {
   const catalog = models.catalog?.models;
   const cloudModels = catalog
     ? catalog.map((m) => ({ id: `impulse:${m.id}`, name: m.name, sub: m.tagline, allowed: m.allowed, cost: m.cost }))
-    : info.models.filter((m) => m.provider === 'impulse').map((m) => ({ id: m.id, name: m.displayName, sub: '', allowed: true, cost: null }));
+    : info.models.map((m) => ({ id: m.id, name: m.displayName, sub: '', allowed: true, cost: null }));
   const items = [{ heading: 'Impulse Cloud · uses credits' }];
   for (const m of cloudModels) {
     items.push({
@@ -664,27 +666,7 @@ function openModelMenu(anchor) {
     });
   }
   if (!signedIn) items.push({ label: 'Sign in to use these', icon: ICON.user, onSelect: () => account.openSignIn() });
-  // Models on this computer exist only in builds without a cloud address (development).
-  if (info.local?.enabled !== false) {
-    items.push({ separator: true }, { heading: 'On this computer · free' });
-    const local = info.models.filter((m) => m.provider === 'ollama');
-    for (const m of local) items.push({ label: m.displayName, sub: 'Runs offline, slower', checked: info.modelId === m.id, onSelect: () => chooseModel(m.id) });
-    if (!local.length) {
-      if (info.local?.running) {
-        for (const d of (info.local.downloads || []).slice(0, 3)) items.push({ label: `Download ${d.displayName}`, sub: `${d.note} · ${d.size}`, onSelect: () => localModels(() => impulse.ai.pullLocal(d.name)) });
-      } else {
-        items.push({ label: 'Start Ollama…', sub: 'Free models that run on this computer', onSelect: () => localModels(() => impulse.ai.startLocal()) });
-      }
-    }
-  }
   menu(anchor, items, { label: 'Model', side: 'top' });
-}
-
-async function localModels(run) {
-  const res = await run();
-  await refreshModels();
-  if (res?.ok) toast(`Using ${modelLabel(impulse.ai.info().modelId)}. It runs on this computer, free.`);
-  else if (res && !res.canceled) toast(res.error || 'That didn\'t work.', { duration: res.notInstalled ? 9000 : 4200 });
 }
 
 async function chooseModel(id) {
@@ -1044,26 +1026,12 @@ function renderAccount() {
       h('span', { class: 'v-me-plan', text: s.credits ? `${s.credits.planName} plan` : s.needsVerification ? 'Verify your email' : '' })));
   } else {
     fill(meButton, h('span', { class: 'v-avatar', html: ICON.user, style: 'color:var(--v-text-3)' }), h('span', { class: 'v-me-text' },
-      h('span', { class: 'v-me-name', text: s.configured ? 'Sign in' : 'Local mode' }),
-      h('span', { class: 'v-me-plan', text: s.configured ? 'Free credits to start' : 'Free models on this computer' })));
+      h('span', { class: 'v-me-name', text: s.configured ? 'Sign in' : 'Impulse Cloud isn\'t connected' }),
+      h('span', { class: 'v-me-plan', text: s.configured ? 'Free credits to start' : 'This build has no cloud address' })));
   }
-  if (boardBusy || localProgress) return;
+  if (boardBusy) return;
   const message = s.maintenance ? 'Impulse AI is in maintenance' : s.offline ? 'Offline: showing your last known credits' : s.announcement;
   setAnnounce(message, s.offline || s.maintenance ? 'amber' : 'green');
-}
-
-let localProgress = null;
-
-/** A local model downloading: progress above the composer. */
-function onLocalProgress(e) {
-  const p = e.detail || {};
-  if (p.done) {
-    localProgress = null;
-    renderAccount();
-    return;
-  }
-  localProgress = p;
-  setAnnounce(p.percent === null || p.percent === undefined ? `${p.name}: ${p.status || 'preparing'}` : `Downloading ${p.name}… ${p.percent}%`, 'amber', { pulse: true });
 }
 
 /** An app update: a quiet chip in the top bar. */
@@ -1365,11 +1333,10 @@ function wire() {
     bench.refreshCode();
   });
   window.addEventListener('impulse:models-changed', renderModelChip);
-  window.addEventListener('impulse:local-progress', onLocalProgress);
   window.addEventListener('impulse:update-status', onUpdateStatus);
   impulse.serial.onState((s) => { serialDot.hidden = !s.connected; });
 
-  // Messages the IDE raises (a board plugged in, a local model ready…) show as this view's toast.
+  // Messages the IDE raises (a board plugged in, an update ready…) show as this view's toast.
   window.addEventListener('impulse:notify', (e) => {
     const n = e.detail || {};
     if (shellMode() !== 'vibe' || !(n.message || n.title)) return;

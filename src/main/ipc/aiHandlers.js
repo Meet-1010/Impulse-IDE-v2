@@ -19,20 +19,20 @@ const defaultFail = { success: false, error: 'Invalid input' };
 function register(ipcMain, ctx) {
   const { aiAgent, cloudAccount, uiState } = ctx;
 
-  /** What a provider runs with: the Impulse session, or nothing for local models. */
-  const credentialFor = (providerName) => (AIAgent.isKeyless(providerName) ? 'local' : cloudAccount.sessionToken());
+  /** Every provider runs through Impulse Cloud on the account's session. */
+  const credentialFor = () => cloudAccount.sessionToken();
 
   // Signing in, out or into another account swaps the token under the cloud model.
   cloudAccount.on('change', () => {
     const current = aiAgent.currentProvider;
-    if (current?.name !== 'impulse') return;
+    if (!current || !AIAgent.CLOUD_PROVIDERS.includes(current.name)) return;
     const token = cloudAccount.sessionToken();
     if (!token) {
       aiAgent.currentProvider = null;
       return;
     }
     // Cheap (no network): always pick up the newest session.
-    aiAgent.setProvider('impulse', token, current.appModel);
+    aiAgent.setProvider(current.name, token, current.appModel);
   });
 
   ipcMain.handle('ai:generate-circuit', withDebugLog('ai:generate-circuit', async (event, sketchCode, options) => {
@@ -146,15 +146,7 @@ function register(ipcMain, ctx) {
 
   ipcMain.handle('ai:get-unified-models', withDebugLog('ai:get-unified-models', async () => {
     try {
-      // Local models first, so Ollama's list is current when the menu is built.
-      const local = await aiAgent.refreshLocalModels();
-      const list = aiAgent.getUnifiedModelList();
-      const OllamaProvider = require('../services/ai/providers/ollamaProvider');
-      // Recommended downloads that aren't installed yet, best first.
-      const enabled = aiAgent.localModelsEnabled();
-      const installed = new Set(local.models.map((m) => m.name));
-      const downloads = enabled ? OllamaProvider.recommendedModels().filter((m) => !installed.has(m.name)) : [];
-      return { success: true, data: list ?? [], local: { enabled, running: local.running, count: local.models.length, downloads } };
+      return { success: true, data: aiAgent.getUnifiedModelList() ?? [] };
     } catch (error) {
       return { success: false, error: error?.message ?? 'Get models failed' };
     }
@@ -180,10 +172,7 @@ function register(ipcMain, ctx) {
 
   ipcMain.handle('ai:get-model-suggestion', withDebugLog('ai:get-model-suggestion', async () => {
     try {
-      const usable = cloudAccount.sessionToken() ? ['impulse'] : [];
-      // Installed local models count as a provider you can use right away.
-      const local = await aiAgent.refreshLocalModels();
-      if (local.models.length) usable.push('ollama');
+      const usable = cloudAccount.sessionToken() ? [...AIAgent.CLOUD_PROVIDERS] : [];
       const suggestion = await aiAgent.getModelSuggestion(usable);
       return { success: true, data: suggestion };
     } catch (error) {
@@ -215,32 +204,6 @@ function register(ipcMain, ctx) {
       return { success: true, data: stats ?? {} };
     } catch (error) {
       return { success: false, error: error?.message ?? 'Get stats failed' };
-    }
-  }));
-
-  ipcMain.handle('ai:start-local', withDebugLog('ai:start-local', async () => {
-    if (!aiAgent.localModelsEnabled()) return { success: false, error: 'This build of Impulse runs its AI through Impulse Cloud only.' };
-    try {
-      const OllamaProvider = require('../services/ai/providers/ollamaProvider');
-      const started = await OllamaProvider.start();
-      if (!started.success) return started;
-      const local = await aiAgent.refreshLocalModels();
-      return { success: true, running: local.running, count: local.models.length };
-    } catch (error) {
-      return { success: false, error: error?.message ?? 'Could not start Ollama' };
-    }
-  }));
-
-  ipcMain.handle('ai:pull-local-model', withDebugLog('ai:pull-local-model', async (event, model) => {
-    if (!aiAgent.localModelsEnabled()) return { success: false, error: 'This build of Impulse runs its AI through Impulse Cloud only.' };
-    const OllamaProvider = require('../services/ai/providers/ollamaProvider');
-    const name = typeof model === 'string' && /^[\w.:/-]{1,100}$/.test(model) ? model : OllamaProvider.recommendedModel().name;
-    try {
-      return await OllamaProvider.pull(name, (p) => {
-        if (!event.sender.isDestroyed()) event.sender.send('ai:local-progress', p);
-      });
-    } catch (error) {
-      return { success: false, error: error?.message ?? 'Download failed' };
     }
   }));
 

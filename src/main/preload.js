@@ -176,13 +176,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getProviders: () => ipcRenderer.invoke('ai:get-providers'),
     getModels: (provider) => ipcRenderer.invoke('ai:get-models', provider),
     getUnifiedModels: () => ipcRenderer.invoke('ai:get-unified-models'),
-    startLocal: () => ipcRenderer.invoke('ai:start-local'),
-    pullLocal: (model) => ipcRenderer.invoke('ai:pull-local-model', model),
-    onLocalProgress: (callback) => {
-      const handler = (event, progress) => callback(progress);
-      ipcRenderer.on('ai:local-progress', handler);
-      return () => ipcRenderer.removeListener('ai:local-progress', handler);
-    },
     summarizeHistory: () => ipcRenderer.invoke('ai:summarize-history'),
     clearHistory: () => ipcRenderer.invoke('ai:clear-history'),
     getHistory: () => ipcRenderer.invoke('ai:get-history'),

@@ -1,7 +1,7 @@
 // What the desktop app reads about the signed-in user: profile, plan,
 // credits, models, usage, plans, and upgrade requests.
 
-import { MODELS, relativeCost } from './pricing.js';
+import { MODELS, relativeCost, servableModels } from './pricing.js';
 import { describe, getAccount } from './credits.js';
 import { PLAN_IDS } from './settings.js';
 
@@ -32,13 +32,14 @@ export function createAccountApi({ pool, auth, settings, config }) {
   }
 
   function planList(s) {
+    const servable = servableModels(s, config);
     return PLAN_IDS.map((id) => ({
       id,
       name: s.plans[id].name,
       monthlyCredits: s.plans[id].monthlyCredits,
       periodHours: s.plans[id].periodHours || null,
       priceUsd: s.plans[id].priceUsd,
-      models: s.plans[id].models.filter((m) => s.enabledModels.includes(m)).map((m) => MODELS[m].name),
+      models: s.plans[id].models.filter((m) => servable.includes(m)).map((m) => MODELS[m].name),
     }));
   }
 
@@ -77,15 +78,19 @@ export function createAccountApi({ pool, auth, settings, config }) {
       let planId = 'free';
       if (who.user.emailVerified) planId = (await getAccount(pool, who.user.id, s)).plan;
       const plan = s.plans[planId] || s.plans.free;
-      const models = Object.keys(MODELS).filter((id) => s.enabledModels.includes(id)).map((id) => ({
+      // Only models this server can serve: enabled, and their vendor has a key here.
+      const servable = servableModels(s, config);
+      const defaultModel = servable.includes(s.defaultModel) ? s.defaultModel : servable[0] || null;
+      const models = servable.map((id) => ({
         id,
+        vendor: MODELS[id].vendor,
         name: MODELS[id].name,
         tagline: MODELS[id].tagline,
         allowed: plan.models.includes(id),
-        cost: relativeCost(id, s.defaultModel),
-        isDefault: id === s.defaultModel,
+        cost: relativeCost(id, defaultModel || s.defaultModel),
+        isDefault: id === defaultModel,
       }));
-      return json({ models, defaultModel: s.defaultModel });
+      return json({ models, defaultModel });
     },
 
     async usage(request) {

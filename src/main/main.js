@@ -24,7 +24,7 @@ const ErrorMemory = require('./services/errorMemory');
 const AIAgent = require('./services/ai/agent');
 const { FixCapture } = require('./services/ai/learning/fixCapture');
 const { CloudAccount } = require('./services/cloud/account');
-const { cloudURL, localModelsEnabled } = require('./services/cloud/config');
+const { cloudURL } = require('./services/cloud/config');
 const ChatStore = require('./services/chatStore');
 const { registerAllIpc } = require('./ipc');
 const { debug } = require('./utils/logger');
@@ -457,7 +457,7 @@ app.whenReady().then(() => {
   chatStore = new ChatStore(path.join(app.getPath('userData'), 'chats'));
   learning = setupLearning();
   // A build with a cloud address is credits-only: no models on this computer.
-  aiAgent = new AIAgent(arduinoService, serialMonitor, errorMemory, { localModels: localModelsEnabled() });
+  aiAgent = new AIAgent(arduinoService, serialMonitor, errorMemory);
   aiAgent.initializeProviders();
   // The board makers' own pages, cached on disk (knowledge/docs.js).
   if (aiAgent.toolExecutor) {
@@ -467,7 +467,7 @@ app.whenReady().then(() => {
     arduinoService.pinInspector = () => aiAgent.toolExecutor.checkPins();
   }
   // Gateway requests say which app version sent them.
-  aiAgent.providerOptions = { impulse: { version: app.getVersion() } };
+  aiAgent.providerOptions = { impulse: { version: app.getVersion() }, 'impulse-openai': { version: app.getVersion() } };
 
   if (aiAgent.toolExecutor) {
     aiAgent.toolExecutor.setUICallbacks({

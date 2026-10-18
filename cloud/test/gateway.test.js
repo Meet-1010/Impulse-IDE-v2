@@ -1,6 +1,6 @@
 import { after, before, beforeEach, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readAll, setup, startFakeAnthropic } from './helpers.js';
+import { readAll, setup, startFakeAnthropic, startFakeOpenAI } from './helpers.js';
 
 const MESSAGE = { model: 'claude-opus-5-5', max_tokens: 32000, messages: [{ role: 'user', content: 'Blink an LED' }] };
 
@@ -10,18 +10,24 @@ describe('AI gateway', () => {
   let token;
   let userId;
 
+  let fakeOpenAI;
+
   before(async () => {
     fake = await startFakeAnthropic();
-    t = await setup({ fake });
+    fakeOpenAI = await startFakeOpenAI();
+    t = await setup({ fake, fakeOpenAI });
     ({ token, user: { id: userId } } = await t.signUp('maker@impulse.test'));
   });
   after(async () => {
     await t.close();
     await fake.close();
+    await fakeOpenAI.close();
   });
   beforeEach(async () => {
     fake.reply = null;
     fake.calls.length = 0;
+    fakeOpenAI.reply = null;
+    fakeOpenAI.calls.length = 0;
     await t.pool.query(`delete from app_setting`);
     t.settings.invalidate();
     await t.pool.query(`update credit_account set plan = 'free', plan_credits = 100000, bonus_credits = 200000 where user_id = $1`, [userId]);
@@ -207,11 +213,232 @@ describe('AI gateway', () => {
     assert.match((await res.json()).error.message, /capacity/);
   });
 
+  test('a model of the other vendor is refused on this lane, before anything is forwarded', async () => {
+    const res = await send({ ...MESSAGE, model: 'gpt-5.4' });
+    assert.equal(res.status, 400);
+    assert.match((await res.json()).error.message, /not served on this endpoint/);
+    assert.equal(fake.calls.length, 0);
+  });
+
+  test('the catalog lists the models this server can serve, with their vendor and the default', async () => {
+    const res = await t.request('/v1/models', { headers: t.bearer(token) });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.defaultModel, 'gpt-5.4');
+    const gpt = body.models.find((m) => m.id === 'gpt-5.4');
+    assert.deepEqual({ vendor: gpt.vendor, allowed: gpt.allowed, isDefault: gpt.isDefault, cost: gpt.cost }, { vendor: 'openai', allowed: true, isDefault: true, cost: 1 });
+    assert.equal(body.models.find((m) => m.id === 'claude-opus-5-5').vendor, 'anthropic');
+    assert.equal(body.models.find((m) => m.id === 'claude-fable-5-1').allowed, false, 'Fable is a Pro model');
+  });
+
+  test('a vendor without a key on this server is not offered, and its lane answers 503', async () => {
+    const key = t.config.openai.apiKey;
+    t.config.openai.apiKey = '';
+    try {
+      const body = await (await t.request('/v1/models', { headers: t.bearer(token) })).json();
+      assert.ok(body.models.every((m) => m.vendor === 'anthropic'), 'no OpenAI model is listed');
+      assert.equal(body.defaultModel, 'claude-opus-5-5', 'the default falls back to a model that can be served');
+      const res = await t.request('/ai/openai/v1/responses', {
+        method: 'POST', headers: { 'content-type': 'application/json', ...t.bearer(token) },
+        body: JSON.stringify({ model: 'gpt-5.4', input: [{ role: 'user', content: 'hi' }] }),
+      });
+      assert.equal(res.status, 503);
+      assert.equal(fakeOpenAI.calls.length, 0);
+    } finally {
+      t.config.openai.apiKey = key;
+    }
+  });
+
   test('without a session the gateway answers 401 in Anthropic\'s error shape', async () => {
     const res = await t.request('/ai/v1/messages', { method: 'POST', body: JSON.stringify(MESSAGE), headers: { 'content-type': 'application/json' } });
     assert.equal(res.status, 401);
     const body = await res.json();
     assert.equal(body.type, 'error');
     assert.equal(body.error.type, 'authentication_error');
+  });
+});
+
+describe('AI gateway: the OpenAI lane', () => {
+  let t;
+  let fake;
+  let fakeOpenAI;
+  let token;
+  let userId;
+
+  before(async () => {
+    fake = await startFakeAnthropic();
+    fakeOpenAI = await startFakeOpenAI();
+    t = await setup({ fake, fakeOpenAI });
+    ({ token, user: { id: userId } } = await t.signUp('builder@impulse.test'));
+  });
+  after(async () => {
+    await t.close();
+    await fake.close();
+    await fakeOpenAI.close();
+  });
+  beforeEach(async () => {
+    fakeOpenAI.reply = null;
+    fakeOpenAI.calls.length = 0;
+    await t.pool.query(`delete from app_setting`);
+    t.settings.invalidate();
+    await t.pool.query(`update credit_account set plan = 'free', plan_credits = 100000, bonus_credits = 200000 where user_id = $1`, [userId]);
+    await t.pool.query(`delete from rate_bucket`);
+  });
+
+  const CHAT = { model: 'gpt-5.4', max_output_tokens: 32000, input: [{ role: 'user', content: 'Blink an LED' }], instructions: 'Be brief.' };
+  const send = (body = CHAT, headers = {}) => t.request('/ai/openai/v1/responses', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...t.bearer(token), ...headers },
+    body: JSON.stringify(body),
+  });
+  const balance = async () => (await t.pool.query('select plan_credits, bonus_credits from credit_account where user_id = $1', [userId])).rows[0];
+  const lastUsage = async () => (await t.pool.query('select * from usage_event where user_id = $1 order by id desc limit 1', [userId])).rows[0];
+
+  test('streams the answer through unchanged and charges what it cost', async () => {
+    const res = await send({ ...CHAT, stream: true }, { 'x-impulse-task': 't_openai_1' });
+    assert.equal(res.status, 200);
+    assert.match(res.headers.get('content-type'), /text\/event-stream/);
+    assert.equal(res.headers.get('x-request-id'), 'req_openai_test');
+    const text = await readAll(res);
+    assert.match(text, /from the fake API\./);
+    assert.match(text, /event: response\.completed/);
+
+    // 10,000 input tokens of which 8,000 cached, 300 out (100 of them reasoning), on GPT-5.4:
+    // 2,000 x $2.50 + 8,000 x $0.25 + 300 x $15 = $0.0115 = 1.15 credits.
+    const usage = await lastUsage();
+    assert.equal(usage.status, 'ok');
+    assert.equal(usage.cost_micros, 11500);
+    assert.equal(usage.credits_charged, 1150);
+    assert.equal(usage.input_tokens, 2000);
+    assert.equal(usage.cache_read_tokens, 8000);
+    assert.equal(usage.output_tokens, 300);
+    assert.equal(usage.served_model, 'gpt-5.4-2026-03-05');
+    assert.equal(usage.request_id, 'req_openai_test');
+    assert.equal(usage.task_id, 't_openai_1');
+    const b = await balance();
+    assert.equal(b.plan_credits, 100000 - 1150);
+  });
+
+  test('a non-streaming request is charged too', async () => {
+    const res = await send(CHAT);
+    assert.equal(res.status, 200);
+    assert.equal((await res.json()).output[0].content[0].text, 'Hello from the fake API.');
+    assert.equal((await lastUsage()).credits_charged, 1150);
+  });
+
+  test('forwards only safe fields, with our key, our identifiers, and nothing kept or run upstream', async () => {
+    await send({
+      ...CHAT, stream: true, store: true, background: true, user: 'spoofed', safety_identifier: 'spoofed', prompt_cache_key: 'spoofed',
+      max_output_tokens: 500000, service_tier: 'priority', include: ['reasoning.encrypted_content', 'file_search_call.results'],
+      reasoning: { effort: 'high' }, tools: [{ type: 'function', name: 'compile_sketch', parameters: { type: 'object' } }],
+    }).then(readAll);
+    const call = fakeOpenAI.calls.at(-1);
+    assert.equal(call.url, '/v1/responses');
+    assert.equal(call.headers.authorization, 'Bearer test-openai-key');
+    assert.equal(call.body.background, undefined);
+    assert.equal(call.body.service_tier, undefined);
+    assert.equal(call.body.user, undefined);
+    assert.equal(call.body.store, false);
+    assert.equal(call.body.max_output_tokens, 32000);
+    assert.deepEqual(call.body.include, ['reasoning.encrypted_content']);
+    assert.deepEqual(call.body.reasoning, { effort: 'high' });
+    assert.equal(call.body.instructions, 'Be brief.');
+    assert.match(call.body.safety_identifier, /^[0-9a-f]{32}$/);
+    assert.notEqual(call.body.safety_identifier, userId);
+    assert.equal(call.body.prompt_cache_key, call.body.safety_identifier);
+  });
+
+  test('tools other than functions, and server-side conversation state, are refused', async () => {
+    const res = await send({ ...CHAT, tools: [{ type: 'web_search' }] });
+    assert.equal(res.status, 400);
+    assert.match((await res.json()).error.message, /isn't available/);
+    const previous = await send({ ...CHAT, previous_response_id: 'resp_123' });
+    assert.equal(previous.status, 400);
+    assert.match((await previous.json()).error.message, /no conversation state upstream/);
+    assert.equal(fakeOpenAI.calls.length, 0);
+  });
+
+  test('a Claude model is refused on this lane', async () => {
+    const res = await send({ ...CHAT, model: 'claude-opus-5-5' });
+    assert.equal(res.status, 400);
+    const body = await res.json();
+    assert.equal(body.error.code, 'invalid_request_error');
+    assert.match(body.error.message, /not served on this endpoint/);
+  });
+
+  test('errors come in OpenAI\'s shape, with Impulse\'s reason as the code', async () => {
+    await t.pool.query('update credit_account set plan_credits = 0, bonus_credits = 500 where user_id = $1', [userId]);
+    const res = await send();
+    assert.equal(res.status, 402);
+    assert.equal(res.headers.get('x-should-retry'), 'false');
+    const body = await res.json();
+    assert.equal(body.error.type, 'insufficient_quota');
+    assert.equal(body.error.code, 'insufficient_credits');
+    assert.equal(fakeOpenAI.calls.length, 0);
+  });
+
+  test('our key being rejected upstream is not reported as the user\'s fault', async () => {
+    fakeOpenAI.reply = () => ({ status: 401, json: { error: { message: 'Incorrect API key provided', type: 'invalid_request_error', code: 'invalid_api_key' } } });
+    const res = await send();
+    assert.equal(res.status, 503);
+    assert.doesNotMatch((await res.json()).error.message, /key/i);
+    assert.equal((await lastUsage()).status, 'error');
+  });
+
+  test('OpenAI\'s own quota problem is ours, not the user\'s', async () => {
+    fakeOpenAI.reply = () => ({ status: 429, json: { error: { message: 'You exceeded your current quota', type: 'insufficient_quota', code: 'insufficient_quota' } } });
+    const res = await send();
+    assert.equal(res.status, 503);
+    assert.match(t.logs.at(-1), /quota or billing/);
+  });
+
+  test('a filtered answer is recorded as refused', async () => {
+    fakeOpenAI.reply = () => ({
+      events: [
+        { type: 'response.created', response: { id: 'r', status: 'in_progress', model: 'gpt-5.4-2026-03-05', output: [] } },
+        {
+          type: 'response.incomplete',
+          response: { id: 'r', status: 'incomplete', incomplete_details: { reason: 'content_filter' }, model: 'gpt-5.4-2026-03-05', output: [], usage: { input_tokens: 100, input_tokens_details: { cached_tokens: 0 }, output_tokens: 5 } },
+        },
+      ],
+    });
+    await readAll(await send({ ...CHAT, stream: true }));
+    const usage = await lastUsage();
+    assert.equal(usage.status, 'refused');
+    assert.equal(usage.cost_micros, 100 * 2.5 + 5 * 15);
+  });
+
+  test('a stopped stream is charged from an estimate, not left pending', async () => {
+    fakeOpenAI.reply = () => ({
+      events: [
+        { type: 'response.created', response: { id: 'r', status: 'in_progress', model: 'gpt-5.4-2026-03-05', output: [] } },
+        { type: 'response.output_text.delta', output_index: 0, content_index: 0, delta: 'x'.repeat(400) },
+        'hang',
+      ],
+    });
+    const res = await send({ ...CHAT, stream: true });
+    const reader = res.body.getReader();
+    let seen = '';
+    while (!seen.includes('xxxx')) {
+      const { done, value } = await reader.read();
+      assert.ok(!done, `the stream ended early: ${seen}`);
+      seen += new TextDecoder().decode(value);
+    }
+    await reader.cancel();
+    await t.settleBackground();
+    const usage = await lastUsage();
+    assert.equal(usage.status, 'aborted');
+    // The prompt as sent (JSON length / 4) at $2.50, plus 100 estimated output tokens at $15.
+    const promptEstimate = Math.ceil(JSON.stringify({ instructions: CHAT.instructions, input: CHAT.input, tools: [] }).length / 4);
+    assert.equal(usage.cost_micros, Math.ceil(promptEstimate * 2.5 + 100 * 15));
+    assert.equal(usage.input_tokens, promptEstimate);
+  });
+
+  test('without a session the lane answers 401 in OpenAI\'s error shape', async () => {
+    const res = await t.request('/ai/openai/v1/responses', { method: 'POST', body: JSON.stringify(CHAT), headers: { 'content-type': 'application/json' } });
+    assert.equal(res.status, 401);
+    const body = await res.json();
+    assert.equal(body.error.type, 'authentication_error');
+    assert.equal(body.error.code, 'authentication_error');
   });
 });

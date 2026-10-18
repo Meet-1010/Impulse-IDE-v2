@@ -3,9 +3,12 @@
 // copy there (which goes to the Trash, so it can be put back).
 //
 //   npm run install:mac
+//   IMPULSE_CLOUD_URL=http://localhost:8787 npm run install:mac   # a copy that talks to a local Impulse Cloud
 //
 // The app is built for this Mac's architecture and signed ad hoc by
 // build/afterPack.cjs, then checked with codesign before it replaces anything.
+// IMPULSE_CLOUD_URL, when set, is written into the packaged package.json
+// ("impulse.cloudUrl"), which is where the app reads its cloud address.
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -28,7 +31,10 @@ console.log(`Building ${appName} ${pkg.version} for ${arch}…`);
 run('npm', ['run', 'build:renderer']);
 // The ESP32 emulator ships inside the Mac app (build/qemu-<arch>).
 run('node', ['scripts/qemu-mac-pack.mjs', arch]);
-run('npx', ['electron-builder', '--mac', 'dir', `--${arch}`], { env: { ...process.env, CSC_IDENTITY_AUTO_DISCOVERY: 'false' } });
+const cloudUrl = process.env.IMPULSE_CLOUD_URL || '';
+if (cloudUrl) console.log(`Cloud address baked into this copy: ${cloudUrl}`);
+run('npx', ['electron-builder', '--mac', 'dir', `--${arch}`, ...(cloudUrl ? [`-c.extraMetadata.impulse.cloudUrl=${cloudUrl}`] : [])],
+  { env: { ...process.env, CSC_IDENTITY_AUTO_DISCOVERY: 'false' } });
 
 const built = path.join(root, 'dist', arch === 'arm64' ? 'mac-arm64' : 'mac', appName);
 if (!fs.existsSync(built)) throw new Error(`The build didn't produce ${built}`);

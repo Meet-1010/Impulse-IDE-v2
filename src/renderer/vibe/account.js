@@ -66,9 +66,9 @@ function errorBox() {
 }
 
 /**
- * @param {{ api: typeof window.electronAPI, onSignedIn?: (status: object) => void, onUseLocal?: () => void }} deps
+ * @param {{ api: typeof window.electronAPI, onSignedIn?: (status: object) => void }} deps
  */
-export function createAccount({ api, onSignedIn, onUseLocal }) {
+export function createAccount({ api, onSignedIn }) {
   let status = { configured: false, signedIn: false };
   const listeners = new Set();
   const set = (next) => {
@@ -129,10 +129,9 @@ export function createAccount({ api, onSignedIn, onUseLocal }) {
       const auth = status.auth || { google: true, github: true, email: true };
 
       if (!status.configured) {
-        add(d.body, 
+        add(d.body,
           h('h2', { text: 'Impulse Cloud isn\'t connected' }),
-          h('p', { class: 'v-sub', text: 'This build of Impulse has no cloud address, so accounts and credits are off. You can still build with a free model that runs on this computer.' }),
-          h('button', { type: 'button', class: 'v-btn primary block', text: 'Use a model on this computer', onclick: () => { d.close(); onUseLocal?.(); } }));
+          h('p', { class: 'v-sub', text: 'This build of Impulse has no cloud address, so accounts, credits and the AI are off. The simulator and the IDE still work. A build with a cloud address brings the AI back.' }));
         return;
       }
 

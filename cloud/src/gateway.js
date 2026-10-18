@@ -1,8 +1,12 @@
-// The AI gateway: an Anthropic-compatible POST /ai/v1/messages. The desktop
-// app points the Anthropic SDK here with its session token. Each request is
-// checked (signed in, verified, not banned, model on the plan, credits left,
-// rate and daily budget), forwarded with Impulse's own API key, streamed back
-// unchanged, and charged from the usage Anthropic reports.
+// The AI gateway: one gate, two lanes.
+//
+//   POST /ai/v1/messages          Anthropic-compatible; the app's Anthropic SDK points here
+//   POST /ai/openai/v1/responses   OpenAI's Responses API; the app's OpenAI client points here
+//
+// Each request is checked (signed in, verified, not banned, model enabled and
+// on the plan, its vendor set up on this server, credits left, rate and daily
+// budget), forwarded with Impulse's own key for that vendor, streamed back
+// unchanged, and charged from the usage the vendor reports.
 
 import { createHmac } from 'node:crypto';
 import { MODELS, costMicros, toMillicredits, totalTokens } from './pricing.js';
@@ -12,8 +16,8 @@ import { allowRequest } from './limits.js';
 const ANTHROPIC_VERSION = '2023-06-01';
 const MAX_BODY_BYTES = 6 * 1024 * 1024;
 
-/** Request fields passed through; anything else (server tools, fast mode, containers…) is dropped. */
-const FIELDS = new Set([
+/** Anthropic request fields passed through; anything else (server tools, fast mode, containers…) is dropped. */
+const ANTHROPIC_FIELDS = new Set([
   'model', 'messages', 'system', 'max_tokens', 'tools', 'tool_choice', 'thinking', 'output_config',
   'stop_sequences', 'stream', 'cache_control', 'fallbacks', 'temperature', 'top_p', 'top_k',
   'context_management',
@@ -28,15 +32,45 @@ const BETAS = new Set([
   'compact-2026-01-12',
 ]);
 
-export function apiError(status, type, message, headers = {}) {
-  return new Response(JSON.stringify({ type: 'error', error: { type, message } }), {
+/**
+ * OpenAI Responses fields passed through. `store`, `background`, server-side
+ * conversations and the identifiers are ours to set or refuse.
+ */
+const OPENAI_FIELDS = new Set([
+  'model', 'input', 'instructions', 'tools', 'tool_choice', 'parallel_tool_calls', 'max_output_tokens',
+  'reasoning', 'text', 'stream', 'temperature', 'top_p', 'truncation', 'include', 'prompt_cache_retention',
+]);
+/** The only `include` worth passing: encrypted reasoning, so a turn's reasoning survives its tool steps. */
+const OPENAI_INCLUDES = new Set(['reasoning.encrypted_content']);
+
+// ── Errors in each vendor's own shape, so each client's SDK understands them ──
+
+/** Impulse's reasons → the type OpenAI clients expect; `code` keeps Impulse's reason. */
+const OPENAI_TYPES = {
+  insufficient_credits: 'insufficient_quota',
+  api_error: 'server_error',
+  overloaded_error: 'server_error',
+  request_too_large: 'invalid_request_error',
+};
+
+function errorBody(vendor, type, message) {
+  if (vendor === 'openai') return { error: { message, type: OPENAI_TYPES[type] || type, code: type } };
+  return { type: 'error', error: { type, message } };
+}
+
+export function apiError(status, type, message, headers = {}, vendor = 'anthropic') {
+  return new Response(JSON.stringify(errorBody(vendor, type, message)), {
     status,
     headers: { 'content-type': 'application/json', ...headers },
   });
 }
 
-/** Errors the SDK must not retry (it honours x-should-retry). */
-const final = (status, type, message) => apiError(status, type, message, { 'x-should-retry': 'false' });
+/** The two error makers of a lane: `final` ones the SDK must not retry (it honours x-should-retry). */
+function errorsFor(vendor) {
+  const error = (status, type, message, headers = {}) => apiError(status, type, message, headers, vendor);
+  const final = (status, type, message) => error(status, type, message, { 'x-should-retry': 'false' });
+  return { error, final };
+}
 
 async function readLimited(request, limit) {
   const declared = Number(request.headers.get('content-length') || 0);
@@ -68,7 +102,7 @@ export function sanitize(body, settings, userKey) {
     return { error: apiError(400, 'invalid_request_error', 'The request body must be a JSON object.') };
   }
   const out = {};
-  for (const [key, value] of Object.entries(body)) if (FIELDS.has(key)) out[key] = value;
+  for (const [key, value] of Object.entries(body)) if (ANTHROPIC_FIELDS.has(key)) out[key] = value;
   if (!Array.isArray(out.messages) || out.messages.length === 0) {
     return { error: apiError(400, 'invalid_request_error', 'messages must be a non-empty array.') };
   }
@@ -83,31 +117,78 @@ export function sanitize(body, settings, userKey) {
   return { body: out };
 }
 
+/**
+ * The OpenAI lane's request, with only the fields we pass, our own identifiers,
+ * function tools only, and nothing stored or run in the background upstream.
+ * @returns {{ body: object } | { error: Response }}
+ */
+export function sanitizeOpenAI(body, settings, userKey) {
+  const { error } = errorsFor('openai');
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return { error: error(400, 'invalid_request_error', 'The request body must be a JSON object.') };
+  }
+  const out = {};
+  for (const [key, value] of Object.entries(body)) if (OPENAI_FIELDS.has(key)) out[key] = value;
+  const hasInput = typeof out.input === 'string' ? out.input.length > 0 : Array.isArray(out.input) && out.input.length > 0;
+  if (!hasInput) return { error: error(400, 'invalid_request_error', 'input must be a non-empty string or array.') };
+  if (out.tools !== undefined) {
+    if (!Array.isArray(out.tools)) return { error: error(400, 'invalid_request_error', 'tools must be an array.') };
+    const other = out.tools.find((t) => !t || typeof t !== 'object' || t.type !== 'function');
+    if (other) return { error: error(400, 'invalid_request_error', `The ${other?.type || 'unknown'} tool isn't available through Impulse.`) };
+  }
+  if (body.previous_response_id !== undefined || body.conversation !== undefined) {
+    return { error: error(400, 'invalid_request_error', 'Impulse keeps no conversation state upstream: send the whole input each time.') };
+  }
+  if (out.include !== undefined) {
+    out.include = Array.isArray(out.include) ? out.include.filter((i) => OPENAI_INCLUDES.has(i)) : [];
+    if (!out.include.length) delete out.include;
+  }
+  const asked = Number(out.max_output_tokens);
+  const fallback = Math.min(16000, settings.maxOutputTokens);
+  out.max_output_tokens = Math.min(Number.isFinite(asked) && asked >= 1 ? Math.floor(asked) : fallback, settings.maxOutputTokens);
+  out.safety_identifier = userKey;
+  out.prompt_cache_key = userKey;
+  out.store = false;
+  return { body: out };
+}
+
 function filterBetas(header) {
   if (!header) return '';
   return header.split(',').map((b) => b.trim()).filter((b) => BETAS.has(b)).join(',');
 }
 
-/** Map an upstream failure to what the app should see. Our own key problems never leak as "your key". */
-function upstreamFailure(status, text, headers, log) {
-  let message = '';
+function upstreamMessage(text) {
   try {
-    message = JSON.parse(text)?.error?.message || '';
-  } catch { /* not JSON */ }
+    return JSON.parse(text)?.error?.message || '';
+  } catch {
+    return '';
+  }
+}
+
+/** Map an upstream failure to what the app should see. Our own key or billing problems never leak as "your" problem. */
+function upstreamFailure(vendor, status, text, headers, log) {
+  const { error, final } = errorsFor(vendor);
+  const message = upstreamMessage(text);
+  const name = vendor === 'openai' ? 'OpenAI' : 'Anthropic';
   if (status === 401 || status === 403) {
-    log(`[gateway] Anthropic rejected the server's API key (${status}): ${message}`);
+    log(`[gateway] ${name} rejected the server's API key (${status}): ${message}`);
     return final(503, 'api_error', 'Impulse AI is temporarily unavailable. Try again later.');
   }
   if (status === 429) {
+    // OpenAI answers 429 for its own quota too: that is our account, not the user's.
+    if (vendor === 'openai' && /insufficient_quota|billing|exceeded your current quota/i.test(`${text}`)) {
+      log(`[gateway] OpenAI quota or billing problem on the server's account: ${message}`);
+      return final(503, 'api_error', 'Impulse AI is temporarily unavailable. Try again later.');
+    }
     const retry = headers.get('retry-after');
-    return apiError(429, 'rate_limit_error', 'The AI service is busy right now. Trying again in a moment.', retry ? { 'retry-after': retry } : {});
+    return error(429, 'rate_limit_error', 'The AI service is busy right now. Trying again in a moment.', retry ? { 'retry-after': retry } : {});
   }
-  if (status === 529) return apiError(529, 'overloaded_error', 'The AI service is overloaded. Trying again in a moment.');
-  if (status >= 500) return apiError(502, 'api_error', 'The AI service had a problem. Try again.');
-  return apiError(status, 'invalid_request_error', message || 'The AI service rejected the request.');
+  if (status === 529) return error(529, 'overloaded_error', 'The AI service is overloaded. Trying again in a moment.');
+  if (status >= 500) return error(502, 'api_error', 'The AI service had a problem. Try again.');
+  return error(status, 'invalid_request_error', message || 'The AI service rejected the request.');
 }
 
-/** Reads usage out of the event stream as it passes through. */
+/** Reads usage out of an Anthropic event stream as it passes through. */
 export class UsageMeter {
   constructor() {
     this.decoder = new TextDecoder();
@@ -161,10 +242,82 @@ export class UsageMeter {
     if (this.sawDelta) return this.usage;
     return { ...this.usage, output_tokens: Math.max(this.usage.output_tokens || 0, Math.ceil(this.streamedChars / 4)) };
   }
+
+  refused() {
+    return this.stopReason === 'refusal';
+  }
+}
+
+/**
+ * Reads usage out of an OpenAI Responses stream. The count comes once, in the
+ * terminal event (response.completed, .incomplete or .failed), so a stream cut
+ * short is billed from an estimate: the prompt as sent, the output as streamed.
+ */
+export class OpenAIUsageMeter {
+  constructor({ promptEstimate = 0 } = {}) {
+    this.decoder = new TextDecoder();
+    this.buffer = '';
+    this.model = null;
+    this.usage = null;
+    this.status = null;
+    this.incompleteReason = null;
+    this.streamedChars = 0;
+    this.promptEstimate = promptEstimate;
+  }
+
+  feed(chunk) {
+    this.buffer += this.decoder.decode(chunk, { stream: true });
+    let nl;
+    while ((nl = this.buffer.indexOf('\n')) !== -1) {
+      const line = this.buffer.slice(0, nl).replace(/\r$/, '');
+      this.buffer = this.buffer.slice(nl + 1);
+      if (line.startsWith('data:')) this.line(line.slice(5).trim());
+    }
+    if (this.buffer.length > 2_000_000) this.buffer = '';
+  }
+
+  line(data) {
+    if (!data.startsWith('{')) return; // "[DONE]" and comments
+    let event;
+    try {
+      event = JSON.parse(data);
+    } catch {
+      return;
+    }
+    const type = String(event.type || '');
+    if (type === 'response.output_text.delta' || type === 'response.function_call_arguments.delta') {
+      this.streamedChars += String(event.delta || '').length;
+    } else if (type === 'response.completed' || type === 'response.incomplete' || type === 'response.failed') {
+      const r = event.response || {};
+      if (r.usage) this.usage = r.usage;
+      if (r.model) this.model = r.model;
+      this.status = r.status || type.split('.').pop();
+      this.incompleteReason = r.incomplete_details?.reason || null;
+    }
+  }
+
+  final() {
+    if (this.usage) return this.usage;
+    return { input_tokens: this.promptEstimate, input_tokens_details: { cached_tokens: 0 }, output_tokens: Math.ceil(this.streamedChars / 4) };
+  }
+
+  refused() {
+    return this.incompleteReason === 'content_filter';
+  }
+}
+
+/** Roughly how many tokens a request's prompt is, for a stream that never reported usage. */
+function estimatePromptTokens(body) {
+  try {
+    return Math.ceil(JSON.stringify({ instructions: body.instructions || '', input: body.input, tools: body.tools || [] }).length / 4);
+  } catch {
+    return 0;
+  }
 }
 
 /**
  * @param {{ pool, auth, settings, budget, config, background: (p: Promise<unknown>) => void, log?: Function, fetch?: typeof fetch }} deps
+ * @returns {{ messages: (request: Request) => Promise<Response>, responses: (request: Request) => Promise<Response> }}
  */
 export function createGateway(deps) {
   const { pool, auth, settings, budget, config } = deps;
@@ -201,100 +354,104 @@ export function createGateway(deps) {
     }
   }
 
-  /** @param {Request} request */
-  return async function messages(request) {
+  /**
+   * Everything a request must pass before anything is forwarded. The same for
+   * both lanes; only the error shape differs.
+   * @returns {Promise<{ error: Response } | { user, s, body, model, started, taskId, client }>}
+   */
+  async function admit(request, vendor) {
+    const { error, final } = errorsFor(vendor);
     const started = Date.now();
     const session = await auth.api.getSession({ headers: request.headers }).catch(() => null);
-    if (!session?.user) return final(401, 'authentication_error', 'Sign in to Impulse to use AI.');
+    if (!session?.user) return { error: final(401, 'authentication_error', 'Sign in to Impulse to use AI.') };
     const user = session.user;
-    if (user.banned) return final(403, 'permission_error', 'This account is suspended. Contact Impulse support if you think this is a mistake.');
-    if (!user.emailVerified) return final(403, 'permission_error', 'Verify your email address to start using your credits.');
+    if (user.banned) return { error: final(403, 'permission_error', 'This account is suspended. Contact Impulse support if you think this is a mistake.') };
+    if (!user.emailVerified) return { error: final(403, 'permission_error', 'Verify your email address to start using your credits.') };
 
     const s = await settings.get();
-    if (s.maintenance) return final(503, 'overloaded_error', 'Impulse AI is down for maintenance. Try again soon.');
-    if (!config.anthropic.apiKey) return final(503, 'api_error', 'Impulse AI is not set up on this server yet.');
+    if (s.maintenance) return { error: final(503, 'overloaded_error', 'Impulse AI is down for maintenance. Try again soon.') };
 
     const raw = await readLimited(request, MAX_BODY_BYTES);
-    if (raw === null) return final(413, 'request_too_large', 'This conversation is too long to send. Start a new chat.');
+    if (raw === null) return { error: final(413, 'request_too_large', 'This conversation is too long to send. Start a new chat.') };
     let body;
     try {
       body = JSON.parse(raw);
     } catch {
-      return final(400, 'invalid_request_error', 'The request body is not valid JSON.');
+      return { error: final(400, 'invalid_request_error', 'The request body is not valid JSON.') };
     }
     const model = body?.model;
     if (!MODELS[model] || !s.enabledModels.includes(model)) {
-      return final(400, 'invalid_request_error', 'That model is not available on Impulse. Pick another in the model menu.');
+      return { error: final(400, 'invalid_request_error', 'That model is not available on Impulse. Pick another in the model menu.') };
     }
+    if (MODELS[model].vendor !== vendor) {
+      return { error: final(400, 'invalid_request_error', `${MODELS[model].name} is not served on this endpoint.`) };
+    }
+    if (!config[vendor]?.apiKey) return { error: final(503, 'api_error', 'Impulse AI is not set up for this model on this server yet.') };
 
     const account = await getAccount(pool, user.id, s);
     const plan = s.plans[account.plan] || s.plans.free;
     if (!plan.models.includes(model)) {
       const needed = cheapestPlanWith(s, model);
-      return final(403, 'permission_error', `${MODELS[model].name} is part of the ${s.plans[needed]?.name || 'Pro'} plan. Upgrade, or pick another model.`);
+      return { error: final(403, 'permission_error', `${MODELS[model].name} is part of the ${s.plans[needed]?.name || 'Pro'} plan. Upgrade, or pick another model.`) };
     }
     if (spendable(account) < MIN_TO_START) {
-      return final(402, 'insufficient_credits', 'You are out of credits for this month. Upgrade for more, or wait for your monthly refill.');
+      return { error: final(402, 'insufficient_credits', 'You are out of credits for this month. Upgrade for more, or wait for your monthly refill.') };
     }
     if (!(await allowRequest(pool, user.id, s.rateLimitPerMinute))) {
-      return apiError(429, 'rate_limit_error', 'Too many requests at once. Trying again in a moment.', { 'retry-after': '20' });
+      return { error: error(429, 'rate_limit_error', 'Too many requests at once. Trying again in a moment.', { 'retry-after': '20' }) };
     }
     if (await budget.exceeded(s.dailyBudgetUsd)) {
       log('[gateway] daily budget reached; refusing AI requests until tomorrow (UTC)');
-      return final(503, 'overloaded_error', 'Impulse AI is at capacity for today. Try again tomorrow.');
+      return { error: final(503, 'overloaded_error', 'Impulse AI is at capacity for today. Try again tomorrow.') };
     }
-
-    const clean = sanitize(body, s, userKey(user.id));
-    if (clean.error) return clean.error;
-    const out = clean.body;
-    const beta = new URL(request.url).searchParams.get('beta') === 'true';
-    const betas = filterBetas(request.headers.get('anthropic-beta'));
     const taskId = (request.headers.get('x-impulse-task') || '').slice(0, 64) || null;
-    const usageId = await insertPending(user.id, model, (request.headers.get('x-impulse-client') || '').slice(0, 80) || null, /^[\w.-]+$/.test(taskId || '') ? taskId : null);
+    return {
+      user, s, body, model, started,
+      taskId: /^[\w.-]+$/.test(taskId || '') ? taskId : null,
+      client: (request.headers.get('x-impulse-client') || '').slice(0, 80) || null,
+    };
+  }
 
+  /**
+   * Forward a sanitised request and stream it back, charging from the meter.
+   * @param {{ vendor, admitted, out, url, headers, meter, usageId, requestIdHeader }} lane
+   */
+  async function forward({ vendor, admitted, out, url, headers, meter, usageId, requestIdHeader }) {
+    const { error } = errorsFor(vendor);
+    const { user, model, started } = admitted;
     const abort = new AbortController();
     let upstream;
     try {
-      upstream = await upstreamFetch(`${config.anthropic.baseURL}/v1/messages${beta ? '?beta=true' : ''}`, {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'x-api-key': config.anthropic.apiKey,
-          'anthropic-version': ANTHROPIC_VERSION,
-          ...(betas ? { 'anthropic-beta': betas } : {}),
-        },
-        body: JSON.stringify(out),
-        signal: abort.signal,
-      });
-    } catch (error) {
-      log(`[gateway] could not reach Anthropic: ${error?.message || error}`);
+      upstream = await upstreamFetch(url, { method: 'POST', headers, body: JSON.stringify(out), signal: abort.signal });
+    } catch (err) {
+      log(`[gateway] could not reach ${vendor}: ${err?.message || err}`);
       await settle({ usageId, userId: user.id, model, status: 'error', httpStatus: 502, started });
-      return apiError(502, 'api_error', 'Could not reach the AI service. Try again.');
+      return error(502, 'api_error', 'Could not reach the AI service. Try again.');
     }
-    const requestId = upstream.headers.get('request-id');
+    const requestId = upstream.headers.get(requestIdHeader);
 
     if (!upstream.ok) {
       const text = await upstream.text().catch(() => '');
       await settle({ usageId, userId: user.id, model, status: 'error', httpStatus: upstream.status, started, requestId });
-      return upstreamFailure(upstream.status, text, upstream.headers, log);
+      return upstreamFailure(vendor, upstream.status, text, upstream.headers, log);
     }
 
     if (!out.stream) {
       const json = await upstream.json();
+      const refused = vendor === 'openai' ? json.incomplete_details?.reason === 'content_filter' : json.stop_reason === 'refusal';
       await settle({
         usageId, userId: user.id, model, served: json.model, usage: json.usage,
-        status: json.stop_reason === 'refusal' ? 'refused' : 'ok', httpStatus: 200, started, requestId,
+        status: refused ? 'refused' : 'ok', httpStatus: 200, started, requestId,
       });
-      return Response.json(json, { headers: requestId ? { 'request-id': requestId } : {} });
+      return Response.json(json, { headers: requestId ? { [requestIdHeader]: requestId } : {} });
     }
 
-    const meter = new UsageMeter();
     const reader = upstream.body.getReader();
     let settled = null;
     const settleOnce = (status) => {
       settled ??= settle({
         usageId, userId: user.id, model, served: meter.served || meter.model, usage: meter.final(),
-        status: status === 'ok' && meter.stopReason === 'refusal' ? 'refused' : status,
+        status: status === 'ok' && meter.refused() ? 'refused' : status,
         httpStatus: 200, started, requestId,
       });
       return settled;
@@ -305,9 +462,9 @@ export function createGateway(deps) {
         let chunk;
         try {
           chunk = await reader.read();
-        } catch (error) {
+        } catch (err) {
           await settleOnce('error');
-          controller.error(error);
+          controller.error(err);
           return;
         }
         if (chunk.done) {
@@ -332,8 +489,56 @@ export function createGateway(deps) {
       headers: {
         'content-type': 'text/event-stream; charset=utf-8',
         'cache-control': 'no-cache',
-        ...(requestId ? { 'request-id': requestId } : {}),
+        ...(requestId ? { [requestIdHeader]: requestId } : {}),
       },
     });
-  };
+  }
+
+  /** The Anthropic lane. @param {Request} request */
+  async function messages(request) {
+    const admitted = await admit(request, 'anthropic');
+    if (admitted.error) return admitted.error;
+    const { user, s, body, model, taskId, client } = admitted;
+    const clean = sanitize(body, s, userKey(user.id));
+    if (clean.error) return clean.error;
+    const out = clean.body;
+    const beta = new URL(request.url).searchParams.get('beta') === 'true';
+    const betas = filterBetas(request.headers.get('anthropic-beta'));
+    const usageId = await insertPending(user.id, model, client, taskId);
+    return forward({
+      vendor: 'anthropic', admitted, out, usageId,
+      url: `${config.anthropic.baseURL}/v1/messages${beta ? '?beta=true' : ''}`,
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': config.anthropic.apiKey,
+        'anthropic-version': ANTHROPIC_VERSION,
+        ...(betas ? { 'anthropic-beta': betas } : {}),
+      },
+      meter: new UsageMeter(),
+      requestIdHeader: 'request-id',
+    });
+  }
+
+  /** The OpenAI lane (the Responses API). @param {Request} request */
+  async function responses(request) {
+    const admitted = await admit(request, 'openai');
+    if (admitted.error) return admitted.error;
+    const { user, s, body, model, taskId, client } = admitted;
+    const clean = sanitizeOpenAI(body, s, userKey(user.id));
+    if (clean.error) return clean.error;
+    const out = clean.body;
+    const usageId = await insertPending(user.id, model, client, taskId);
+    return forward({
+      vendor: 'openai', admitted, out, usageId,
+      url: `${config.openai.baseURL}/v1/responses`,
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${config.openai.apiKey}`,
+      },
+      meter: new OpenAIUsageMeter({ promptEstimate: estimatePromptTokens(out) }),
+      requestIdHeader: 'x-request-id',
+    });
+  }
+
+  return { messages, responses };
 }
