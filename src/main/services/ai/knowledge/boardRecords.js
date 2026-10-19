@@ -205,8 +205,63 @@ function popularBoards() {
   }));
 }
 
+const escapeRe = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * Catalog boards a message names ("my ESP32-C3 SuperMini", "a NodeMCU"), as
+ * whole words, the longest name first; a shorter name inside a longer one
+ * that matched ("Nano" in "Nano ESP32") does not count again.
+ * @returns {Array<object>} catalog entries, at most `limit`
+ */
+function boardsNamedIn(text, { limit = 2 } = {}) {
+  const t = String(text || '').toLowerCase();
+  const hits = [];
+  for (const b of CATALOG) {
+    let best = null;
+    for (const name of [b.name, ...(b.aliases || [])].map((n) => n.toLowerCase()).filter((n) => n.length >= 4)) {
+      const m = new RegExp(`(?:^|[^a-z0-9])(${escapeRe(name)})(?=[^a-z0-9]|$)`).exec(t);
+      if (m && (!best || name.length > best.len)) best = { b, len: name.length, start: m.index + m[0].length - name.length };
+    }
+    if (best) hits.push(best);
+  }
+  const taken = [];
+  const out = [];
+  for (const h of hits.sort((x, y) => y.len - x.len || x.b.rank - y.b.rank)) {
+    const end = h.start + h.len;
+    if (taken.some(([s, e]) => h.start < e && end > s)) continue;
+    taken.push([h.start, end]);
+    out.push(h.b);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+/**
+ * The [NAMED BOARD] block: what Impulse knows about a board the message names
+ * when it is not the selected one (a SuperMini programmed as "ESP32C3 Dev
+ * Module" has a plain LED on GPIO 8, not the Dev Module's RGB LED).
+ * @returns {string|null}
+ */
+function namedBoardFacts(text, { fqbn = '' } = {}) {
+  const selected = baseFqbn(fqbn);
+  const boards = boardsNamedIn(text).filter((b) => b.fqbn !== selected);
+  if (!boards.length) return null;
+  const lines = boards.map((b) => {
+    const record = RECORDS[b.id] || {};
+    const parts = [];
+    if (record.onboard?.length) parts.push(`Onboard: ${record.onboard.slice(0, 4).join('; ')}.`);
+    if (record.taken?.length) parts.push(`Pins taken by onboard parts: ${record.taken.join(', ')}.`);
+    if (record.notes?.length) parts.push(record.notes.slice(0, 2).join(' '));
+    else if (b.india) parts.push(b.india);
+    return `[NAMED BOARD] The message names the ${b.name} (its own board id: ${b.fqbn}). ${parts.join(' ')} Proof: ${proofTag(boardProof(b))}.`;
+  });
+  if (fqbn) lines.push(`The selected board is ${fqbn}. Where its facts differ from the named board's (an LED's pin or type, pins that exist), write for the hardware the user names and say so.`);
+  return lines.join('\n');
+}
+
 module.exports = {
   CATALOG, FAMILIES, RECORDS, CORES,
   baseFqbn, platformOf, parseVersion, compareVersions,
   catalogEntry, familyFor, familyByPlatform, driftFor, driftText, boardNotes, notesText, searchCatalog, popularBoards,
+  boardsNamedIn, namedBoardFacts,
 };

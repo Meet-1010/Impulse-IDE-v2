@@ -1,6 +1,7 @@
 const { getSystemPrompt } = require('./prompts/systemPrompt');
 const { circuitBlock } = require('./knowledge/circuitFacts');
 const { componentFacts } = require('./knowledge/components');
+const { namedBoardFacts } = require('./knowledge/boardRecords');
 const ToolExecutor = require('./tools/toolExecutor');
 const SimpleMemory = require('./memory/simpleMemory');
 const { getCoreTools, getDebugTools, getPlanTools, getPackTools } = require('./tools/toolSchema');
@@ -303,7 +304,9 @@ class AIAgent {
     // Parts the message names come with their wiring and a compiled sketch, so
     // the first answer is right without a tool round trip.
     const partFacts = mode === 'ask' ? null : componentFacts(userQuery, { fqbn: context.selectedBoard || '' });
-    const standing = [boardFacts, circuitFacts, partFacts].filter(Boolean).join('\n\n');
+    // A board the message names that is not the selected one ("my SuperMini" with the generic C3 selected).
+    const namedBoard = namedBoardFacts(userQuery, { fqbn: context.selectedBoard || '' });
+    const standing = [boardFacts, namedBoard, circuitFacts, partFacts].filter(Boolean).join('\n\n');
     const messages = [
       {
         role: 'system',

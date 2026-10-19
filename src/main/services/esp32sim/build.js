@@ -33,6 +33,8 @@ function bridgeSource() {
 /** Functions the bridge takes over at link time (the rest are weak in the core). */
 const WRAPPED = [
   'initArduino', '__attachInterruptFunctionalArg', 'pulseIn', 'pulseInLong',
+  // ESP-IDF's GPIO driver, so sketches that use it simulate like digitalWrite ones.
+  'gpio_set_level', 'gpio_get_level', 'gpio_set_direction', 'gpio_reset_pin', 'gpio_config', 'gpio_set_pull_mode',
   // LEDC by channel (core 2.x) and by pin (core 3.x): the bridge defines the set its core has.
   'ledcSetup', 'ledcChangeFrequency', 'ledcAttachPin', 'ledcDetachPin', 'ledcWrite', 'ledcRead', 'ledcReadFreq',
   'ledcWriteTone', 'ledcWriteNote', 'ledcAttach', 'ledcAttachChannel', 'ledcWriteChannel', 'ledcDetach', 'ledcOutputInvert',

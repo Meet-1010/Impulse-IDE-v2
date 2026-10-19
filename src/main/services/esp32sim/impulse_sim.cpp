@@ -36,6 +36,7 @@
 #define ARDUINO_CORE_BUILD
 #include <Arduino.h>
 #include "driver/uart.h"
+#include "driver/gpio.h"
 #include "esp32-hal-spi.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
@@ -329,6 +330,81 @@ void digitalWrite(uint8_t pin, uint8_t val) {
 
 int digitalRead(uint8_t pin) {
   return pin < SIM_PINS ? simLevel(pin) : 0;
+}
+
+// ── ESP-IDF's own GPIO calls: the same pins as digitalWrite ──
+// Sketches that drive pins through the IDF driver (gpio_set_level and
+// friends) simulate too. The real calls still run, since the core's own
+// drivers use them; the circuit hears about a pin only once the bridge is up.
+esp_err_t __real_gpio_set_level(gpio_num_t gpio_num, uint32_t level);
+int __real_gpio_get_level(gpio_num_t gpio_num);
+esp_err_t __real_gpio_set_direction(gpio_num_t gpio_num, gpio_mode_t mode);
+esp_err_t __real_gpio_reset_pin(gpio_num_t gpio_num);
+esp_err_t __real_gpio_config(const gpio_config_t *cfg);
+esp_err_t __real_gpio_set_pull_mode(gpio_num_t gpio_num, gpio_pull_mode_t pull);
+
+static uint8_t simIdfMode(gpio_mode_t mode, uint8_t pulls) {
+  if (mode == GPIO_MODE_OUTPUT_OD || mode == GPIO_MODE_INPUT_OUTPUT_OD) return OUTPUT_OPEN_DRAIN;
+  if (mode == GPIO_MODE_OUTPUT || mode == GPIO_MODE_INPUT_OUTPUT) return OUTPUT;
+  if (mode == GPIO_MODE_DISABLE) return INPUT;
+  return INPUT | pulls;
+}
+
+static void simIdfSetMode(int pin, uint8_t mode) {
+  if (!simReady || pin < 0 || pin >= SIM_PINS) return;
+  simMode[pin] = mode;
+  simSendf("M%u,%u,%lu\n", pin, mode, simNow());
+}
+
+esp_err_t __wrap_gpio_set_level(gpio_num_t gpio_num, uint32_t level) {
+  esp_err_t r = __real_gpio_set_level(gpio_num, level);
+  int pin = (int)gpio_num;
+  if (simReady && pin >= 0 && pin < SIM_PINS) {
+    uint8_t l = level ? 1 : 0;
+    simOut[pin] = l;
+    simSendf("W%u,%u,%lu\n", pin, l, simNow());
+  }
+  return r;
+}
+
+int __wrap_gpio_get_level(gpio_num_t gpio_num) {
+  int pin = (int)gpio_num;
+  if (simReady && pin >= 0 && pin < SIM_PINS) return simLevel(pin);
+  return __real_gpio_get_level(gpio_num);
+}
+
+esp_err_t __wrap_gpio_set_direction(gpio_num_t gpio_num, gpio_mode_t mode) {
+  esp_err_t r = __real_gpio_set_direction(gpio_num, mode);
+  int pin = (int)gpio_num;
+  if (pin >= 0 && pin < SIM_PINS) simIdfSetMode(pin, simIdfMode(mode, simMode[pin] & (PULLUP | PULLDOWN)));
+  return r;
+}
+
+esp_err_t __wrap_gpio_reset_pin(gpio_num_t gpio_num) {
+  esp_err_t r = __real_gpio_reset_pin(gpio_num);
+  simIdfSetMode((int)gpio_num, INPUT_PULLUP);  // IDF: input disabled, pull-up on
+  return r;
+}
+
+esp_err_t __wrap_gpio_config(const gpio_config_t *cfg) {
+  esp_err_t r = __real_gpio_config(cfg);
+  if (cfg) {
+    uint8_t pulls = (cfg->pull_up_en ? PULLUP : 0) | (cfg->pull_down_en ? PULLDOWN : 0);
+    for (int pin = 0; pin < SIM_PINS; pin++) {
+      if (cfg->pin_bit_mask & (1ULL << pin)) simIdfSetMode(pin, simIdfMode(cfg->mode, pulls));
+    }
+  }
+  return r;
+}
+
+esp_err_t __wrap_gpio_set_pull_mode(gpio_num_t gpio_num, gpio_pull_mode_t pull) {
+  esp_err_t r = __real_gpio_set_pull_mode(gpio_num, pull);
+  int pin = (int)gpio_num;
+  if (pin >= 0 && pin < SIM_PINS && !((simMode[pin] & OUTPUT) == OUTPUT)) {
+    uint8_t pulls = pull == GPIO_PULLUP_ONLY ? PULLUP : pull == GPIO_PULLDOWN_ONLY ? PULLDOWN : pull == GPIO_PULLUP_PULLDOWN ? (PULLUP | PULLDOWN) : 0;
+    simIdfSetMode(pin, INPUT | pulls);
+  }
+  return r;
 }
 
 static void simAttach(uint8_t pin, void *fn, void *arg, bool hasArg, int mode) {

@@ -865,9 +865,9 @@
    "category": "board-facts",
    "ask": "Cycle the onboard RGB LED through red, green and blue, one second each, and print the colour name each time it changes.",
    "expect": [
-    "serial contains \"red\"",
-    "serial contains \"green\"",
-    "serial contains \"blue\""
+    "serial matches /red/i",
+    "serial matches /green/i",
+    "serial matches /blue/i"
    ],
    "seconds": 5,
    "why": "The S3 DevKitC LED is a WS2812 on GPIO 48 (RGB_BUILTIN); core 3 drives it with rgbLedWrite."
@@ -1518,7 +1518,7 @@
    "id": "pico-button",
    "board": "pico",
    "category": "gpio",
-   "ask": "A push button connects GP14 to GND, with no external resistor, and an LED is on GP15. Light the LED while the button is held, and print pressed or released whenever the state changes.",
+   "ask": "A push button connects GP14 to GND, with no external resistor, and an LED is on GP15. Light the LED while the button is held, and print pressed or released at startup and whenever the state changes.",
    "expect": [
     "pin 15 low",
     "serial contains \"released\""

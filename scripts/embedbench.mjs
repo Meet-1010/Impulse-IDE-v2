@@ -28,6 +28,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 const BoardKnowledge = require(path.join(root, 'src/main/services/ai/knowledge/boardKnowledge.js'));
 const { componentFacts } = require(path.join(root, 'src/main/services/ai/knowledge/components.js'));
+const { namedBoardFacts } = require(path.join(root, 'src/main/services/ai/knowledge/boardRecords.js'));
 const { circuitBlock } = require(path.join(root, 'src/main/services/ai/knowledge/circuitFacts.js'));
 const { LibraryService } = require(path.join(root, 'src/main/services/libraryService.js'));
 const { lint, autofix, lintReport } = require(path.join(root, 'src/main/services/ai/knowledge/linter.js'));
@@ -161,6 +162,8 @@ async function impulseFacts(task) {
   const blocks = [];
   const facts = kb ? await kb.summary(board.fqbn).catch(() => null) : null;
   if (facts) blocks.push(facts);
+  const named = namedBoardFacts(userMessage(task), { fqbn: board.fqbn });
+  if (named) blocks.push(named);
   const parts = componentFacts(task.ask, { fqbn: board.fqbn });
   if (parts) blocks.push(parts);
   const circuit = circuitText(task);

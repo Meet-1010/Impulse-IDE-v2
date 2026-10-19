@@ -131,3 +131,24 @@ describe('catalog search', () => {
     expect(searchCatalog('zzznotaboard')).toEqual([]);
   });
 });
+
+describe('boards a message names', () => {
+  const { boardsNamedIn, namedBoardFacts } = require('../boardRecords');
+
+  test('finds catalog boards by name or alias, whole words, longest first', () => {
+    expect(boardsNamedIn('Blink the onboard LED of my ESP32-C3 SuperMini').map((b) => b.id)).toEqual(['esp32-c3-supermini']);
+    expect(boardsNamedIn('I have an Arduino Nano ESP32 here').map((b) => b.id)).toEqual(['nano-esp32']); // not the classic Nano too
+    expect(boardsNamedIn('blink an led, then print hello')).toEqual([]);
+    expect(boardsNamedIn('')).toEqual([]);
+  });
+
+  test('a named board that is not the selected one brings its facts and a warning', () => {
+    const facts = namedBoardFacts('Board: ESP32-C3 SuperMini. Blink the onboard LED.', { fqbn: 'esp32:esp32:esp32c3' });
+    expect(facts).toMatch(/^\[NAMED BOARD\] The message names the ESP32-C3 SuperMini \(its own board id: esp32:esp32:nologo_esp32c3_super_mini\)\. Onboard: Blue LED on GPIO8 \(active-LOW\)/);
+    expect(facts).toMatch(/Proof: L\d \(/);
+    expect(facts).toMatch(/The selected board is esp32:esp32:esp32c3\. Where its facts differ/);
+    // Naming the board that is selected adds nothing: the board facts already cover it.
+    expect(namedBoardFacts('my ESP32-C3 SuperMini', { fqbn: 'esp32:esp32:nologo_esp32c3_super_mini' })).toBeNull();
+    expect(namedBoardFacts('blink an led', { fqbn: 'arduino:avr:uno' })).toBeNull();
+  });
+});
