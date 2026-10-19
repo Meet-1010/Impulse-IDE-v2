@@ -1,5 +1,5 @@
 const { proofLine, docsProof, fixProof } = require('../knowledge/proof');
-const { lint, lintReport } = require('../knowledge/linter');
+const { lint, lintReport, autofix } = require('../knowledge/linter');
 const { rewrite: rewriteErrors } = require('../knowledge/errorDecoder');
 const { validateToolCall } = require('./toolSchema');
 const { boundedOutput } = require('./retain');
@@ -369,28 +369,53 @@ class ToolExecutor {
       const fqbn = await this.selectedFqbn().catch(() => '');
       const sketch = code ?? (this.uiCallbacks?.getEditorCode ? await this.uiCallbacks.getEditorCode() : '');
       if (!fqbn || !sketch) return { findings: [], report: '' };
-      const info = this.boardKnowledge ? await this.boardKnowledge.boardInfo(fqbn).catch(() => null) : null;
-      const pins = info?.pins && Object.keys(info.pins).length ? info.pins : null;
-      const ctx = {
-        fqbn,
-        coreVersion: String(info?.core || '').split(' ')[1] || '',
-        ledBuiltin: pins ? (pins.LED_BUILTIN ?? null) : undefined,
-        cdcOnBoot: /enabled/i.test(String(info?.boardOptions?.['USB CDC On Boot'] || '')),
-        built,
-      };
-      // The sketch's other tabs, so a Serial.begin() in another file counts.
-      const sketchPath = this.uiCallbacks?.getCurrentSketchPath ? await this.uiCallbacks.getCurrentSketchPath().catch(() => '') : '';
-      if (sketchPath) {
-        const fs = require('fs');
-        const path = require('path');
-        const dir = path.dirname(sketchPath);
-        ctx.project = fs.readdirSync(dir).filter((f) => /\.(?:ino|cpp|c|h|hpp)$/i.test(f) && path.join(dir, f) !== sketchPath)
-          .slice(0, 20).map((f) => { try { return fs.readFileSync(path.join(dir, f), 'utf8'); } catch { return ''; } }).join('\n');
-      }
-      const findings = lint(sketch, ctx);
+      const findings = lint(sketch, await this.lintContext(fqbn, { built }));
       return { findings, report: lintReport(findings) };
     } catch {
       return { findings: [], report: '' };
+    }
+  }
+
+  /** What the linter needs to know about the board and the sketch's other tabs. */
+  async lintContext(fqbn, { built = false } = {}) {
+    const info = this.boardKnowledge ? await this.boardKnowledge.boardInfo(fqbn).catch(() => null) : null;
+    const pins = info?.pins && Object.keys(info.pins).length ? info.pins : null;
+    const ctx = {
+      fqbn,
+      coreVersion: String(info?.core || '').split(' ')[1] || '',
+      ledBuiltin: pins ? (pins.LED_BUILTIN ?? null) : undefined,
+      cdcOnBoot: /enabled/i.test(String(info?.boardOptions?.['USB CDC On Boot'] || '')),
+      built,
+    };
+    // The sketch's other tabs, so a Serial.begin() in another file counts.
+    const sketchPath = this.uiCallbacks?.getCurrentSketchPath ? await this.uiCallbacks.getCurrentSketchPath().catch(() => '') : '';
+    if (sketchPath) {
+      const fs = require('fs');
+      const path = require('path');
+      const dir = path.dirname(sketchPath);
+      ctx.project = fs.readdirSync(dir).filter((f) => /\.(?:ino|cpp|c|h|hpp)$/i.test(f) && path.join(dir, f) !== sketchPath)
+        .slice(0, 20).map((f) => { try { return fs.readFileSync(path.join(dir, f), 'utf8'); } catch { return ''; } }).join('\n');
+    }
+    return ctx;
+  }
+
+  /**
+   * The linter's mechanical fixes on the open sketch (a wait for a native-USB
+   * monitor, the wrong core's API), without a model call.
+   * @returns {Promise<{ applied: string[] } | null>}
+   */
+  async applyLintFixes() {
+    try {
+      if (!this.uiCallbacks?.getEditorCode || !this.uiCallbacks?.setEditorCode) return null;
+      const fqbn = await this.selectedFqbn().catch(() => '');
+      const code = await this.uiCallbacks.getEditorCode();
+      if (!fqbn || !code) return null;
+      const fixed = autofix(code, await this.lintContext(fqbn, { built: true }));
+      if (!fixed.applied.length) return null;
+      await this.uiCallbacks.setEditorCode(fixed.code);
+      return { applied: fixed.applied };
+    } catch {
+      return null;
     }
   }
 

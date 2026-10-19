@@ -128,6 +128,22 @@ describe('the verify guard', () => {
     expect(result.toolResults.find((r) => r.autoFixed)).toMatchObject({ success: true, autoFixed: ['esp32-ledc-core3'] });
   });
 
+  it('applies the linter\'s mechanical fixes without asking the model', async () => {
+    const { agent, calls, executed } = agentWith([
+      { content: null, toolCalls: [{ id: '1', name: 'set_editor_code', arguments: { code: 'a' } }] },
+      { content: 'Prints the button state.', toolCalls: [] },
+    ], { compile_sketch: { success: true, tool: 'compile_sketch', summary: ['Sketch uses 60,000 bytes (3%) of program storage space.'] } });
+    let lints = 0;
+    agent.toolExecutor.lintSketch = async () => (++lints === 1
+      ? { findings: [{ id: 'native-usb-early-print', level: 'error', line: 3, canRewrite: true, message: "This board's Serial is its own USB: what setup() prints right after a reset is lost before the serial monitor reconnects.", fix: 'Wait for the monitor first.' }], report: 'Problem (line 3): …' }
+      : { findings: [], report: '' });
+    agent.toolExecutor.applyLintFixes = async () => ({ applied: ['native-usb-early-print'] });
+    const result = await agent.processQuery('print the button state on the pico', { hasFileOpen: true }, 'agent');
+    expect(executed).toEqual(['set_editor_code', 'compile_sketch', 'compile_sketch']);
+    expect(calls).toHaveLength(2); // no repair round
+    expect(result.response).toMatch(/Impulse fixed this automatically: This board's Serial is its own USB: what setup\(\) prints right after a reset is lost before the serial monitor reconnects\.$/);
+  });
+
   it('sends what the hardware linter finds back to the model once the sketch compiles', async () => {
     const { agent, calls, executed } = agentWith([
       { content: null, toolCalls: [{ id: '1', name: 'set_editor_code', arguments: { code: 'a' } }] },

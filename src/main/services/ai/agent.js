@@ -30,9 +30,12 @@ function verifySummary(check) {
 /** Titles of the error decoder's rules that were applied, for the answer. */
 function autoFixTitles(ids) {
   const { RULES } = require('./knowledge/errorDecoder');
+  const { RULES: LINT } = require('./knowledge/linter');
   return [...new Set(ids)].map((id) => {
     const rule = RULES.find((r) => r.id === id);
-    return typeof rule?.title === 'string' ? rule.title : id;
+    if (typeof rule?.title === 'string') return rule.title;
+    const lintRule = LINT.find((r) => r.id === id);
+    return lintRule ? lintRule.message.replace(/\.$/, '') : id;
   }).join('; ');
 }
 
@@ -393,8 +396,22 @@ class AIAgent {
           }
           if (pins?.issues?.length) response.content = `${response.content || ''}\n\n${pins.report}`.trim();
           // It compiles and the pins exist; the hardware linter knows what still fails on the bench.
-          const linted = await this.toolExecutor.lintSketch?.(null, { built: true }).catch(() => null);
-          const lintErrors = (linted?.findings || []).filter((f) => f.level === 'error');
+          let linted = await this.toolExecutor.lintSketch?.(null, { built: true }).catch(() => null);
+          let lintErrors = (linted?.findings || []).filter((f) => f.level === 'error');
+          // Mechanical fixes first (a wait for a native-USB monitor…), then a fresh build and a fresh look.
+          if (lintErrors.some((f) => f.canRewrite)) {
+            const auto = await this.toolExecutor.applyLintFixes?.().catch(() => null);
+            if (auto?.applied?.length) {
+              step({ type: 'tool', name: 'compile_sketch' });
+              const again = await this.toolExecutor.execute({ name: 'compile_sketch', arguments: {} });
+              toolResults.push({ ...again, tool: 'compile_sketch', verify: true, autoFixed: auto.applied });
+              if (again?.success) {
+                autoFixed.push(...auto.applied);
+                linted = await this.toolExecutor.lintSketch?.(null, { built: true }).catch(() => null);
+                lintErrors = (linted?.findings || []).filter((f) => f.level === 'error');
+              }
+            }
+          }
           if (lintErrors.length) {
             toolResults.push({ success: false, tool: 'lint', verify: true, findings: linted.findings });
             messages.push({ role: 'assistant', content: response.content || '' });

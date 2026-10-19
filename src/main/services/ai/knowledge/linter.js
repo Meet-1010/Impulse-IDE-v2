@@ -352,19 +352,30 @@ const RULES = [
     fix: 'Wait with a time limit: while (!Serial && millis() < 3000) delay(10);',
   },
   {
-    id: 'native-usb-early-print', level: 'warning', proofLevel: 5,
+    // An error: the user sees nothing at all (seen on a real ESP32-S3, 2026-10-19). The fix is mechanical.
+    id: 'native-usb-early-print', level: 'error', proofLevel: 5,
     when: nativeUsb,
     test: (s) => {
       const setup = functionBody(s, 'setup');
       if (!setup) return null;
-      const print = /\bSerial\s*\.\s*(?:print|println|printf)\s*\(/.exec(setup.body);
-      if (!print) return null;
-      const before = setup.body.slice(0, print.index);
+      // A print in setup(), or a call to one of the sketch's functions that prints.
+      const PRINT = /\bSerial\s*\.\s*(?:print|println|printf)\s*\(/;
+      const printers = [...s.matchAll(/\b(?:void|int|bool)\s+(\w+)\s*\([^)]*\)\s*\{/g)]
+        .map((m) => m[1]).filter((name) => name !== 'setup' && name !== 'loop' && PRINT.test(functionBody(s, name)?.body || ''));
+      const calls = [PRINT, ...printers.map((name) => new RegExp(`\\b${name}\\s*\\(`))]
+        .map((re) => re.exec(setup.body)?.index).filter((i) => i !== undefined);
+      if (!calls.length) return null;
+      const before = setup.body.slice(0, Math.min(...calls));
       if (/while\s*\(\s*!\s*Serial|delay\s*\(\s*(?:[1-9]\d{3,}|\w+)\s*\)/.test(before)) return null;
       return { index: setup.index };
     },
     message: 'This board\'s Serial is its own USB: what setup() prints right after a reset is lost before the serial monitor reconnects.',
     fix: 'Wait for the monitor first: Serial.begin(115200); while (!Serial && millis() < 3000) delay(10);',
+    rewrite: (code) => {
+      const m = /(Serial\s*\.\s*begin\s*\([^;]*\)\s*;)/.exec(code);
+      if (!m || /while\s*\(\s*!\s*Serial/.test(code)) return null;
+      return code.replace(m[1], `${m[1]} while (!Serial && millis() < 3000) delay(10);  // native USB: wait for the monitor`);
+    },
   },
   {
     id: 'esp-eeprom-begin', level: 'error', proofLevel: 0,

@@ -134,7 +134,7 @@ model is having a bad day.
    battery-powered board, `delay()` or `Serial.print()` inside an interrupt,
    a missing `volatile`, `String` concatenation in a loop on an Uno,
    `millis()` stored in an `int`, two parts on one I²C address,
-   `SoftwareSerial` on an ESP32. Today: 28 rules (`knowledge/linter.js`), in
+   `SoftwareSerial` on an ESP32. Today: 27 rules (`knowledge/linter.js`), in
    every build, the Problems tab and the agent's verify step.
 3. **Pin planner.** Given a board and the parts, assigns pins that satisfy
    every constraint (hardware buses, PWM/ADC/interrupt capability, no
@@ -258,9 +258,13 @@ In order; each step has a test of done.
 
 **Phase 1: foundation and measurement** — built on 2026-10-19 (the
 owner approved the plan that day): proof levels on every answer, EmbedBench
-v0 (60 tasks), the hardware linter v1 (28 rules) and the error decoder v1 (56
+v0 (60 tasks), the hardware linter v1 (27 rules) and the error decoder v1 (56
 rules, 39 proven on real compilers, with automatic rewrites the AI's verify
-step applies by itself). HANDOFF.md has the details and what is next.
+step applies by itself). EmbedBench's first run with gpt-5.4-mini: 53/60
+alone, 56/60 with Impulse's facts, 58/60 with its verify loop, which was also
+the cheapest per working sketch; after teaching what failed, every task's
+latest result passes with Impulse (60/60) against 56/60 alone
+(`bench/README.md`). HANDOFF.md has the details and what is next.
 
 1. **Knowledge schema v2.** Every fact gets a proof level, source, version
    range and verified date; existing boards, parts, recipes and drift notes

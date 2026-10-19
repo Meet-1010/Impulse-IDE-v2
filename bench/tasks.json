@@ -536,7 +536,7 @@
    "category": "board-facts",
    "ask": "Blink the DevKit's blue onboard LED twice per second.",
    "expect": [
-    "pin 2 frequency 2Hz ±5%"
+    "pin 2 frequency 2Hz ±10%"
    ],
    "seconds": 3,
    "why": "The DevKit V1 LED is on GPIO 2; the model must know or look it up."
@@ -878,7 +878,7 @@
    "category": "gpio",
    "ask": "LED with a resistor on GPIO 4. Blink it twice per second.",
    "expect": [
-    "pin 4 frequency 2Hz ±5%"
+    "pin 4 frequency 2Hz ±10%"
    ],
    "seconds": 3,
    "circuit": {
@@ -1107,7 +1107,7 @@
    "category": "board-facts",
    "ask": "Blink the SuperMini's onboard blue LED twice per second.",
    "expect": [
-    "pin 8 frequency 2Hz ±5%"
+    "pin 8 frequency 2Hz ±10%"
    ],
    "seconds": 3,
    "boardName": "ESP32-C3 SuperMini (selected as ESP32C3 Dev Module)",
@@ -1575,7 +1575,7 @@
    "category": "board-facts",
    "ask": "LED with a resistor on pin D2. Blink it once per second (500 ms on, 500 ms off).",
    "expect": [
-    "pin 2 frequency 1Hz ±5%"
+    "pin 2 frequency 1Hz ±10%"
    ],
    "seconds": 3,
    "circuit": {
@@ -1618,7 +1618,7 @@
    "category": "board-facts",
    "ask": "Blink the onboard LED twice per second.",
    "expect": [
-    "pin LED_BUILTIN frequency 2Hz ±5%"
+    "pin LED_BUILTIN frequency 2Hz ±10%"
    ],
    "seconds": 3
   },

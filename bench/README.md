@@ -77,8 +77,9 @@ before it counts as failed.
 ## What it costs
 
 The report adds up the model's tokens at the list prices in
-`cloud/src/pricing.js`. Both variants over all tasks cost roughly a dollar
-with `gpt-5.4-mini`, three to five with `gpt-5.4`. The simulator part is free
+`cloud/src/pricing.js`. The first full run of the three model variants over
+all 60 tasks cost $0.28 with `gpt-5.4-mini` at low reasoning; `gpt-5.4`
+lists at about 3.3 times its price per token. The simulator part is free
 and takes about 30 s per ESP32 task (QEMU) and a few seconds per AVR or Pico
 task; `--jobs` runs several at once.
 
@@ -89,10 +90,40 @@ least compiled and ran, what the model cost and the cost per working sketch.
 `byBoard` splits the passes per board, and `results` has each task's error:
 a compile error, or which check failed and what the simulator measured.
 
+## Results
+
+Every run saved with `--write` is in `reports/` (JSON, and a readable
+`.md`). The first full run, 2026-10-19, gpt-5.4-mini at low reasoning:
+
+| Variant | Passed | Cost per working sketch |
+|---|---|---|
+| reference | 60/60 | – |
+| alone | 53/60 | $0.0017 |
+| impulse | 56/60 | $0.0020 |
+| impulse-fix | 58/60 | $0.0013 |
+
+Its failures taught (see the CHANGELOG): a board the user names must bring
+its facts, LED pin included (the ESP32-C3 SuperMini), the ESP32 simulator
+must follow ESP-IDF's GPIO calls, prints lost before a native-USB monitor
+connects are an error with a mechanical fix (also through a helper
+function), and two tasks were worded badly. The tasks that failed anywhere
+were run again (`reports/*-taught*`); taking each task's latest result:
+
+| Variant | Passed |
+|---|---|
+| alone | 56/60 |
+| impulse | 60/60 |
+| impulse-fix | 60/60 |
+
+The model alone still fails where only Impulse's facts help (the SuperMini's
+LED, the Nano ESP32's core 2 APIs). One sample per task makes single runs
+noisy, and the rerun tasks had a second sample: the next version runs three
+samples per task and reports the spread.
+
 ## Next
 
-The knowledge strategy's phase 1 grows this into the nightly benchmark: more
-tasks (120+, including error-fixing and wiring-bug tasks), a third variant
-that runs Impulse's compile, linter and error-decoder loop, real boards for a
-subset, and a scheduled run that publishes the trend. Teach only what the
-model gets wrong: the failures here say which facts to add next.
+The knowledge strategy grows this into the nightly benchmark: more tasks
+(120+, including error-fixing and wiring-bug tasks), three samples per task
+with the spread, real boards for a subset, and a scheduled run that
+publishes the trend. Teach only what the model gets wrong: the failures here
+say which facts to add next.

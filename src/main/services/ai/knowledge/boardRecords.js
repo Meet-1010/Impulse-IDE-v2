@@ -253,6 +253,9 @@ function namedBoardFacts(text, { fqbn = '' } = {}) {
     if (record.taken?.length) parts.push(`Pins taken by onboard parts: ${record.taken.join(', ')}.`);
     if (record.notes?.length) parts.push(record.notes.slice(0, 2).join(' '));
     else if (b.india) parts.push(b.india);
+    // Its LED, said plainly: the selected board's LED_BUILTIN may be another LED (or an RGB LED).
+    const led = /LED[^.;]*?on GPIO\s?(\d{1,2})[^.;]*/i.exec([...(record.onboard || []), b.india || ''].join('; '));
+    if (led && fqbn && baseFqbn(fqbn) !== b.fqbn) parts.push(`For its LED write digitalWrite(${led[1]}, …) with the number ${led[1]}, not LED_BUILTIN: with the selected board, LED_BUILTIN means that board's LED${/active.?low/i.test(led[0]) ? `; this one is active-LOW (LOW = on)` : ''}.`);
     return `[NAMED BOARD] The message names the ${b.name} (its own board id: ${b.fqbn}). ${parts.join(' ')} Proof: ${proofTag(boardProof(b))}.`;
   });
   if (fqbn) lines.push(`The selected board is ${fqbn}. Where its facts differ from the named board's (an LED's pin or type, pins that exist), write for the hardware the user names and say so.`);

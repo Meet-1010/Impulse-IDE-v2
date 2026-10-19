@@ -68,6 +68,8 @@ describe('the linter', () => {
     expect(ids('void report() { Serial.println("x"); }\n', { ...UNO, project: 'void setup() { Serial.begin(9600); }' })).not.toContain('serial-without-begin'); // begin() in another tab
     const early = 'void setup() { Serial.begin(115200); Serial.println("count=0"); }\nvoid loop() {}\n';
     expect(ids(early, PICO)).toContain('native-usb-early-print');
+    // A print through one of the sketch's own functions counts too.
+    expect(ids('void report(bool p) { Serial.println(p ? "pressed" : "released"); }\nvoid setup() { Serial.begin(115200); report(false); }\nvoid loop() {}\n', PICO)).toContain('native-usb-early-print');
     expect(ids(early, UNO)).not.toContain('native-usb-early-print'); // the Uno's USB chip keeps the port open
     expect(ids(early.replace('Serial.begin(115200);', 'Serial.begin(115200); while (!Serial && millis() < 3000) delay(10);'), PICO)).toEqual([]);
     expect(ids('void setup() { Serial.begin(115200); while (!Serial); }\nvoid loop() {}\n', PICO)).toContain('while-serial-forever');
