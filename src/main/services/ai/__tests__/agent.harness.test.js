@@ -107,6 +107,27 @@ describe('the verify guard', () => {
     expect(result.response).toMatch(/Sketch uses 1,000 bytes/);
   });
 
+  it('fixes an error with a proven rewrite without asking the model again', async () => {
+    let compiles = 0;
+    const { agent, calls, executed } = agentWith([
+      { content: null, toolCalls: [{ id: '1', name: 'set_editor_code', arguments: { code: 'ledcSetup(0, 5000, 8);' } }] },
+      { content: 'Dimmed the LED with LEDC.', toolCalls: [] },
+    ], {
+      compile_sketch: () => (++compiles === 1
+        ? { success: false, tool: 'compile_sketch', code: 'CODE_ERROR', error: 'ESP32 core 3 removed ledcSetup and ledcAttachPin', diagnostics: [{ file: '/s/s.ino', line: 2, level: 'error', message: "'ledcSetup' was not declared in this scope" }] }
+        : { success: true, tool: 'compile_sketch', summary: ['Sketch uses 290,000 bytes (22%) of program storage space.'] }),
+    });
+    const rewrites = [];
+    agent.toolExecutor.applyKnownRewrite = async (check) => { rewrites.push(check.code); return { applied: ['esp32-ledc-core3'] }; };
+    const result = await agent.processQuery('dim the led on 4', { hasFileOpen: true }, 'agent');
+    expect(executed).toEqual(['set_editor_code', 'compile_sketch', 'compile_sketch']);
+    expect(rewrites).toEqual(['CODE_ERROR']);
+    expect(calls).toHaveLength(2); // no repair round: the rewrite fixed it
+    expect(result.response).toMatch(/Sketch uses 290,000 bytes/);
+    expect(result.response).toMatch(/Impulse fixed this automatically: ESP32 core 3 removed ledcSetup and ledcAttachPin\.$/);
+    expect(result.toolResults.find((r) => r.autoFixed)).toMatchObject({ success: true, autoFixed: ['esp32-ledc-core3'] });
+  });
+
   it('sends what the hardware linter finds back to the model once the sketch compiles', async () => {
     const { agent, calls, executed } = agentWith([
       { content: null, toolCalls: [{ id: '1', name: 'set_editor_code', arguments: { code: 'a' } }] },

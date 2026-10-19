@@ -59,3 +59,31 @@ describe('ToolExecutor', () => {
     expect(res.error).toContain('Arduino CLI is not available');
   });
 });
+
+describe('fixes the error decoder can make by itself', () => {
+  const executorWith = (code, fqbn) => {
+    const executor = new ToolExecutor({}, {}, {}, null);
+    const written = [];
+    executor.uiCallbacks = {
+      getSelectedBoard: async () => fqbn,
+      getEditorCode: async () => code,
+      setEditorCode: async (next) => { written.push(next); },
+    };
+    return { executor, written };
+  };
+
+  test('core 2 LEDC on ESP32 core 3 is rewritten in the editor', async () => {
+    const { executor, written } = executorWith('void setup() {\n  ledcSetup(0, 5000, 8);\n  ledcAttachPin(4, 0);\n  ledcWrite(0, 128);\n}\nvoid loop() {}\n', 'esp32:esp32:esp32');
+    const check = { success: false, code: 'CODE_ERROR', diagnostics: [{ file: '/s/s.ino', line: 2, col: 3, level: 'error', message: "'ledcSetup' was not declared in this scope" }] };
+    expect(await executor.applyKnownRewrite(check)).toEqual({ applied: ['esp32-ledc-core3'] });
+    expect(written).toEqual(['void setup() {\n  ledcAttach(4, 5000, 8);\n  ledcWrite(4, 128);\n}\nvoid loop() {}\n']);
+  });
+
+  test('nothing to fix, a passing build or no editor: nothing is written', async () => {
+    const { executor, written } = executorWith('void setup() {}\nvoid loop() {}\n', 'arduino:avr:uno');
+    expect(await executor.applyKnownRewrite({ success: false, diagnostics: [{ file: 's.ino', line: 1, level: 'error', message: "call of overloaded 'f(int)' is ambiguous" }] })).toBeNull();
+    expect(await executor.applyKnownRewrite({ success: true })).toBeNull();
+    expect(written).toEqual([]);
+    expect(await new ToolExecutor({}, {}, {}, null).applyKnownRewrite({ success: false })).toBeNull();
+  });
+});

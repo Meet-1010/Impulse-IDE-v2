@@ -1,5 +1,6 @@
 const { proofLine, docsProof, fixProof } = require('../knowledge/proof');
 const { lint, lintReport } = require('../knowledge/linter');
+const { rewrite: rewriteErrors } = require('../knowledge/errorDecoder');
 const { validateToolCall } = require('./toolSchema');
 const { boundedOutput } = require('./retain');
 const { circuitToolResult } = require('../knowledge/circuitFacts');
@@ -380,6 +381,30 @@ class ToolExecutor {
       return { findings, report: lintReport(findings) };
     } catch {
       return { findings: [], report: '' };
+    }
+  }
+
+  /**
+   * A failed build whose errors have a proven mechanical fix (the error
+   * decoder's rewrites: an API that moved between core versions, a missing
+   * include, pasted quotes): apply it to the open sketch without a model call.
+   * @returns {Promise<{ applied: string[] } | null>}
+   */
+  async applyKnownRewrite(check) {
+    try {
+      if (!check || check.success !== false || !this.uiCallbacks?.getEditorCode || !this.uiCallbacks?.setEditorCode) return null;
+      const fqbn = await this.selectedFqbn().catch(() => '');
+      const code = await this.uiCallbacks.getEditorCode();
+      if (!fqbn || !code) return null;
+      const output = [check.output || '', ...(check.diagnostics || []).map((d) => `${d.file}:${d.line}:${d.col ?? 1}: ${d.level}: ${d.message}`)].join('\n');
+      const info = this.boardKnowledge ? await this.boardKnowledge.boardInfo(fqbn).catch(() => null) : null;
+      const led = info?.pins?.LED_BUILTIN;
+      const fixed = rewriteErrors(code, output, { fqbn, ledPin: Number.isInteger(led) ? led : null });
+      if (!fixed.applied.length) return null;
+      await this.uiCallbacks.setEditorCode(fixed.code);
+      return { applied: fixed.applied };
+    } catch {
+      return null;
     }
   }
 

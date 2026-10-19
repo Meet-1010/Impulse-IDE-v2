@@ -17,6 +17,7 @@
 // global one, the way the app installs them.
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
+import https from 'node:https';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -186,33 +187,48 @@ if (!REFERENCE && !KEY) throw new Error('No OpenAI key: set OPENAI_API_KEY or pu
 const PRICE = MODEL ? MODELS[MODEL] : null;
 if (!REFERENCE && !PRICE) throw new Error(`Unknown model "${MODEL}". Known: ${Object.keys(MODELS).filter((m) => MODELS[m].vendor === 'openai').join(', ')}`);
 
+/** One POST over a fresh HTTPS connection: no shared pool to go stale after a network blip. */
+function postJson(url, body, { timeoutMs = 240000 } = {}) {
+  return new Promise((resolve, reject) => {
+    const data = JSON.stringify(body);
+    const req = https.request(url, {
+      method: 'POST',
+      agent: new https.Agent({ keepAlive: false }),
+      headers: { Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) },
+      timeout: timeoutMs,
+    }, (res) => {
+      let text = '';
+      res.setEncoding('utf8');
+      res.on('data', (chunk) => { text += chunk; });
+      res.on('end', () => {
+        let json = {};
+        try { json = JSON.parse(text); } catch { /* not JSON */ }
+        resolve({ status: res.statusCode, json });
+      });
+    });
+    req.on('timeout', () => req.destroy(new Error('timed out')));
+    req.on('error', reject);
+    req.end(data);
+  });
+}
+
 async function callModel(instructions, input) {
   // input: the user's message, or a conversation [{ role, content }] for a repair round.
   const body = { model: MODEL, instructions, input, reasoning: { effort: EFFORT }, max_output_tokens: MAX_OUTPUT, store: false };
   let lastError = '';
-  for (let attempt = 0; attempt < 4; attempt++) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 240000);
+  for (let attempt = 0; attempt < 7; attempt++) {
     try {
-      const res = await fetch('https://api.openai.com/v1/responses', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-        signal: controller.signal,
-      });
-      const json = await res.json().catch(() => ({}));
-      if (res.ok) {
+      const { status, json } = await postJson('https://api.openai.com/v1/responses', body);
+      if (status >= 200 && status < 300) {
         const text = (json.output || []).filter((o) => o.type === 'message').flatMap((o) => o.content || []).filter((c) => c.type === 'output_text').map((c) => c.text).join('');
         return { text, usage: json.usage || {} };
       }
-      lastError = `${res.status} ${json?.error?.message || ''}`.trim();
-      if (![408, 409, 429, 500, 502, 503, 504].includes(res.status)) break;
+      lastError = `${status} ${json?.error?.message || ''}`.trim();
+      if (![408, 409, 429, 500, 502, 503, 504].includes(status)) break;
     } catch (error) {
-      lastError = error.name === 'AbortError' ? 'timed out' : error.message;
-    } finally {
-      clearTimeout(timer);
+      lastError = error.message; // network trouble: wait and try a fresh connection
     }
-    await new Promise((r) => setTimeout(r, 2000 * 2 ** attempt));
+    await new Promise((r) => setTimeout(r, Math.min(60000, 2000 * 2 ** attempt)));
   }
   return { error: lastError || 'the model call failed', text: '', usage: {} };
 }

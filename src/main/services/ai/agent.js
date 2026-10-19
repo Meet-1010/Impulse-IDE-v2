@@ -26,6 +26,15 @@ function verifySummary(check) {
   return lines.join('\n');
 }
 
+/** Titles of the error decoder's rules that were applied, for the answer. */
+function autoFixTitles(ids) {
+  const { RULES } = require('./knowledge/errorDecoder');
+  return [...new Set(ids)].map((id) => {
+    const rule = RULES.find((r) => r.id === id);
+    return typeof rule?.title === 'string' ? rule.title : id;
+  }).join('; ');
+}
+
 function safeJson(text) {
   try { return JSON.parse(text) || {}; } catch { return {}; }
 }
@@ -335,6 +344,7 @@ class AIAgent {
     // The verify guard: code edited this turn must compile before the answer stands.
     let editedSinceCompile = false;
     let verifyRounds = 0;
+    const autoFixed = []; // decoder rewrites applied without a model call
 
     while (iteration < maxIterations) {
       step({ type: 'thinking' });
@@ -346,8 +356,18 @@ class AIAgent {
           verifyRounds++;
           editedSinceCompile = false;
           step({ type: 'tool', name: 'compile_sketch' });
-          const check = await this.toolExecutor.execute({ name: 'compile_sketch', arguments: {} });
+          let check = await this.toolExecutor.execute({ name: 'compile_sketch', arguments: {} });
           toolResults.push({ ...check, tool: 'compile_sketch', verify: true });
+          // Errors with a proven mechanical fix are fixed without a model call, then compiled again.
+          if (check && check.success === false && check.code !== 'BUSY') {
+            const auto = await this.toolExecutor.applyKnownRewrite?.(check).catch(() => null);
+            if (auto?.applied?.length) {
+              step({ type: 'tool', name: 'compile_sketch' });
+              check = await this.toolExecutor.execute({ name: 'compile_sketch', arguments: {} });
+              toolResults.push({ ...check, tool: 'compile_sketch', verify: true, autoFixed: auto.applied });
+              autoFixed.push(...auto.applied);
+            }
+          }
           if (check && check.success === false && check.code !== 'BUSY') {
             messages.push({ role: 'assistant', content: response.content || '' });
             messages.push({ role: 'user', content: `[VERIFY] The sketch you edited does not compile:\n${verifySummary(check)}\nFix it (knownFixes, if present, says what fixed this before), then tell the user what you changed.` });
@@ -382,6 +402,9 @@ class AIAgent {
           }
           if (check && check.success && Array.isArray(check.summary) && check.summary.length) {
             response.content = `${response.content || ''}\n\n${check.summary[0]}`.trim();
+          }
+          if (autoFixed.length && check?.success) {
+            response.content = `${response.content || ''}\n\nImpulse fixed this automatically: ${autoFixTitles(autoFixed)}.`.trim();
           }
         }
         if (response.content) {
