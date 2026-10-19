@@ -139,6 +139,13 @@ export function createAccount({ api, onSignedIn }) {
         const providers = [];
         if (auth.google) providers.push(h('button', { type: 'button', class: 'v-btn block', onclick: () => provider('google') }, icon(ICON.google), 'Continue with Google'));
         if (auth.github) providers.push(h('button', { type: 'button', class: 'v-btn block', onclick: () => provider('github') }, icon(ICON.github), 'Continue with GitHub'));
+        // A server with no sign-in method switched on yet (a new deployment): say so instead of an empty dialog.
+        if (!providers.length && !auth.email) {
+          add(d.body,
+            h('h2', { text: 'Sign-in isn\'t open yet' }),
+            h('p', { class: 'v-sub', text: 'Impulse Cloud is running, but no way to sign in has been switched on yet. The simulator and the IDE work meanwhile; try again later.' }));
+          return;
+        }
         const mail = field('Email', { type: 'email', autocomplete: 'email', required: true, value: email });
         const pass = field('Password', { type: 'password', autocomplete: 'current-password', required: true });
         const submit = h('button', { type: 'submit', class: 'v-btn primary block', text: 'Sign in', dataset: { label: 'Sign in' } });

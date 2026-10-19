@@ -1,6 +1,8 @@
 /**
  * Where Impulse Cloud (accounts, credits, AI) lives: package.json
  * "impulse.cloudUrl", or IMPULSE_CLOUD_URL for development and tests.
+ * IMPULSE_CLOUD_URL=off runs a build without a cloud (tests, offline work):
+ * any value that is not a URL wins over package.json and means "no cloud".
  * @module main/services/cloud/config
  */
 

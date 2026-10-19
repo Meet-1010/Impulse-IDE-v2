@@ -7,27 +7,43 @@ free tiers except the AI itself, which OpenAI bills per use.
 What you end up with:
 
 ```
-Impulse desktop app ──https──▶ Impulse Cloud on Cloud Run (Singapore)
-                                 ├─▶ Postgres on Neon (Singapore)
+Impulse desktop app ──https──▶ Impulse Cloud on Cloud Run (Oregon, us-west1)
+                                 ├─▶ Postgres on Neon (AWS Oregon, us-west-2)
                                  ├─▶ OpenAI API (Impulse's key)
                                  └─▶ Resend (sign-up codes, once you own a domain)
 ```
+
+**Live deployment (2026-10-19).** Already done by Claude with the owner's
+go-ahead: project `impulse-cloud-prod` on billing account "My Billing Account
+1", Cloud Run service `impulse-cloud` at
+https://impulse-cloud-1008821972739.us-west1.run.app, runtime account
+`impulse-cloud@impulse-cloud-prod.iam.gserviceaccount.com`, Neon project
+`impulse-cloud` (database and owner role `impulse`, smallest compute) in AWS
+Oregon, secrets `impulse-database-url`, `impulse-auth-secret`,
+`impulse-openai-key`, the image and source cleanup rules from "Running it",
+a ₹100 budget with alerts at ₹1, ₹50 and ₹100, and a daily AI spend cap of $2
+(admin console → Settings). **Still to do: step 8 (sign-in), which needs the
+owner signed in to GitHub as Meet-1010 and to Google as the project's owner**;
+`cloud/scripts/set-signin.sh` then does the rest in one command.
 
 **Who does what.** The account steps (Google billing, OAuth apps, OpenAI key,
 Resend domain) need you in a browser. Every command step can be run by Claude
 in this repository once `gcloud` is signed in, if you prefer: say which.
 
-**Why Singapore.** Neon has no region in India; its closest is AWS Singapore.
-Each AI request makes about five database queries before the first word
-streams back, so the server belongs next to the database: Mumbai to Singapore
-adds about 65 ms per query (over 300 ms per request), while users in India
-reach Singapore in about 60–80 ms once. Singapore (`asia-southeast1`) also
-supports Cloud Run custom domains, which Mumbai does not. The trade-off is that
-Singapore is a Tier 2 price region: the free tier is a spending discount at
-Tier 1 prices, so it covers about 128,000 vCPU-seconds there instead of
-180,000. That is still far more than a launch needs. (Mumbai, `asia-south1`,
-has been Tier 1 since November 2024; use it together with a database in Mumbai
-if you ever move off Neon.)
+**Why Oregon, and why it stays free.** The owner wants Impulse Cloud free to
+run at launch. Cloud Run, Cloud Build, Artifact Registry and Secret Manager
+have the same free allowance in every region, but two allowances apply only
+in the US: Cloud Storage (where `--source` deploys upload the code) is free
+only in us-east1, us-west1 and us-central1, and Cloud Run's free outbound data
+counts only from North America. Neon has a region in Oregon (AWS us-west-2)
+within a few milliseconds of Cloud Run's us-west1, which matters because each
+AI request makes several database queries. Users in India are farther away
+(about 250 ms per round trip instead of 70 ms to Singapore), but OpenAI itself
+runs in the US, so an AI answer from Singapore would cross the Pacific anyway:
+for the requests that matter the two regions are about equally fast, and only
+Oregon is free. If Impulse later outgrows the free tier, Singapore
+(`asia-southeast1`) beside Neon's AWS Singapore region is the better home for
+non-AI traffic.
 
 ---
 
@@ -80,7 +96,7 @@ In Terminal, from the repository folder (`~/Impulse-2D-Simulation/repo`):
 
 ```bash
 export PROJECT_ID=impulse-cloud-prod      # the ID from step 1.4
-export REGION=asia-southeast1
+export REGION=us-west1
 gcloud config set project $PROJECT_ID
 gcloud config set run/region $REGION
 export PROJECT_NUMBER=$(gcloud projects describe $PROJECT_ID --format='value(projectNumber)')
@@ -120,12 +136,15 @@ gcloud iam service-accounts create impulse-cloud --display-name="Impulse Cloud r
 ## 3. The database on Neon
 
 1. <https://console.neon.tech> → **New project**.
-   - Name `impulse`, the default Postgres version, region
-     **AWS Asia Pacific (Singapore)**. The region cannot be changed later.
+   - Name `impulse-cloud`, Postgres 17, region **AWS US West 2 (Oregon)**.
+     The region cannot be changed later.
 2. On the project dashboard, **Connect** → turn **Connection pooling** on →
    copy the connection string. It looks like
-   `postgresql://…@ep-…-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require…`
+   `postgresql://…@ep-…-pooler.c-4.us-west-2.aws.neon.tech/impulse?sslmode=require…`
    (the `-pooler` part matters: Cloud Run opens many short connections).
+   Change `sslmode=require` to `sslmode=verify-full` and drop
+   `channel_binding=require`: the Postgres driver treats `require` as
+   `verify-full` today and warns that its next major version will not.
 3. Leave it on the clipboard for the next step. Nothing to run here: the
    server creates its tables the first time it starts.
 
@@ -138,9 +157,11 @@ gcloud iam service-accounts create impulse-cloud --display-name="Impulse Cloud r
    start) and turn on **Enforce a hard limit**: requests fail with HTTP 429
    once it is reached (enforcement is near, not exactly at, the limit). Add
    spend alerts below it.
-4. The key that was pasted into a chat earlier should be revoked once the new
-   one works (API keys → that key → Revoke), and the local `cloud/.env`
-   updated with a fresh development key.
+4. On 2026-10-19 the owner chose to keep using the key from `cloud/.env`
+   (it was once pasted into a chat). Rotate it whenever it may have been seen
+   by anyone else: create a new key, then
+   `pbpaste | gcloud secrets versions add impulse-openai-key --data-file=-` and
+   `gcloud run services update impulse-cloud --region $REGION` to pick it up.
 
 Impulse has its own guard as well: a daily spend cap (admin console →
 Settings → daily budget, $25 by default) and a per-user request rate.
@@ -182,7 +203,7 @@ gcloud run deploy impulse-cloud \
   --region $REGION \
   --service-account $RUNTIME_SA \
   --allow-unauthenticated \
-  --min-instances 0 --max-instances 3 \
+  --min-instances 0 --max-instances 2 \
   --cpu 1 --memory 512Mi --concurrency 80 --timeout 900 \
   --set-env-vars "IMPULSE_CLOUD_URL=$SERVICE_URL,ADMIN_EMAILS=YOUR_EMAIL,IMPULSE_WEBSITE_URL=https://impulse-ide.vercel.app" \
   --set-secrets "DATABASE_URL=impulse-database-url:latest,BETTER_AUTH_SECRET=impulse-auth-secret:latest,OPENAI_API_KEY=impulse-openai-key:latest"
@@ -196,7 +217,7 @@ gcloud run deploy impulse-cloud \
 - `--source cloud` uploads the `cloud/` folder (minus what `.gcloudignore`
   lists, including the local `.env`) and builds it with `cloud/Dockerfile`.
 - `--allow-unauthenticated` makes the API public; the server checks every
-  request itself. `--max-instances 3` caps how far it can scale (and cost).
+  request itself. `--max-instances 2` caps how far it can scale (and cost).
   `--timeout 900` keeps long streamed answers alive.
 
 When it finishes it prints **Service URL**. It should equal `$SERVICE_URL`. If
@@ -227,7 +248,7 @@ and GitHub come next. Nobody, you included, can sign in before step 8.
    email, audience **External**, contact email → **Create**.
 2. **Clients** → **Create client** → type **Web application**, name
    `Impulse Cloud` → **Authorized redirect URIs** → add exactly
-   `https://impulse-cloud-<PROJECT_NUMBER>.asia-southeast1.run.app/api/auth/callback/google`
+   `https://impulse-cloud-1008821972739.us-west1.run.app/api/auth/callback/google`
    (print it with `echo $SERVICE_URL/api/auth/callback/google`) → **Create**.
    Copy the **Client ID** and the **Client secret**.
 3. **Audience** → **Publish app**. Until it is published, only test users you
@@ -243,7 +264,11 @@ and GitHub come next. Nobody, you included, can sign in before step 8.
 2. **Register application** → **Generate a new client secret**. Copy the
    **Client ID** and the secret.
 
-**Give them to the server** (copy each secret right before its line):
+**Give them to the server.** The quick way: copy the client secret, then run
+`cloud/scripts/set-signin.sh github <client-id>` (or `google <client-id>`). It
+stores the secret from the clipboard, lets the server read it, sets the client
+ID and prints the sign-in methods the server now offers. By hand (copy each
+secret right before its line):
 
 ```bash
 pbpaste | gcloud secrets create impulse-google-secret --data-file=-   # Google client secret
@@ -346,17 +371,18 @@ paid plan.
 
 | Service | Free allowance | Impulse at launch |
 |---|---|---|
-| Cloud Run | about 128,000 vCPU-seconds, 2 million requests a month in Singapore | well inside |
-| Cloud Build | free build minutes each month | a deploy takes 1–2 minutes |
+| Cloud Run | 180,000 vCPU-seconds, 360,000 GiB-seconds, 2 million requests and 1 GB of outbound data from North America a month | well inside |
+| Cloud Build | 2,500 build-minutes a month | a deploy takes about 3 minutes |
+| Cloud Storage | 5 GB in us-west1 (uploaded sources) | inside; sources expire after 7 days |
 | Artifact Registry | 0.5 GB | inside, with the cleanup policy |
 | Secret Manager | 6 active secret versions, 10,000 reads | inside |
-| Neon | free plan: 0.5 GB storage, limited compute hours | inside |
+| Neon | free plan: 0.5 GB storage, limited compute hours (Impulse uses the smallest compute) | inside |
 | Resend | 100 emails a day | inside |
-| OpenAI | none | the real cost, capped by the hard limit |
+| OpenAI | none | the real cost, capped by the server's daily budget ($2 at first) and OpenAI's hard limit |
 
 ## A custom domain (later)
 
-`asia-southeast1` supports Cloud Run domain mappings (a preview feature):
+`us-west1` supports Cloud Run domain mappings (a preview feature):
 verify the domain once (`gcloud domains verify YOUR-DOMAIN`), then
 `gcloud beta run domain-mappings create --service impulse-cloud --domain api.YOUR-DOMAIN --region $REGION`
 and add the DNS records it prints. Then set `IMPULSE_CLOUD_URL` to the new
@@ -371,7 +397,7 @@ before the first public release if you can.
 | Deploy fails with `PERMISSION_DENIED` mentioning `run.builder` | The role from step 2 has not applied yet (wait two minutes) or was not granted. |
 | Deploy fails: secret … permission denied | Step 5's `add-iam-policy-binding` was skipped for that secret. |
 | `/health` fails, logs say `Set DATABASE_URL…` | A secret is empty or misnamed: `gcloud secrets versions access latest --secret impulse-database-url \| head -c 30`. |
-| Logs show database connection errors | The Neon string must be the **pooled** one with `sslmode=require`. |
+| Logs show database connection errors | The Neon string must be the **pooled** one with `sslmode=verify-full` (or `require`). |
 | Google says `redirect_uri_mismatch` | The redirect URI in step 8 must match `$SERVICE_URL/api/auth/callback/google` exactly, `https` included. |
 | Only some Google accounts can sign in | The OAuth app is still in Testing: Audience → Publish app. |
 | The app says Impulse AI is unavailable | `OPENAI_API_KEY` is missing or revoked, or the OpenAI hard limit was reached: admin console → Settings → This server, and the OpenAI project's usage page. |
