@@ -22,6 +22,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { markdownReport } from './embedbench-report.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
@@ -501,5 +502,6 @@ if (flag('write')) {
   const file = path.join(root, 'bench/reports', `${report.date.slice(0, 10)}-${String(LABEL).replace(/[^\w.-]/g, '_')}.json`);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, `${JSON.stringify(report, null, 1)}\n`);
-  console.log(`Report: ${path.relative(root, file)}`);
+  fs.writeFileSync(file.replace(/\.json$/, '.md'), markdownReport(report));
+  console.log(`Report: ${path.relative(root, file)} (and .md)`);
 }

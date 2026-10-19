@@ -256,7 +256,11 @@ better on day one.
 
 In order; each step has a test of done.
 
-**Phase 1: foundation and measurement**
+**Phase 1: foundation and measurement** — built on 2026-10-19 (the
+owner approved the plan that day): proof levels on every answer, EmbedBench
+v0 (60 tasks), the hardware linter v1 (28 rules) and the error decoder v1 (56
+rules, 39 proven on real compilers, with automatic rewrites the AI's verify
+step applies by itself). HANDOFF.md has the details and what is next.
 
 1. **Knowledge schema v2.** Every fact gets a proof level, source, version
    range and verified date; existing boards, parts, recipes and drift notes
