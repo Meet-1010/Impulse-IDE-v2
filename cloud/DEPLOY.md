@@ -160,8 +160,13 @@ gcloud iam service-accounts create impulse-cloud --display-name="Impulse Cloud r
 4. On 2026-10-19 the owner chose to keep using the key from `cloud/.env`
    (it was once pasted into a chat). Rotate it whenever it may have been seen
    by anyone else: create a new key, then
-   `pbpaste | gcloud secrets versions add impulse-openai-key --data-file=-` and
-   `gcloud run services update impulse-cloud --region $REGION` to pick it up.
+   `pbpaste | gcloud secrets versions add impulse-openai-key --data-file=-`,
+   then start a revision that reads it (a secret is read when an instance
+   starts, and `services update` refuses to run without a change):
+   `gcloud run services update impulse-cloud --region $REGION --update-labels rotated=$(date +%Y%m%d%H%M)`.
+   Once the app works, destroy the old version so the free tier's six active
+   versions are not exceeded: `gcloud secrets versions list impulse-openai-key`
+   shows its number, `gcloud secrets versions destroy N --secret impulse-openai-key`.
 
 Impulse has its own guard as well: a daily spend cap (admin console →
 Settings → daily budget, $25 by default) and a per-user request rate.
