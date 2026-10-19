@@ -42,8 +42,6 @@ const state = window.state = {
     aiPanelWidth: 400,
     aiProviderConfigured: false,
     aiMode: 'agent',
-    aiModelId: null,
-    aiUnifiedModels: [],
     aiModelSuggestion: null,
     aiTokensUsed: 0,       // cumulative input tokens this session
     aiCompacting: false,   // guard against concurrent compaction
@@ -121,7 +119,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         await checkArduinoCLI();
         await loadBoards();
         await loadPorts();
-        await loadAIUnifiedModels();
         await restoreAIPreferences();
         await ensureAIModel({ quiet: true });
         window.electronAPI.cloud.onStatus(followAccount);
@@ -1831,7 +1828,6 @@ function setupAIListeners() {
         state.aiMode = e.target.value;
         saveAIPreferences();
     });
-    document.getElementById('aiModelSelect')?.addEventListener('change', onAIModelChange);
     document.getElementById('aiCompactBtn')?.addEventListener('click', compactConversation);
     // The welcome (starters) as it is before the first message, for New chat.
     state.aiWelcomeHtml = state.aiWelcomeHtml || document.querySelector('#aiMessages .ai-welcome')?.outerHTML || '';
@@ -3656,10 +3652,7 @@ async function restoreSession() {
 
 function saveAIPreferences() {
     try {
-        localStorage.setItem(AI_PREFS_KEY, JSON.stringify({
-            mode: state.aiMode,
-            modelId: state.aiModelId
-        }));
+        localStorage.setItem(AI_PREFS_KEY, JSON.stringify({ mode: state.aiMode }));
     } catch (e) {
         console.warn('Could not save AI preferences', e);
     }
@@ -3675,55 +3668,37 @@ async function restoreAIPreferences() {
             const modeSelect = document.getElementById('aiModeSelect');
             if (modeSelect) modeSelect.value = prefs.mode;
         }
-        // Models from before Impulse Cloud (your own API keys) no longer exist.
-        if (!providerOfModel(prefs.modelId)) return;
-        state.aiModelId = prefs.modelId;
-        const modelSelect = document.getElementById('aiModelSelect');
-        if (modelSelect) modelSelect.value = prefs.modelId;
-        const result = await window.electronAPI.ai.setModel(prefs.modelId).catch(() => null);
-        state.aiProviderConfigured = !!result?.success;
-        refreshAIStatus();
     } catch (e) {
         console.warn('Could not restore AI preferences', e);
     }
 }
 
-/** The cloud model to start with: the server's default once the catalog loaded, else GPT-5.4. */
-let cloudDefaultModel = 'impulse:gpt-5.4';
-const defaultCloudModel = () => cloudDefaultModel;
-
-// Map a model id to its lane (mirrors AIAgent.getProviderFromModel): every
-// model runs through Impulse Cloud; the model's vendor decides the lane.
-function providerOfModel(modelId) {
-    if (!modelId || typeof modelId !== 'string' || !modelId.startsWith('impulse:')) return null;
-    const bare = modelId.slice('impulse:'.length);
-    if (/^(gpt-|o\d|chatgpt-)/.test(bare)) return 'impulse-openai';
-    if (/^claude-/.test(bare)) return 'impulse';
-    return null;
-}
-
-const modelName = (id) => (state.aiUnifiedModels.find(m => m.id === id) || {}).displayName || id;
-
-/** The line under the IDE composer: which model answers, or what to do first. */
+/** The line under the IDE composer: whether Impulse AI can answer, or what to do first. */
 function refreshAIStatus() {
-    if (state.aiProviderConfigured && state.aiModelId) updateAIStatus(`Ready · ${modelName(state.aiModelId)}`);
+    if (state.aiProviderConfigured) updateAIStatus('Ready · Impulse AI');
     else updateAIStatus('Sign in to Impulse (the person icon) to use the AI');
 }
 
 /**
- * Before sending: make sure a model can answer. Signed in: the chosen cloud
- * model, or the server's default one.
+ * Before sending: make sure Impulse AI can answer. There is one AI to the
+ * person; the server picks the model behind it for each turn, so here only
+ * the account matters.
  * @returns {Promise<{ ok: boolean, provider?: string, needsSignIn?: boolean, error?: string }>}
  */
 async function readyAIModel() {
-    const provider = providerOfModel(state.aiModelId);
-    if (state.aiProviderConfigured && provider) return { ok: true, provider };
     const status = await window.electronAPI.cloud.status().catch(() => null);
     if (!status?.configured) return { ok: false, error: 'This build of Impulse has no cloud address, so its AI is off.' };
-    if (!status.signedIn) return { ok: false, needsSignIn: true };
-    const id = provider ? state.aiModelId : defaultCloudModel();
-    if (await selectModelProgrammatically(id)) return { ok: true, provider: providerOfModel(id) };
-    return { ok: false, error: 'Impulse AI isn\'t available right now.' };
+    if (!status.signedIn) {
+        state.aiProviderConfigured = false;
+        refreshAIStatus();
+        return { ok: false, needsSignIn: true };
+    }
+    const res = await window.electronAPI.ai.ready().catch((e) => ({ success: false, error: e?.message }));
+    state.aiProviderConfigured = !!res?.success;
+    refreshAIStatus();
+    if (res?.success) return { ok: true, provider: 'impulse' };
+    if (res?.needsSignIn) return { ok: false, needsSignIn: true };
+    return { ok: false, error: res?.error || 'Impulse AI isn\'t available right now.' };
 }
 
 /** IDE chat: like readyAIModel, but asks the person when something is missing. */
@@ -3735,86 +3710,14 @@ async function ensureAIModel({ quiet = false, pendingPrompt = null } = {}) {
     return false;
 }
 
-async function loadAIUnifiedModels() {
-    try {
-        const result = await window.electronAPI.ai.getUnifiedModels();
-        if (!result.success || !result.data) {
-            updateAIStatus('Could not load models');
-            return;
-        }
-        state.aiUnifiedModels = result.data;
-        const select = document.getElementById('aiModelSelect');
-        if (select) {
-            select.innerHTML = '<option value="">Model…</option>';
-            const group = document.createElement('optgroup');
-            group.label = 'Impulse Cloud · uses credits';
-            for (const m of result.data) {
-                const opt = document.createElement('option');
-                opt.value = m.id;
-                opt.textContent = m.displayName || m.id;
-                group.appendChild(opt);
-            }
-            select.appendChild(group);
-            if (state.aiModelId) select.value = state.aiModelId;
-        }
-        refreshAIStatus();
-        window.dispatchEvent(new CustomEvent('impulse:models-changed'));
-    } catch (error) {
-        console.error('Failed to load AI models:', error);
-        updateAIStatus('Could not load models');
-    }
-}
-
-/** Switch the active model. Fails quietly (false) when it can't run yet. */
-async function selectModelProgrammatically(modelId) {
-    if (!modelId) return false;
-    try {
-        const result = await window.electronAPI.ai.setModel(modelId, false);
-        if (!result || !result.success) return false;
-        state.aiModelId = modelId;
-        state.aiProviderConfigured = true;
-        const select = document.getElementById('aiModelSelect');
-        if (select) select.value = modelId;
-        refreshAIStatus();
-        saveAIPreferences();
-        window.dispatchEvent(new CustomEvent('impulse:models-changed'));
-        return true;
-    } catch (_) {
-        return false;
-    }
-}
-
-/** Signing in picks the cloud model; signing out leaves the cloud model unusable. */
+/** Signing in makes Impulse AI ready; signing out takes it away. */
 function followAccount(status) {
-    const provider = providerOfModel(state.aiModelId);
     if (status?.signedIn) {
-        if (provider && state.aiProviderConfigured) return;
-        selectModelProgrammatically(provider ? state.aiModelId : defaultCloudModel());
-    } else if (!status?.signedIn && provider && state.aiProviderConfigured) {
+        readyAIModel();
+    } else if (state.aiProviderConfigured) {
         state.aiProviderConfigured = false;
         refreshAIStatus();
-        window.dispatchEvent(new CustomEvent('impulse:models-changed'));
     }
-}
-
-async function onAIModelChange(e) {
-    const modelId = e.target.value;
-    if (!modelId) {
-        e.target.value = state.aiModelId || '';
-        return;
-    }
-    const result = await window.electronAPI.ai.setModel(modelId, true).catch((err) => ({ success: false, error: err?.message }));
-    if (result?.success) {
-        state.aiModelId = modelId;
-        state.aiProviderConfigured = true;
-        saveAIPreferences();
-        refreshAIStatus();
-        window.dispatchEvent(new CustomEvent('impulse:models-changed'));
-        return;
-    }
-    e.target.value = state.aiModelId || '';
-    if (result?.needsSignIn) window.impulse.account?.openSignIn();
-    else updateAIStatus(result?.error || 'That model isn\'t available');
 }
 
 // ============================================
@@ -5536,35 +5439,16 @@ function renderIdeChat(messages) {
 Object.assign(window.impulse, {
     ai: {
         info: () => ({
-            models: state.aiUnifiedModels,
-            modelId: state.aiModelId,
             mode: state.aiMode,
             ready: state.aiProviderConfigured,
         }),
         busy: () => !!chatOrb?.busy(),
         ensureModel: readyAIModel,
-        async selectModel(modelId) {
-            const result = await window.electronAPI.ai.setModel(modelId, true).catch((err) => ({ success: false, error: err?.message }));
-            if (!result?.success) return { ok: false, needsSignIn: !!result?.needsSignIn, error: result?.error };
-            state.aiModelId = modelId;
-            state.aiProviderConfigured = true;
-            const select = document.getElementById('aiModelSelect');
-            if (select) select.value = modelId;
-            saveAIPreferences();
-            refreshAIStatus();
-            window.dispatchEvent(new CustomEvent('impulse:models-changed'));
-            return { ok: true };
-        },
         setMode(mode) {
             state.aiMode = ['agent', 'plan', 'debug'].includes(mode) ? mode : 'agent';
             const select = document.getElementById('aiModeSelect');
             if (select) select.value = state.aiMode;
             saveAIPreferences();
-        },
-        refreshModels: loadAIUnifiedModels,
-        /** The server's default model (chat mode learns it from the catalog). */
-        setCloudDefault(id) {
-            if (typeof id === 'string' && providerOfModel(id)) cloudDefaultModel = id;
         },
         context: buildAIContext,
         snapshot: takeCodeSnapshot,

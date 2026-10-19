@@ -442,3 +442,73 @@ describe('AI gateway: the OpenAI lane', () => {
     assert.equal(body.error.code, 'authentication_error');
   });
 });
+
+describe('routing: one Impulse AI, the server picks the model', () => {
+  let t;
+  let fake;
+  let fakeOpenAI;
+  let token;
+  let userId;
+
+  before(async () => {
+    fake = await startFakeAnthropic();
+    fakeOpenAI = await startFakeOpenAI();
+    t = await setup({ fake, fakeOpenAI });
+    ({ token, user: { id: userId } } = await t.signUp('router@impulse.test'));
+  });
+  after(async () => {
+    await t.close();
+    await fake.close();
+    await fakeOpenAI.close();
+  });
+  beforeEach(async () => {
+    await t.pool.query(`delete from app_setting`);
+    t.settings.invalidate();
+    await t.pool.query(`update credit_account set plan = 'free' where user_id = $1`, [userId]);
+  });
+
+  const route = (body) => t.request('/v1/route', { method: 'POST', headers: { 'content-type': 'application/json', ...t.bearer(token) }, body: JSON.stringify(body) }).then((r) => r.json());
+
+  test('each kind of work gets its model, cheapest where it can be', async () => {
+    assert.equal((await route({ kind: 'agent' })).model, 'gpt-5.4');
+    assert.equal((await route({ kind: 'ask' })).model, 'gpt-5.4-mini');
+    assert.equal((await route({ kind: 'summary' })).model, 'gpt-5.4-nano');
+    const r = await route({});
+    assert.deepEqual({ model: r.model, vendor: r.vendor, kind: r.kind }, { model: 'gpt-5.4', vendor: 'openai', kind: 'agent' });
+    assert.ok(r.ttlSeconds >= 60);
+  });
+
+  test('a turn that already failed climbs the escalation ladder, and stays at the top', async () => {
+    assert.equal((await route({ kind: 'agent', escalate: 1 })).model, 'gpt-5.5');
+    assert.equal((await route({ kind: 'agent', escalate: 3 })).model, 'gpt-5.5');
+  });
+
+  test('a model the plan does not allow is never chosen', async () => {
+    await t.settings.update({ plans: { ...t.settings.cached?.plans || (await t.settings.get()).plans, free: { ...(await t.settings.get()).plans.free, models: ['gpt-5.4-mini', 'gpt-5.4-nano'] } } }, null);
+    assert.equal((await route({ kind: 'agent' })).model, 'gpt-5.4-mini', 'falls to the first model the plan allows');
+    assert.equal((await route({ kind: 'agent', escalate: 1 })).model, 'gpt-5.4-mini', 'no ladder step is allowed either');
+  });
+
+  test('the admin can change the table, within known models', async () => {
+    const res = await t.request('/admin/api/settings', { method: 'PUT', headers: { 'content-type': 'application/json', ...t.bearer(token) }, body: JSON.stringify({ routing: { agent: 'gpt-5.5', plan: 'gpt-5.4', debug: 'gpt-5.4', ask: 'gpt-5.4-nano', summary: 'gpt-5.4-nano', escalation: [] } }) });
+    // Not an admin: refused; the validation itself is checked through the store.
+    assert.equal(res.status, 403);
+    const bad = await import('../src/settings.js').then((m) => m.validateSettings({ routing: { agent: 'nope', plan: 'gpt-5.4', debug: 'gpt-5.4', ask: 'gpt-5.4', summary: 'gpt-5.4', escalation: [] } }));
+    assert.equal(bad.ok, false);
+    const good = await import('../src/settings.js').then((m) => m.validateSettings({ routing: { agent: 'gpt-5.5', plan: 'gpt-5.4', debug: 'gpt-5.4', ask: 'gpt-5.4-nano', summary: 'gpt-5.4-nano', escalation: ['gpt-5.5', 'gpt-5.5'] } }));
+    assert.equal(good.ok, true);
+    assert.deepEqual(good.value.routing.escalation, ['gpt-5.5']);
+  });
+
+  test('without a vendor key for the chosen models, the next servable one answers', async () => {
+    const key = t.config.openai.apiKey;
+    t.config.openai.apiKey = '';
+    try {
+      const r = await route({ kind: 'agent' });
+      assert.equal(r.vendor, 'anthropic');
+      assert.equal(r.model, 'claude-opus-5-5');
+    } finally {
+      t.config.openai.apiKey = key;
+    }
+  });
+});

@@ -340,6 +340,12 @@ class CloudAccount extends EventEmitter {
     return res.ok ? { ok: true, data: res.data } : { ok: false, error: res.error };
   }
 
+  /** Which model answers a kind of work now: the server decides, the person sees "Impulse AI". */
+  async route(kind = 'agent', escalate = 0) {
+    const res = await this.request('POST', '/v1/route', { body: { kind, escalate } });
+    return res.ok ? { ok: true, data: res.data } : { ok: false, error: res.error, status: res.status };
+  }
+
   async requestUpgrade(plan, note) {
     const res = await this.request('POST', '/v1/upgrade-request', { body: { plan, note } });
     return res.ok ? { ok: true, data: res.data } : { ok: false, error: res.error };

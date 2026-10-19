@@ -92,12 +92,11 @@ const folderChip = h('button', { type: 'button', class: 'v-folder-chip', 'aria-h
 const announce = h('span', { class: 'v-announce', hidden: true }, led('amber'), h('span'));
 const input = h('textarea', { class: 'v-input', rows: '1', spellcheck: 'false', 'aria-label': 'Message Impulse' });
 const modeChip = h('button', { type: 'button', class: 'v-chip', 'aria-haspopup': 'menu', 'aria-expanded': 'false', title: 'Mode' });
-const modelChip = h('button', { type: 'button', class: 'v-chip', 'aria-haspopup': 'menu', 'aria-expanded': 'false', title: 'Model' });
 const plusButton = h('button', { type: 'button', class: 'v-icon-btn', 'aria-label': 'More tools', title: 'Libraries, examples, upload…', 'aria-haspopup': 'menu', 'aria-expanded': 'false', html: ICON.plus });
 const sendButton = h('button', { type: 'submit', class: 'v-send', 'aria-label': 'Send', title: 'Send (Enter)', html: ICON.send, disabled: true });
 const composer = h('form', { class: 'v-composer', novalidate: true },
   input,
-  h('div', { class: 'v-composer-row' }, modeChip, modelChip, plusButton, h('span', { class: 'v-spacer' }), sendButton));
+  h('div', { class: 'v-composer-row' }, modeChip, plusButton, h('span', { class: 'v-spacer' }), sendButton));
 const hint = h('span', { class: 'v-hint', text: 'Enter to send · Shift+Enter for a new line' });
 const creditsButton = h('button', { type: 'button', class: 'v-credits', 'aria-haspopup': 'dialog', 'aria-expanded': 'false' });
 const dock = h('div', { class: 'v-dock' },
@@ -116,7 +115,6 @@ const chats = createChats(api);
 const account = createAccount({
   api,
   onSignedIn: () => {
-    refreshModels();
     const queued = pending;
     pending = null;
     if (queued) send(queued.text, { mode: queued.mode });
@@ -127,7 +125,6 @@ let charField = null;
 let busy = false;
 let mode = 'agent';
 let pending = null;
-let models = { catalog: null, at: 0 };
 let shellReady = false;
 
 /* ═════════════════════════════ shell: Chat | IDE ════════════════════════ */
@@ -319,7 +316,7 @@ function errorActions(m) {
   const actions = [];
   if (m.code === 'signed_out') actions.push(h('button', { type: 'button', class: 'v-btn primary', text: 'Sign in', onclick: () => account.openSignIn() }));
   if (m.code === 'insufficient_credits') actions.push(h('button', { type: 'button', class: 'v-btn primary', text: 'See plans', onclick: () => account.openPlans() }));
-  if (m.code === 'forbidden' && /plan/i.test(m.text)) actions.push(h('button', { type: 'button', class: 'v-btn', text: 'Pick another model', onclick: () => openModelMenu(modelChip) }));
+  if (m.code === 'forbidden' && /plan/i.test(m.text)) actions.push(h('button', { type: 'button', class: 'v-btn', text: 'See plans', onclick: () => account.openPlans() }));
   if (!m.stopped && m.prompt) actions.push(h('button', { type: 'button', class: 'v-btn', onclick: () => send(m.prompt, { mode: m.mode }) }, icon(ICON.retry), 'Try again'));
   return actions.length ? h('div', { class: 'v-answer-actions' }, actions) : null;
 }
@@ -456,11 +453,6 @@ function shake() {
   requestAnimationFrame(() => composer.setAttribute('data-shake', ''));
 }
 
-function modelLabel(id) {
-  if (!id) return null;
-  const known = impulse.ai.info().models.find((m) => m.id === id);
-  return known?.displayName || id.replace(/^impulse:/, '');
-}
 
 async function send(textArg, { mode: modeArg, autoFix = 0 } = {}) {
   const text = String(textArg ?? input.value).trim();
@@ -483,8 +475,7 @@ async function send(textArg, { mode: modeArg, autoFix = 0 } = {}) {
       account.openSignIn({ pendingPrompt: text });
       return;
     }
-    toast(ready.error || 'Pick a model first.');
-    openModelMenu(modelChip);
+    toast(ready.error || 'Impulse AI isn\'t available right now.');
     return;
   }
   const credits = account.status.credits;
@@ -520,7 +511,7 @@ async function send(textArg, { mode: modeArg, autoFix = 0 } = {}) {
   const userRecord = chats.add({ role: 'user', text, snapshot: impulse.ai.snapshot(text) });
   setEmpty(false);
   append(userMessage(userRecord));
-  chats.set({ status: 'working', mode: useMode, model: impulse.ai.info().modelId });
+  chats.set({ status: 'working', mode: useMode });
   renderChats();
 
   const live = liveMessage();
@@ -548,7 +539,7 @@ async function send(textArg, { mode: modeArg, autoFix = 0 } = {}) {
     text: ok ? (result.data?.response || result.data?.content || 'Done.') : result?.stopped ? 'Stopped. Nothing after this point was done.' : (result?.error || 'Something went wrong.'),
     prompt: ok ? null : text,
     mode: useMode,
-    model: modelLabel(impulse.ai.info().modelId),
+    model: 'Impulse AI',
     ms: Math.round(ms),
     credits: before !== null && after !== null && before !== undefined && after !== undefined ? Math.max(0, Math.round((before - after) * 10) / 10) : 0,
     steps,
@@ -624,62 +615,6 @@ function setChatMode(next) {
   impulse.ai.setMode(mode);
   fill(modeChip, icon(MODES[mode].icon), MODES[mode].label, icon(ICON.caret));
   input.placeholder = MODES[mode].placeholder;
-}
-
-function renderModelChip() {
-  const info = impulse.ai.info();
-  const id = info.modelId;
-  fill(modelChip, h('span', { text: id ? modelLabel(id) : 'Pick a model' }), icon(ICON.caret));
-}
-
-async function refreshModels() {
-  if (account.status.signedIn) {
-    const res = await api.cloud.models().catch(() => null);
-    if (res?.ok) {
-      models = { catalog: res.data, at: Date.now() };
-      // The server decides the model a new chat starts with.
-      if (res.data?.defaultModel) impulse.ai.setCloudDefault(`impulse:${res.data.defaultModel}`);
-    }
-  } else {
-    models = { catalog: null, at: 0 };
-  }
-  await impulse.ai.refreshModels();
-  renderModelChip();
-}
-
-function openModelMenu(anchor) {
-  const info = impulse.ai.info();
-  const signedIn = account.status.signedIn;
-  const catalog = models.catalog?.models;
-  const cloudModels = catalog
-    ? catalog.map((m) => ({ id: `impulse:${m.id}`, name: m.name, sub: m.tagline, allowed: m.allowed, cost: m.cost }))
-    : info.models.map((m) => ({ id: m.id, name: m.displayName, sub: '', allowed: true, cost: null }));
-  const items = [{ heading: 'Impulse Cloud · uses credits' }];
-  for (const m of cloudModels) {
-    items.push({
-      label: m.name,
-      sub: m.allowed ? m.sub : `${m.sub ? `${m.sub} · ` : ''}needs Pro`,
-      meta: m.cost ? `${m.cost < 0.1 ? '<0.1' : m.cost}×` : null,
-      checked: info.modelId === m.id,
-      disabled: signedIn && !m.allowed,
-      onSelect: () => chooseModel(m.id),
-    });
-  }
-  if (!signedIn) items.push({ label: 'Sign in to use these', icon: ICON.user, onSelect: () => account.openSignIn() });
-  menu(anchor, items, { label: 'Model', side: 'top' });
-}
-
-async function chooseModel(id) {
-  const res = await impulse.ai.selectModel(id);
-  if (res?.needsSignIn) {
-    account.openSignIn();
-    return;
-  }
-  if (!res?.ok) {
-    toast(res?.error || 'That model isn\'t available right now.');
-    return;
-  }
-  renderModelChip();
 }
 
 function openModeMenu(anchor) {
@@ -1127,7 +1062,7 @@ function renderChats() {
     nodes.push(row);
     if (isCurrent && c.project && projectFiles.folder === c.project.folder && projectFiles.files.length) {
       nodes.push(h('ul', { class: 'v-chat-files' }, projectFiles.files.map((f) => h('li', {},
-        h('button', { type: 'button', class: 'v-chat-file', title: f.path, onclick: () => openFile(f.path) }, icon(ICON.file), f.name)))));
+        h('button', { type: 'button', class: 'v-chat-file', title: f.path, onclick: () => openFile(f.path) }, icon(ICON.file), h('span', { class: 'v-chat-file-name', text: f.name }))))));
     }
   }
   fill(chatList, ...nodes);
@@ -1286,7 +1221,6 @@ function wire() {
     }
   });
   modeChip.addEventListener('click', () => openModeMenu(modeChip));
-  modelChip.addEventListener('click', () => openModelMenu(modelChip));
   plusButton.addEventListener('click', () => openPlusMenu(plusButton));
   boardChip.addEventListener('click', () => openBoardMenu(boardChip));
   uploadButton.addEventListener('click', () => boardAction('upload'));
@@ -1332,7 +1266,6 @@ function wire() {
     renderChats();
     bench.refreshCode();
   });
-  window.addEventListener('impulse:models-changed', renderModelChip);
   window.addEventListener('impulse:update-status', onUpdateStatus);
   impulse.serial.onState((s) => { serialDot.hidden = !s.connected; });
 
@@ -1357,7 +1290,6 @@ function wire() {
   account.onChange(() => {
     renderAccount();
     renderCredits();
-    renderModelChip();
   });
 
   new MutationObserver(() => charField?.colors()).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
@@ -1386,11 +1318,11 @@ export async function startChatMode() {
     user: (text, meta = {}) => {
       chats.begin(text);
       chats.add({ role: 'user', text, snapshot: meta.snapshot || null });
-      chats.set({ status: 'working', mode: meta.mode || mode, model: impulse.ai.info().modelId });
+      chats.set({ status: 'working', mode: meta.mode || mode });
       renderChats();
     },
     assistant: (result, meta = {}) => {
-      chats.add({ role: 'assistant', ok: !!result.ok, stopped: !!result.stopped, code: result.code || null, text: String(result.content || ''), mode: meta.mode || mode, model: modelLabel(impulse.ai.info().modelId) });
+      chats.add({ role: 'assistant', ok: !!result.ok, stopped: !!result.stopped, code: result.code || null, text: String(result.content || ''), mode: meta.mode || mode, model: 'Impulse AI' });
       chats.set({ status: result.ok ? 'ok' : result.stopped ? 'stopped' : 'error' });
       renderChats();
     },
@@ -1409,7 +1341,6 @@ export async function startChatMode() {
   renderFolder();
   renderAccount();
   renderCredits();
-  renderModelChip();
 
   let saved = 'vibe';
   try { saved = localStorage.getItem(SHELL_KEY) || 'vibe'; } catch { /* no storage */ }
@@ -1418,7 +1349,6 @@ export async function startChatMode() {
   await Promise.all([chats.load(), account.load()]);
   renderChats();
   renderThread();
-  await refreshModels();
 
   charField = new CharField(field);
   if (!chats.current.messages.length) {

@@ -35,7 +35,7 @@ An AI-assisted Arduino IDE with a built-in hardware simulator. Say what the boar
 - **Source control**: a Source Control panel (⌘/Ctrl+Shift+G) for the open folder: start a Git repository, see what changed and each file's diff, commit, pull and push, and browse recent history. It uses the Git installed on your computer and never prompts for passwords; a push that needs credentials reports git's reason.
 - **PlatformIO projects**: open a folder with `platformio.ini` and Verify, Upload, the simulator and the debugger use PlatformIO Core (`pio`). Pick the environment in the status bar or Tools › PlatformIO Environment; the simulator builds the environment for its board (Uno, Nano or Mega 2560) and keeps the circuit in `diagram.json` at the project root, as Wokwi does.
 - **Pin-aware editor**: hover a pin to see what it's wired to. The gutter flags `digitalWrite` without `pinMode(OUTPUT)`, `analogWrite` on pins without PWM, pins 0/1 used alongside `Serial`, and (when a circuit exists) unwired pins or code that drives an input part.
-- **AI agent**: GPT-5 and Claude models through your Impulse account read and edit the sketch, compile, use the serial monitor and know the selected board's real pins and limits. Every AI code change is run in the simulator automatically and gets a pass/fail card with a "Fix it" button. Uploading to a real board always asks for your approval.
+- **AI agent**: Impulse AI, through your account, reads and edits the sketch, compiles, uses the serial monitor and knows the selected board's real pins and limits. Which model answers is decided on the server per kind of work, cheapest first, climbing when a turn fails. Every AI code change is run in the simulator automatically and gets a pass/fail card with a "Fix it" button. Uploading to a real board always asks for your approval.
 - **Board detection**: the board you plug in is selected for upload with its port, and the simulator follows it.
 - **Simulator vs board**: runs the sketch in the simulator and on a connected Uno, Nano or Mega for the same time, then diffs the serial output line by line (Sketch › Compare Simulator with Board).
 
@@ -94,6 +94,6 @@ src/renderer/    UI: the IDE (editor, panels, AI chat, hardware tests, pin insig
 src/renderer/vibe/         chat mode, the default view (see docs/design/chat-mode.md)
 src/renderer/simulation/   AVR, RP2040 and ESP32 runners, boards, circuit engine, parts and devices, canvas, examples, headless runner (see ARCHITECTURE.md)
 src/cli/         impulse-test, the command-line hardware test runner (bin/impulse-test.mjs)
-cloud/           Impulse Cloud: accounts, credits, the AI gateway, the admin console (Hono + Postgres, Vercel)
+cloud/           Impulse Cloud: accounts, credits, the AI gateway, the admin console (Hono + Postgres; a container for Cloud Run, or Vercel)
 scripts/smoke.mjs, scripts/e2e.mjs   smoke and end-to-end tests of the built app
 ```

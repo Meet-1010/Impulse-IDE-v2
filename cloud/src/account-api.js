@@ -4,6 +4,7 @@
 import { MODELS, relativeCost, servableModels } from './pricing.js';
 import { describe, getAccount } from './credits.js';
 import { PLAN_IDS } from './settings.js';
+import { ROUTE_KINDS, chooseModel } from './routing.js';
 
 const json = (data, status = 200) => Response.json(data, { status, headers: { 'cache-control': 'no-store' } });
 const fail = (status, error, message) => json({ error, message }, status);
@@ -91,6 +92,31 @@ export function createAccountApi({ pool, auth, settings, config }) {
         isDefault: id === defaultModel,
       }));
       return json({ models, defaultModel });
+    },
+
+    /**
+     * Which model the app should use for a kind of work, right now, for this
+     * account. The person sees "Impulse AI"; this is where the model behind it
+     * is decided, from the admin's routing table, among models this server
+     * can serve on the account's plan. `escalate` > 0 climbs the ladder.
+     */
+    async route(request) {
+      const who = await signedIn(request);
+      if (who.error) return who.error;
+      let body = {};
+      try {
+        body = await request.json();
+      } catch { /* an empty body means the default kind */ }
+      const kind = ROUTE_KINDS.includes(body?.kind) ? body.kind : 'agent';
+      const escalate = Math.max(0, Math.min(3, Math.floor(Number(body?.escalate) || 0)));
+      const s = await settings.get();
+      let planId = 'free';
+      if (who.user.emailVerified) planId = (await getAccount(pool, who.user.id, s)).plan;
+      const plan = s.plans[planId] || s.plans.free;
+      const servable = servableModels(s, config).filter((id) => plan.models.includes(id));
+      if (!servable.length) return fail(503, 'no_model', 'Impulse AI is not set up on this server yet.');
+      const model = chooseModel({ routing: s.routing, kind, escalate, servable, fallback: s.defaultModel });
+      return json({ model, vendor: MODELS[model].vendor, kind, escalate, ttlSeconds: 300 });
     },
 
     async usage(request) {

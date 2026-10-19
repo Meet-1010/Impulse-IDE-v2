@@ -1,4 +1,4 @@
-const { LibraryService, includesOf, missingHeadersOf } = require('../libraryService');
+const { LibraryService, includesOf, missingHeadersOf, isCoreHeader } = require('../libraryService');
 
 const INDEX = {
   libraries: [
@@ -111,6 +111,39 @@ describe('well-known headers', () => {
     // A famous header goes straight to its owner, alone.
     lib._index.libraries.push({ name: 'PubSubClient', version: '2.8', provides: [], architectures: ['*'], sentence: '', paragraph: '', versions: [] });
     expect((await lib.providersOf('PubSubClient.h')).map((l) => l.name)).toEqual(['PubSubClient']);
+  });
+});
+
+describe('SDK and toolchain headers', () => {
+  it('knows which headers come with a core or the compiler', () => {
+    expect(isCoreHeader('esp_sleep.h', 'esp32')).toBe(true);
+    expect(isCoreHeader('driver/ledc.h', 'esp32')).toBe(true);
+    expect(isCoreHeader('freertos/FreeRTOS.h', 'esp32')).toBe(true);
+    expect(isCoreHeader('avr/io.h', 'avr')).toBe(true);
+    expect(isCoreHeader('util/delay.h', 'avr')).toBe(true);
+    expect(isCoreHeader('hardware/pwm.h', 'rp2040')).toBe(true);
+    expect(isCoreHeader('vector', 'esp32')).toBe(true);
+    expect(isCoreHeader('string.h', 'avr')).toBe(true);
+    expect(isCoreHeader('esp_now.h', '')).toBe(true); // ESP-IDF names mean the core even without a board
+    expect(isCoreHeader('WiFi.h', 'esp32')).toBe(false);
+    expect(isCoreHeader('Adafruit_SSD1306.h', 'esp32')).toBe(false);
+    expect(isCoreHeader('DHT.h', '')).toBe(false);
+  });
+
+  it('never installs a library that ships a copy of an SDK header', async () => {
+    const { lib, runCli } = service();
+    // The real index lists "EspSleep", which provides esp_sleep.h: installing it would shadow the ESP-IDF header.
+    lib._index = { at: Date.now(), libraries: [
+      { name: 'EspSleep', version: '1', provides: ['esp_sleep.h'], architectures: ['*'], sentence: '', paragraph: '', versions: [] },
+      { name: 'DHT sensor library', version: '1.4.6', provides: ['DHT.h', 'DHT_U.h'], architectures: ['*'], sentence: '', paragraph: '', versions: [] },
+    ] };
+    expect(await lib.providersOf('esp_sleep.h', { fqbn: 'esp32:esp32:esp32s3' })).toEqual([]);
+    const missing = await lib.missingFor('#include <esp_sleep.h>\n#include <driver/rtc_io.h>\n#include <DHT.h>\n', { fqbn: 'esp32:esp32:esp32s3' });
+    expect(missing.map((m) => m.header)).toEqual(['DHT.h']);
+    const result = await lib.installForMissingHeaders('fatal error: esp_sleep.h: No such file or directory', { fqbn: 'arduino:avr:uno' });
+    expect(result.installed).toEqual([]);
+    expect(result.unresolved).toEqual(['esp_sleep.h']);
+    expect(runCli.mock.calls.some((c) => c[0][1] === 'install')).toBe(false);
   });
 });
 

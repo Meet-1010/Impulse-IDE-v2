@@ -19,21 +19,30 @@ const defaultFail = { success: false, error: 'Invalid input' };
 function register(ipcMain, ctx) {
   const { aiAgent, cloudAccount, uiState } = ctx;
 
-  /** Every provider runs through Impulse Cloud on the account's session. */
-  const credentialFor = () => cloudAccount.sessionToken();
-
-  // Signing in, out or into another account swaps the token under the cloud model.
+  // Signing in, out or into another account: the model the server chose for
+  // the old account no longer applies, and the lane needs the new token.
   cloudAccount.on('change', () => {
+    aiAgent.forgetRoutes();
     const current = aiAgent.currentProvider;
-    if (!current || !AIAgent.CLOUD_PROVIDERS.includes(current.name)) return;
     const token = cloudAccount.sessionToken();
     if (!token) {
       aiAgent.currentProvider = null;
       return;
     }
-    // Cheap (no network): always pick up the newest session.
-    aiAgent.setProvider(current.name, token, current.appModel);
+    if (current && AIAgent.CLOUD_PROVIDERS.includes(current.name)) aiAgent.setProvider(current.name, token, current.appModel);
   });
+
+  /** Whether Impulse AI can answer: signed in, and a model routed. */
+  ipcMain.handle('ai:ready', withDebugLog('ai:ready', async () => {
+    if (!cloudAccount.sessionToken()) return { success: false, needsSignIn: true, error: 'Sign in to Impulse to use AI.' };
+    try {
+      await aiAgent.ready();
+      return { success: true };
+    } catch (error) {
+      if (error?.code === 'signed_out') return { success: false, needsSignIn: true, error: error.message };
+      return { success: false, error: error?.message ?? 'Impulse AI is not available right now.' };
+    }
+  }));
 
   ipcMain.handle('ai:generate-circuit', withDebugLog('ai:generate-circuit', async (event, sketchCode, options) => {
     const parsed = parseOrDefault(schemas.aiGenerateCircuit, {
@@ -79,7 +88,8 @@ function register(ipcMain, ctx) {
         selectedPort: uiState.selectedPort ?? ctx.port ?? null,
         hasFileOpen: ctx.hasFileOpen ?? false,
         lastCompileResult: uiState.lastCompileResult ?? null,
-        circuit: uiState.circuit ?? null
+        circuit: uiState.circuit ?? null,
+        escalate: ctx.escalate ?? 0,
       };
       const effectiveMode = ['plan', 'ask', 'debug'].includes(parsed.data.mode) ? parsed.data.mode : 'agent';
       // Each step goes to the chat as it happens (the orb's label).
@@ -88,7 +98,7 @@ function register(ipcMain, ctx) {
       return { success: true, data: result };
     } catch (error) {
       if (error?.stopped) return { success: false, stopped: true, error: 'Stopped' };
-      if (!aiAgent.currentProvider) return { success: false, code: 'signed_out', error: 'Sign in to Impulse to use AI, or pick a model on this computer.' };
+      if (error?.code === 'signed_out' || !cloudAccount.sessionToken()) return { success: false, code: 'signed_out', error: 'Sign in to Impulse to use AI.' };
       return { success: false, code: error?.code, error: error?.message ?? 'Process query failed' };
     } finally {
       if (running === turn) running = null;
@@ -121,62 +131,6 @@ function register(ipcMain, ctx) {
       return { success: true, data: result };
     } catch (error) {
       return { success: false, error: error?.message ?? 'Analyze failed' };
-    }
-  }));
-
-  ipcMain.handle('ai:get-providers', withDebugLog('ai:get-providers', async () => {
-    try {
-      const providers = aiAgent.getAvailableProviders();
-      return { success: true, data: providers ?? [] };
-    } catch (error) {
-      return { success: false, error: error?.message ?? 'Get providers failed' };
-    }
-  }));
-
-  ipcMain.handle('ai:get-models', withDebugLog('ai:get-models', async (event, provider) => {
-    const parsed = parseOrDefault(schemas.aiGetModels, { provider: provider ?? null }, defaultFail);
-    if (!parsed.ok) return parsed.defaultResult;
-    try {
-      const models = aiAgent.getAvailableModels(parsed.data.provider ?? undefined);
-      return { success: true, data: models ?? [] };
-    } catch (error) {
-      return { success: false, error: error?.message ?? 'Get models failed' };
-    }
-  }));
-
-  ipcMain.handle('ai:get-unified-models', withDebugLog('ai:get-unified-models', async () => {
-    try {
-      return { success: true, data: aiAgent.getUnifiedModelList() ?? [] };
-    } catch (error) {
-      return { success: false, error: error?.message ?? 'Get models failed' };
-    }
-  }));
-
-  ipcMain.handle('ai:set-model', withDebugLog('ai:set-model', async (event, modelId, manual) => {
-    const parsed = parseOrDefault(schemas.aiSetModel, { modelId: modelId ?? '', manual: manual ?? undefined }, defaultFail);
-    if (!parsed.ok) return parsed.defaultResult;
-    try {
-      const providerName = AIAgent.getProviderFromModel(parsed.data.modelId);
-      if (!providerName) return { success: false, error: 'Unknown model' };
-      const credential = credentialFor(providerName);
-      if (!credential) return { success: false, error: 'Sign in to use Impulse AI', needsSignIn: true, provider: providerName };
-      aiAgent.setProvider(providerName, credential, parsed.data.modelId);
-      if (parsed.data.manual) {
-        aiAgent.modelPrefs.setPreferredProvider(providerName).catch(() => {});
-      }
-      return { success: true, provider: providerName, model: parsed.data.modelId };
-    } catch (error) {
-      return { success: false, error: error?.message ?? 'Set model failed' };
-    }
-  }));
-
-  ipcMain.handle('ai:get-model-suggestion', withDebugLog('ai:get-model-suggestion', async () => {
-    try {
-      const usable = cloudAccount.sessionToken() ? [...AIAgent.CLOUD_PROVIDERS] : [];
-      const suggestion = await aiAgent.getModelSuggestion(usable);
-      return { success: true, data: suggestion };
-    } catch (error) {
-      return { success: false, error: error?.message ?? 'Get suggestion failed' };
     }
   }));
 

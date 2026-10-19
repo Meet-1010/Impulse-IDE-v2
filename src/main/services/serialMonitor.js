@@ -47,8 +47,8 @@ class SerialMonitor extends EventEmitter {
     this._lastBaudRate = null;
     this._reconnectTimer = null;
     this._reconnectAttempts = 0;
-    this._maxReconnectAttempts = 20;  // ~60s of trying
-    this._reconnectIntervalMs = 3000; // Poll every 3s
+    this._maxReconnectAttempts = 200;  // about a minute of trying at 300 ms
+    this._reconnectIntervalMs = 300;  // a board on native USB is back within a second of waking
     this._intentionalDisconnect = false;
   }
 
@@ -370,8 +370,9 @@ class SerialMonitor extends EventEmitter {
             status: 'port-found'
           });
 
-          // Small delay to let the OS finish enumerating the device
-          await new Promise(r => setTimeout(r, 1000));
+          // A moment for the OS to finish enumerating the device (a failed
+          // open below just starts the poll again).
+          await new Promise(r => setTimeout(r, 350));
 
           try {
             await this.connect(this._lastPortPath, this._lastBaudRate);

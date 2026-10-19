@@ -1,8 +1,8 @@
 const { getSystemPrompt } = require('./prompts/systemPrompt');
 const { circuitBlock } = require('./knowledge/circuitFacts');
+const { componentFacts } = require('./knowledge/components');
 const ToolExecutor = require('./tools/toolExecutor');
 const SimpleMemory = require('./memory/simpleMemory');
-const ModelPreferences = require('./config/modelPreferences');
 const { getCoreTools, getDebugTools, getPlanTools, getPackTools } = require('./tools/toolSchema');
 const ImpulseProvider = require('./providers/impulseProvider');
 const ImpulseOpenAIProvider = require('./providers/impulseOpenAIProvider');
@@ -39,9 +39,6 @@ class AIAgent {
     // Initialize simple JSON-based memory (no SQLite dependency)
     this.memory = new SimpleMemory();
 
-    // Model usage tracking + auto-upgrade preferences
-    this.modelPrefs = new ModelPreferences();
-    
     // Initialize tool executor
     this.toolExecutor = new ToolExecutor(
       arduinoService,
@@ -55,8 +52,15 @@ class AIAgent {
     this.currentProvider = null;
     /** Extra constructor options per provider, e.g. { impulse: { version } }. */
     this.providerOptions = {};
+    /** Set by the main process: asks Impulse Cloud which model answers a kind of work. */
+    this.router = null;
+    /** Set by the main process: the account's session token, or null when signed out. */
+    this.credential = null;
+    this._routeCache = new Map();
     this.config = {
-      maxIterations: config.maxIterations || 10,
+      // Model calls per turn. A build-and-upload job takes 8–12 (write, compile,
+      // simulator check, upload, read the board…); the cap only stops runaways.
+      maxIterations: config.maxIterations || 24,
       temperature: config.temperature || 0.7,
       ...config
     };
@@ -105,28 +109,6 @@ class AIAgent {
   static CLOUD_PROVIDERS = ['impulse-openai', 'impulse'];
 
   /**
-   * Get available providers
-   */
-  getAvailableProviders() {
-    return Array.from(this.providers.keys());
-  }
-
-  /**
-   * Get available models for a provider
-   */
-  getAvailableModels(providerName = null) {
-    if (providerName && this.providers.has(providerName)) {
-      const ProviderClass = this.providers.get(providerName);
-      const tempInstance = new ProviderClass('temp-key');
-      return tempInstance.getAvailableModels();
-    }
-    if (!this.currentProvider) {
-      return [];
-    }
-    return this.currentProvider.getAvailableModels();
-  }
-
-  /**
    * Model ID to provider name (for API key lookup and setProvider)
    */
   static getProviderFromModel(modelId) {
@@ -138,123 +120,54 @@ class AIAgent {
   }
 
   /**
-   * Unified list of all models from all providers for the dropdown.
-   * Returns { id, displayName, provider }.
+   * Which model answers this kind of work. The person sees one Impulse AI;
+   * the server picks the cheapest model that does the job, and climbs its
+   * escalation ladder when a turn has already failed. Cached per kind for the
+   * time the server allows; null when the server cannot be asked.
+   * @param {'agent'|'plan'|'debug'|'ask'|'summary'} kind
+   * @param {{ escalate?: number }} [opts]
+   * @returns {Promise<string|null>} an impulse: model id
    */
-  getUnifiedModelList() {
-    const list = [];
-    for (const providerName of this.providers.keys()) {
-      const ProviderClass = this.providers.get(providerName);
-      const tempInstance = new ProviderClass('temp-key');
-      const models = tempInstance.getAvailableModels();
-      // getAvailableModels() returns newest-first, so index 0 is the latest.
-      models.forEach((modelId, idx) => {
-        list.push({
-          id: modelId,
-          displayName: cloudModels.displayName(modelId),
-          provider: providerName,
-          latest: idx === 0
-        });
-      });
-    }
-    return list;
+  async chooseModel(kind, { escalate = 0 } = {}) {
+    const key = `${kind}:${escalate}`;
+    const cached = this._routeCache.get(key);
+    if (cached && cached.until > Date.now()) return cached.model;
+    if (!this.router) return null;
+    const res = await this.router({ kind, escalate }).catch(() => null);
+    const bare = res?.ok ? res.data?.model : null;
+    if (!bare) return null;
+    const model = `${cloudModels.PREFIX}${bare}`;
+    const ttl = Math.max(30, Number(res.data.ttlSeconds) || 300) * 1000;
+    this._routeCache.set(key, { model, until: Date.now() + ttl });
+    return model;
+  }
+
+  /** Forget what the server said (the account changed). */
+  forgetRoutes() {
+    this._routeCache.clear();
   }
 
   /**
-   * The newest (latest) model id per provider.
-   * @returns {Record<string, string>} e.g. { claude: '...', openai: '...' }
+   * Point the agent at a cloud model; its lane follows from the id. Throws
+   * with code 'signed_out' when there is no session.
    */
-  getLatestByProvider() {
-    const map = {};
-    for (const providerName of this.providers.keys()) {
-      const ProviderClass = this.providers.get(providerName);
-      const tempInstance = new ProviderClass('temp-key');
-      const models = tempInstance.getAvailableModels();
-      if (models.length > 0) map[providerName] = models[0];
-    }
-    return map;
-  }
-
-  /** All valid model ids across every provider. */
-  getAllModelIds() {
-    const ids = [];
-    for (const providerName of this.providers.keys()) {
-      const ProviderClass = this.providers.get(providerName);
-      const tempInstance = new ProviderClass('temp-key');
-      ids.push(...tempInstance.getAvailableModels());
-    }
-    return ids;
-  }
-
-  /** Record real usage of a model (fire-and-forget safe). */
-  async recordModelUsage(modelId) {
-    try { await this.modelPrefs.recordUsage(modelId); } catch (_) { /* best effort */ }
+  useModel(modelId) {
+    const token = this.credential?.();
+    if (!token) throw Object.assign(new Error('Sign in to Impulse to use AI.'), { code: 'signed_out' });
+    const lane = AIAgent.getProviderFromModel(modelId);
+    if (!lane) throw new Error(`Unknown model ${modelId}`);
+    const current = this.currentProvider;
+    if (current && current.name === lane && current.appModel === modelId && current.apiKey === token) return current;
+    return this.setProvider(lane, token, modelId);
   }
 
   /**
-   * Decide which model the IDE should use on boot.
-   *
-   * Rules:
-   *  - A pinned model always wins (auto-upgrade never moves away from it).
-   *  - Otherwise pick the LATEST model of the user's preferred provider
-   *    (falls back to the most-used model's provider, then any provider
-   *    that has an API key, then the first registered provider).
-   *  - The most-used model is always returned too, so the UI can keep it
-   *    surfaced even after an upgrade.
-   *
-   * @param {string[]} providersWithKeys - providers that have an API key set
-   * @returns {Promise<{suggested: string|null, reason: string, pinned: string|null, mostUsed: string|null, autoUpgrade: boolean, preferredProvider: string|null, latestByProvider: Record<string,string>}>}
+   * Make sure a model can answer: the server's choice for agent work, or the
+   * default lane when the server cannot be asked. Throws 'signed_out'.
    */
-  async getModelSuggestion(providersWithKeys = []) {
-    const latestByProvider = this.getLatestByProvider();
-    const validIds = this.getAllModelIds();
-    const state = await this.modelPrefs.getState();
-    const mostUsed = await this.modelPrefs.getMostUsed(validIds);
-
-    const keyed = Array.isArray(providersWithKeys) ? providersWithKeys.filter(Boolean) : [];
-    const hasKey = (p) => keyed.length === 0 || keyed.includes(p);
-
-    // 1. Pinned model wins outright (if it still exists in the catalog).
-    if (state.pinnedModel && validIds.includes(state.pinnedModel)) {
-      return {
-        suggested: state.pinnedModel,
-        reason: 'pinned',
-        pinned: state.pinnedModel,
-        mostUsed,
-        autoUpgrade: state.autoUpgrade,
-        preferredProvider: state.preferredProvider,
-        latestByProvider
-      };
-    }
-
-    // 2. Choose the target provider.
-    const mostUsedProvider = mostUsed ? AIAgent.getProviderFromModel(mostUsed) : null;
-    const candidates = [
-      state.preferredProvider,
-      mostUsedProvider,
-      ...keyed,
-      ...this.providers.keys()
-    ];
-    let targetProvider = null;
-    for (const p of candidates) {
-      if (p && latestByProvider[p] && hasKey(p)) { targetProvider = p; break; }
-    }
-    // Last resort: first provider that has a latest model at all.
-    if (!targetProvider) {
-      targetProvider = Object.keys(latestByProvider)[0] || null;
-    }
-
-    const suggested = targetProvider ? latestByProvider[targetProvider] : (mostUsed || null);
-
-    return {
-      suggested,
-      reason: state.autoUpgrade ? 'latest' : 'preferred',
-      pinned: null,
-      mostUsed,
-      autoUpgrade: state.autoUpgrade,
-      preferredProvider: state.preferredProvider,
-      latestByProvider
-    };
+  async ready() {
+    const model = (await this.chooseModel('agent')) || this.currentProvider?.appModel || cloudModels.DEFAULT_MODEL;
+    return this.useModel(model);
   }
 
   /**
@@ -283,9 +196,25 @@ class AIAgent {
    */
   async processQuery(userQuery, context = {}, mode = 'agent', { onStep, signal } = {}) {
     const step = (s) => { try { onStep?.(s); } catch { /* the UI's problem, not the query's */ } };
-    if (!this.currentProvider) {
+    // The model for this turn: the server's choice for this kind of work, a
+    // step up the ladder when the caller says the previous try failed
+    // (context.escalate), or whatever answered last time when offline.
+    let escalation = Math.max(0, Math.min(3, Math.floor(Number(context.escalate) || 0)));
+    const kind = ['plan', 'debug', 'ask'].includes(mode) ? mode : 'agent';
+    if (this.router) {
+      const routed = await this.chooseModel(kind, { escalate: escalation });
+      if (routed) this.useModel(routed);
+      else if (!this.currentProvider) this.useModel(cloudModels.DEFAULT_MODEL);
+    } else if (!this.currentProvider) {
+      // No cloud to ask (tests, tools): whatever provider was set answers.
       throw new Error('No provider selected. Please set a provider first.');
     }
+    const climb = async () => {
+      if (!this.router || escalation >= 3) return;
+      escalation++;
+      const up = await this.chooseModel(kind, { escalate: escalation });
+      if (up) this.useModel(up);
+    };
     const historyLength = this.conversationHistory.length;
     const stopIfAsked = () => {
       if (!signal?.aborted) return;
@@ -303,12 +232,6 @@ class AIAgent {
         throw error;
       }
     };
-
-    // Track real usage so the "most-used" model stays surfaced even after
-    // auto-upgrades. Fire-and-forget — never block the query on disk I/O.
-    if (this.currentProvider.model) {
-      this.recordModelUsage(this.currentProvider.model).catch(() => {});
-    }
 
     const toolsForMode = [...this._getToolsForMode(mode)];
     const useTools = Array.isArray(toolsForMode) && toolsForMode.length > 0;
@@ -368,7 +291,10 @@ class AIAgent {
     const circuitChanged = this.lastCircuitHash !== undefined && circuitHash !== this.lastCircuitHash && this.conversationHistory.length > 1;
     const circuitFacts = circuitBlock(context.circuit, { changed: circuitChanged });
     this.lastCircuitHash = circuitHash;
-    const standing = [boardFacts, circuitFacts].filter(Boolean).join('\n\n');
+    // Parts the message names come with their wiring and a compiled sketch, so
+    // the first answer is right without a tool round trip.
+    const partFacts = mode === 'ask' ? null : componentFacts(userQuery, { fqbn: context.selectedBoard || '' });
+    const standing = [boardFacts, circuitFacts, partFacts].filter(Boolean).join('\n\n');
     const messages = [
       {
         role: 'system',
@@ -425,6 +351,8 @@ class AIAgent {
           if (check && check.success === false && check.code !== 'BUSY') {
             messages.push({ role: 'assistant', content: response.content || '' });
             messages.push({ role: 'user', content: `[VERIFY] The sketch you edited does not compile:\n${verifySummary(check)}\nFix it (knownFixes, if present, says what fixed this before), then tell the user what you changed.` });
+            // The cheaper model did not get it right: the retry gets a stronger one.
+            await climb();
             iteration++;
             continue;
           }
@@ -436,6 +364,7 @@ class AIAgent {
             toolResults.push({ success: false, tool: 'check_pins', verify: true, issues: pins.issues });
             messages.push({ role: 'assistant', content: response.content || '' });
             messages.push({ role: 'user', content: `${pins.report}\nChange those pins to ones the board has, then tell the user what you changed and why.` });
+            await climb();
             iteration++;
             continue;
           }
@@ -513,9 +442,33 @@ class AIAgent {
       iteration++;
     }
 
+    // Out of steps: the person still gets a real answer. One last call, with
+    // no tools, says what was done, what works now and what is left.
+    return this._wrapUpAfterCap({ messages, chatOptions, toolResults, ask, step });
+  }
+
+  /**
+   * The answer when a turn used every model call: a tool-less summary of what
+   * happened, or a plain sentence when even that call fails.
+   * @private
+   */
+  async _wrapUpAfterCap({ messages, chatOptions, toolResults, ask, step }) {
+    const nudge = {
+      role: 'user',
+      content: '[Impulse] This turn has used all of its tool steps. Without calling any tool, tell me in a few short sentences what you did, what works now (did it compile, was it uploaded, what does the board print), and what is still left to do and how to continue. Do not apologise.'
+    };
+    try {
+      step({ type: 'thinking' });
+      const final = await ask([...messages, nudge], { ...chatOptions, tools: [] });
+      const text = typeof final?.content === 'string' ? final.content.trim() : '';
+      if (text) return { response: text, toolResults, usage: final.usage, model: final.model, warning: 'max_iterations_reached' };
+    } catch (error) {
+      if (error?.stopped) throw error;
+    }
+    const done = toolResults.filter((r) => r && r.success !== false).length;
     return {
-      response: 'Maximum iterations reached. Please refine your query.',
-      toolResults: toolResults,
+      response: `I ran out of steps for this turn after ${toolResults.length} tool call${toolResults.length === 1 ? '' : 's'} (${done} succeeded). Send "continue" and I will pick up where I stopped.`,
+      toolResults,
       warning: 'max_iterations_reached'
     };
   }
@@ -606,8 +559,13 @@ class AIAgent {
    * @returns {Promise<string>} summary text
    */
   async summarizeAndCompact() {
-    if (!this.currentProvider) throw new Error('No provider configured');
     if (this.conversationHistory.length === 0) return '';
+    // Summaries are routine work: the cheapest model the server offers for them.
+    if (this.router) {
+      const model = await this.chooseModel('summary');
+      if (model) this.useModel(model);
+    }
+    if (!this.currentProvider) throw new Error('No provider configured');
 
     // Ask the model to produce a concise summary of what happened so far.
     const summarisePrompt = [

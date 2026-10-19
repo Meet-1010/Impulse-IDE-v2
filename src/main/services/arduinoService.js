@@ -638,6 +638,30 @@ class ArduinoService {
     throw this._failure(output, 'compile', { reason, code, memory, diagnostics, installedLibraries });
   }
 
+  /**
+   * True once `port` is listed, waiting up to `maxMs` for a board that is
+   * asleep or resetting (its USB port comes and goes); true at once when the
+   * list itself cannot be read, so the upload reports the real problem.
+   * @private
+   */
+  async _waitForPort(port, job, { maxMs = 20000, everyMs = 500 } = {}) {
+    const listed = async () => {
+      const ports = await this.listPorts().catch(() => null);
+      return ports === null || ports.some((p) => p.port === port);
+    };
+    if (await listed()) return true;
+    job.line(`Waiting for ${port} to come back (a board that sleeps or is resetting shows its port only part of the time)…`);
+    const until = Date.now() + maxMs;
+    while (Date.now() < until) {
+      await new Promise((r) => setTimeout(r, everyMs));
+      if (await listed()) {
+        job.line(`${port} is back.`);
+        return true;
+      }
+    }
+    return false;
+  }
+
   /** The upload half of a job (the sketch is compiled already). Throws a coded Error on failure. */
   async _uploadJob(job, sketchPath, boardFQBN, port, compiled = null) {
     const pioRoot = this.platformioRoot(sketchPath);
@@ -657,9 +681,10 @@ class ArduinoService {
     if (!validation.valid) throw coded(`Invalid input: ${validation.errors.join(', ')}`, 'INVALID');
     if (!this.validateFQBN(boardFQBN)) throw coded(`Invalid FQBN format: "${boardFQBN}". Expected format: vendor:architecture:board`, 'INVALID');
     // The port must still be there (when listing itself fails, let the upload report it precisely).
-    const availablePorts = await this.listPorts().catch(() => null);
-    if (availablePorts && !availablePorts.some((p) => p.port === port)) {
-      throw coded(`Port ${port} is not available. Please check if your device is connected.`, 'PORT_GONE', { title: 'The port is gone', hint: 'Plug the board back in, pick its port again, then upload.' });
+    // A board in deep sleep, or one still resetting, shows its port only part of
+    // the time: wait for it a while before giving up.
+    if (!(await this._waitForPort(port, job))) {
+      throw coded(`Port ${port} is not available. Please check if your device is connected.`, 'PORT_GONE', { title: 'The port is gone', hint: 'Plug the board back in and pick its port again. A board in deep sleep wakes only now and then: press RESET as the upload starts.' });
     }
     job.stage('uploading');
     const { code, output, reason } = await this._runStreaming(job, ['upload', '--fqbn', boardFQBN, '--port', port, '--verbose', sketchPath], {

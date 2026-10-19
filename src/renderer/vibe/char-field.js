@@ -26,9 +26,9 @@ const MAX_RIPPLES = 8;
  */
 export const FIELD_DEFAULTS = Object.freeze({
   // Resting field
-  baseAlpha: 0.04,        // how visible unlit characters are
-  litAlpha: 0.62,         // how bright a fully lit character gets
-  ambient: 0.6,           // the drifting light's strength (0 = none)
+  baseAlpha: 0.035,       // how visible unlit characters are
+  litAlpha: 0.5,          // how bright a fully lit character gets
+  ambient: 0.5,           // the drifting light's strength (0 = none)
   ambientSpeed: 1,        // how fast it drifts
   sweepEvery: 16,         // seconds between signal sweeps (0 = none)
   sweepGain: 1,           // the sweep's brightness
@@ -346,8 +346,9 @@ export class CharField {
       base: rgb(given.base || css.getPropertyValue('--v-field-base'), [0.59, 0.64, 0.7]),
       lit: rgb(given.lit || css.getPropertyValue('--v-field-lit'), [0.3, 0.5, 0.73]),
       peak: rgb(given.peak || css.getPropertyValue('--v-field-peak'), [0.55, 0.73, 0.93]),
-      baseAlpha: light ? this.params.baseAlpha * 1.75 : this.params.baseAlpha,
-      litAlpha: light ? this.params.litAlpha * 0.82 : this.params.litAlpha,
+      // Light theme: grey on near-white reads louder than the same alpha on black, so it stays quieter.
+      baseAlpha: light ? this.params.baseAlpha * 1.1 : this.params.baseAlpha,
+      litAlpha: light ? this.params.litAlpha * 0.42 : this.params.litAlpha,
     };
     if (this.fallback) this.drawFallback();
   }

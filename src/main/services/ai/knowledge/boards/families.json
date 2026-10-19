@@ -183,7 +183,8 @@
   "title": "ESP32 (WROOM/WROVER dev kits, ESP32-CAM, D1 R32, LOLIN32)",
   "upload": [
    "esptool through the USB-serial chip; dev kits enter download mode by themselves. 'Failed to connect … Wrong boot mode' means hold BOOT (GPIO0) while 'Connecting…' prints, then release. Long or thin cables: Upload Speed 115200.",
-   "Boards without a USB chip (ESP32-CAM, bare modules) upload through a USB-serial adapter with GPIO0 to GND at reset."
+   "Boards without a USB chip (ESP32-CAM, bare modules) upload through a USB-serial adapter with GPIO0 to GND at reset.",
+   "A board in deep sleep cannot be flashed: its USB port comes and goes with each wake, so 'the port is gone' or 'Failed to connect' during an upload means press RESET (or hold BOOT while plugging in) when 'Connecting…' prints, or upload during the awake part of its cycle."
   ],
   "power": [
    "Wi-Fi draws peaks above 400 mA: a weak USB port or thin cable gives 'Brownout detector was triggered' resets; use a 5 V 1 A supply or add a 470 µF capacitor on 5 V.",
@@ -206,7 +207,8 @@
  "esp32-s2": {
   "title": "ESP32-S2 (Saola, LOLIN S2 Mini)",
   "upload": [
-   "Native USB (CDC) only on most boards: enable USB CDC On Boot for Serial; hold BOOT (GPIO0) while plugging in if no port appears."
+   "Native USB (CDC) only on most boards: enable USB CDC On Boot for Serial; hold BOOT (GPIO0) while plugging in if no port appears.",
+   "A board in deep sleep cannot be flashed: its USB port comes and goes with each wake, so 'the port is gone' or 'Failed to connect' during an upload means press RESET (or hold BOOT while plugging in) when 'Connecting…' prints, or upload during the awake part of its cycle."
   ],
   "power": [
    "3.3 V logic; same brownout notes as the ESP32."
@@ -216,13 +218,15 @@
    "Same Wi-Fi libraries as the ESP32; no Bluetooth at all on the S2; USB device libraries (keyboard, MSC) through TinyUSB."
   ],
   "notes": [
-   "Single core, Wi-Fi only. GPIO19/20 are USB; strapping GPIO0, 45, 46; ADC1 GPIO1–10, ADC2 GPIO11–20 (unusable with Wi-Fi); DAC on GPIO17 and 18."
+   "Single core, Wi-Fi only. GPIO19/20 are USB; strapping GPIO0, 45, 46; ADC1 GPIO1–10, ADC2 GPIO11–20 (unusable with Wi-Fi); DAC on GPIO17 and 18.",
+   "Boards on the chip's native USB lose what is printed in the first 1–2 s after a reset or deep-sleep wake (the port re-enumerates and the monitor reconnects): delay(2000) before the first print."
   ]
  },
  "esp32-s3": {
   "title": "ESP32-S3 (DevKitC, SuperMini, XIAO S3, Heltec V3, T-Display-S3)",
   "upload": [
-   "DevKitC boards have two USB-C ports: the UART port (CP2102) behaves like the classic ESP32; the native port needs USB CDC On Boot for Serial (Impulse turns it on when the board is on its native port). SuperMini/XIAO boards have the native port only."
+   "DevKitC boards have two USB-C ports: the UART port (CP2102) behaves like the classic ESP32; the native port needs USB CDC On Boot for Serial (Impulse turns it on when the board is on its native port). SuperMini/XIAO boards have the native port only.",
+   "A board in deep sleep cannot be flashed: its USB port comes and goes with each wake, so 'the port is gone' or 'Failed to connect' during an upload means press RESET (or hold BOOT while plugging in) when 'Connecting…' prints, or upload during the awake part of its cycle."
   ],
   "power": [
    "3.3 V logic; brownout notes as the ESP32; the native USB port alone cannot power a camera plus Wi-Fi reliably on thin cables."
@@ -234,13 +238,15 @@
    "Same Wi-Fi/BLE libraries as the ESP32 (BLE 5 only, no classic Bluetooth so no BluetoothSerial); USB HID/MSC through the USB library; esp_camera for camera boards; TFT_eSPI for display boards."
   ],
   "notes": [
-   "Dual core 240 MHz; GPIO26–32 are the flash and GPIO33–37 the PSRAM on octal-PSRAM (N8R8/N16R8) boards: do not use them; strapping GPIO0, 3, 45, 46; no DAC; ADC1 GPIO1–10, ADC2 GPIO11–20 (unusable with Wi-Fi). RGB LED through rgbLedWrite()/Adafruit_NeoPixel."
+   "Dual core 240 MHz; GPIO26–32 are the flash and GPIO33–37 the PSRAM on octal-PSRAM (N8R8/N16R8) boards: do not use them; strapping GPIO0, 3, 45, 46; no DAC; ADC1 GPIO1–10, ADC2 GPIO11–20 (unusable with Wi-Fi). RGB LED through rgbLedWrite()/Adafruit_NeoPixel.",
+   "Native USB (USB CDC On Boot): the port disappears on reset, upload and deep sleep and re-enumerates on wake, and the serial monitor reconnects about 1–2 s after the chip boots. Lines printed before that are lost, and while(!Serial) returns as soon as USB is up, before a monitor attaches: delay(2000) (or wait for Serial and then 1 s more) before the first print, and keep deep-sleep awake time above that."
   ]
  },
  "esp32-c3": {
   "title": "ESP32-C3 (SuperMini, DevKitM-1, XIAO C3, LOLIN C3 Mini)",
   "upload": [
-   "SuperMini and XIAO boards have native USB only: USB CDC On Boot must be enabled for Serial; hold BOOT (GPIO9) while plugging in to force download mode when no port appears. DevKitC-02 boards also have a UART chip."
+   "SuperMini and XIAO boards have native USB only: USB CDC On Boot must be enabled for Serial; hold BOOT (GPIO9) while plugging in to force download mode when no port appears. DevKitC-02 boards also have a UART chip.",
+   "A board in deep sleep cannot be flashed: its USB port comes and goes with each wake, so 'the port is gone' or 'Failed to connect' during an upload means press RESET (or hold BOOT while plugging in) when 'Connecting…' prints, or upload during the awake part of its cycle."
   ],
   "power": [
    "3.3 V logic; the SuperMini's 3.3 V regulator is small (about 300 mA): no displays with backlights or servos from 3V3."
@@ -252,13 +258,15 @@
    "Same Wi-Fi libraries as the ESP32; BLE 5 (NimBLE-Arduino is lighter); no classic Bluetooth; no DAC."
   ],
   "notes": [
-   "Single RISC-V core 160 MHz; GPIO0–21 only; GPIO18/19 are USB; strapping GPIO2, 8, 9; ADC1 GPIO0–4, ADC2 GPIO5 (unusable with Wi-Fi); UART0 TX GPIO21 / RX GPIO20."
+   "Single RISC-V core 160 MHz; GPIO0–21 only; GPIO18/19 are USB; strapping GPIO2, 8, 9; ADC1 GPIO0–4, ADC2 GPIO5 (unusable with Wi-Fi); UART0 TX GPIO21 / RX GPIO20.",
+   "Boards on the chip's native USB lose what is printed in the first 1–2 s after a reset or deep-sleep wake (the port re-enumerates and the monitor reconnects): delay(2000) before the first print."
   ]
  },
  "esp32-c6": {
   "title": "ESP32-C6 (DevKitC-1, SuperMini, XIAO C6)",
   "upload": [
-   "DevKitC has UART and native USB ports; SuperMini/XIAO native only (USB CDC On Boot on)."
+   "DevKitC has UART and native USB ports; SuperMini/XIAO native only (USB CDC On Boot on).",
+   "A board in deep sleep cannot be flashed: its USB port comes and goes with each wake, so 'the port is gone' or 'Failed to connect' during an upload means press RESET (or hold BOOT while plugging in) when 'Connecting…' prints, or upload during the awake part of its cycle."
   ],
   "power": [
    "3.3 V logic."
@@ -268,7 +276,8 @@
    "Wi-Fi 6 and BLE 5 through the usual libraries; Zigbee through the Zigbee library (needs the Zigbee partition scheme and mode in Board Options); Thread/802.15.4 through OpenThread."
   ],
   "notes": [
-   "RISC-V 160 MHz; GPIO12/13 are USB; strapping GPIO4, 5, 8, 9, 15; ADC on GPIO0–6. Needs ESP32 Arduino core 3.0 or later: core 2.x does not know the C6."
+   "RISC-V 160 MHz; GPIO12/13 are USB; strapping GPIO4, 5, 8, 9, 15; ADC on GPIO0–6. Needs ESP32 Arduino core 3.0 or later: core 2.x does not know the C6.",
+   "Boards on the chip's native USB lose what is printed in the first 1–2 s after a reset or deep-sleep wake (the port re-enumerates and the monitor reconnects): delay(2000) before the first print."
   ]
  },
  "esp8266": {

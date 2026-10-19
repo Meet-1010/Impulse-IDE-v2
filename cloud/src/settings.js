@@ -2,6 +2,7 @@
 // key per row in app_setting; anything not stored uses the default below.
 
 import { MODELS } from './pricing.js';
+import { ROUTE_KINDS } from './routing.js';
 
 const ALL_MODELS = Object.keys(MODELS);
 
@@ -12,6 +13,13 @@ export const DEFAULTS = Object.freeze({
   markup: 1,
   defaultModel: 'gpt-5.4',
   enabledModels: ALL_MODELS,
+  // One "Impulse AI" to the person; the model behind it is chosen here per
+  // kind of work, cheapest first, and moves up the escalation ladder when a
+  // turn has already failed (a compile that did not pass, a check that failed).
+  routing: {
+    agent: 'gpt-5.4', plan: 'gpt-5.4', debug: 'gpt-5.4', ask: 'gpt-5.4-mini', summary: 'gpt-5.4-nano',
+    escalation: ['gpt-5.5'],
+  },
   maxOutputTokens: 32_000,
   rateLimitPerMinute: 40,
   // Stop serving AI for the rest of the UTC day once upstream spend passes this.
@@ -49,6 +57,12 @@ const RULES = {
   maintenance: (v) => (typeof v === 'boolean' ? null : 'true or false'),
   learningEnabled: (v) => (typeof v === 'boolean' ? null : 'true or false'),
   announcement: (v) => (typeof v === 'string' && v.length <= 280 ? null : 'text up to 280 characters'),
+  routing: (v) => {
+    if (!v || typeof v !== 'object' || Array.isArray(v)) return 'an object with a model per kind of work';
+    for (const kind of ROUTE_KINDS) if (!ALL_MODELS.includes(v[kind])) return `a known model for "${kind}"`;
+    if (!Array.isArray(v.escalation) || v.escalation.length > 3 || !v.escalation.every((m) => ALL_MODELS.includes(m))) return 'an escalation list of up to three known models';
+    return null;
+  },
   plans: (v) => {
     if (!v || typeof v !== 'object') return 'an object of plans';
     for (const id of ['free', 'pro', 'max']) {
@@ -78,12 +92,16 @@ export function validateSettings(patch) {
     if (!rule) return { ok: false, error: `Unknown setting "${key}".` };
     const problem = rule(v);
     if (problem) return { ok: false, error: `${key} must be ${problem}.` };
-    value[key] = key === 'plans'
-      ? Object.fromEntries(PLAN_IDS.map((id) => [id, {
+    if (key === 'plans') {
+      value[key] = Object.fromEntries(PLAN_IDS.map((id) => [id, {
         name: v[id].name.trim(), monthlyCredits: v[id].monthlyCredits, periodHours: Number.isInteger(v[id].periodHours) ? v[id].periodHours : null,
         priceUsd: v[id].priceUsd, models: [...new Set(v[id].models)],
-      }]))
-      : v;
+      }]));
+    } else if (key === 'routing') {
+      value[key] = { ...Object.fromEntries(ROUTE_KINDS.map((k) => [k, v[k]])), escalation: [...new Set(v.escalation)] };
+    } else {
+      value[key] = v;
+    }
   }
   return { ok: true, value };
 }

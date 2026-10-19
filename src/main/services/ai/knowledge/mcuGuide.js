@@ -282,6 +282,8 @@ const FAMILIES = [
       'GPIO26–32 are used by the flash on most modules; on modules with octal PSRAM (N8R8, N16R8) GPIO33–37 are taken too.',
       'PSRAM must match the module: Tools › PSRAM = "OPI PSRAM" for N8R8/N16R8 modules, "QSPI" for quad PSRAM, "Disabled" when there is none. The wrong setting can stop the board booting.',
       'ESP32-S3-DevKitC-1: an RGB LED (WS2812) on GPIO48 (GPIO38 on board v1.1), driven by neopixelWrite() (core 2.x) or rgbLedWrite() (core 3.x) with RGB_BUILTIN. It has two USB ports: "UART" (USB-serial chip, UART0 on GPIO43/44) and "USB" (the chip\'s native USB).',
+      'On the native USB port, Serial is the chip\'s USB CDC: the port re-enumerates after every reset, upload and deep-sleep wake, and the monitor reconnects 1–2 s later, so the first prints are lost unless the sketch waits (delay(2000) before printing; while(!Serial) returns too early). Deep sleep with a 5 s wake therefore shows only lines printed late in the awake time.',
+      'Touch pads T1–T14 are GPIO1–14; touchRead() returns values around 20,000–30,000 that RISE when touched (the classic ESP32\'s fall). temperatureRead() gives the die temperature in °C. LEDC PWM on any output pin with ledcAttach(pin, freq, bits); the S3 has no DAC.',
       'Serial follows "USB CDC On Boot": enabled = Serial is the native USB port; disabled = Serial is UART0 (GPIO43 TX / GPIO44 RX). Impulse turns it on automatically when the board is on its native USB port.',
       'Default I2C: SDA 8 / SCL 9 (DevKit variant; other boards differ, check get_board_info).',
     ],

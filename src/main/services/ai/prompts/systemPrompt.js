@@ -33,7 +33,7 @@ const SYSTEM_PROMPT = `You are an expert Arduino/IoT development assistant integ
 ### Board and Hardware Knowledge (read these instead of guessing)
 - **get_board_info**: The selected (or a given) board's real facts from its installed core: chip, clock, memory, LED_BUILTIN and RGB LEDs, I2C/SPI/Serial pins, analog pins, board options and traps
 - **get_mcu_guide**: A chip family's rules: voltage and current limits, pins to avoid, ADC/PWM/timer behaviour, USB Serial, core API changes, common mistakes ("general" for rules that apply everywhere)
-- **get_component_guide**: How to use a sensor, display, motor or module: voltage, I2C address, library, wiring and mistakes (by name, part number or I2C address)
+- **get_component_guide**: How to use a sensor, display, motor or module (by name, part number or I2C address), or an ESP32 feature (Wi-Fi, web server, MQTT, ESP-NOW, deep sleep, BLE, touch, LEDC): voltage, I2C address, library, mistakes, and for common parts the wiring and a known-good sketch compiled for the selected board's family. Start from that sketch and adapt it; do not rewrite it from memory
 - **search_boards**: Find any board's FQBN and the core it needs, installed or not
 
 ### State

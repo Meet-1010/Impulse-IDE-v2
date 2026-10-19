@@ -4,7 +4,7 @@
 const path = require('path');
 const { readDefinitions, pinFacts, resolve } = require('../pinsHeader');
 const { FAMILIES, familyOf, familyById, guideText } = require('../mcuGuide');
-const { COMPONENTS, findComponents, componentText } = require('../components');
+const { COMPONENTS, RECIPES, findComponents, componentText, familyKey, recipeFor, componentsNamedIn, componentFacts } = require('../components');
 const BoardKnowledge = require('../boardKnowledge');
 const ToolExecutor = require('../../tools/toolExecutor');
 
@@ -93,6 +93,99 @@ describe('chip family guides', () => {
     expect(s3).toMatch(/Logic level: 3\.3 V logic, NOT 5 V tolerant/);
     expect(guideText(familyById('atmega328p'))).toMatch(/F\("…"\)/);
     expect(guideText(familyById('atmega328p'))).toMatch(/Embedded fundamentals/);
+  });
+});
+
+describe('component recipes (compiled sketches)', () => {
+  test('knows the chip family of a board from its FQBN', () => {
+    expect(familyKey('arduino:avr:uno')).toBe('avr');
+    expect(familyKey('esp32:esp32:esp32')).toBe('esp32');
+    expect(familyKey('esp32:esp32:esp32s3')).toBe('esp32s3');
+    expect(familyKey('esp32:esp32:XIAO_ESP32C3')).toBe('esp32c3');
+    expect(familyKey('esp32:esp32:heltec_wifi_lora_32_V3')).toBe('esp32s3');
+    expect(familyKey('arduino:esp32:nano_nora')).toBe('esp32s3');
+    expect(familyKey('esp32:esp32:esp32c6')).toBe('esp32c6');
+    expect(familyKey('rp2040:rp2040:rpipico')).toBe('rp2040');
+    expect(familyKey('')).toBe('avr');
+  });
+
+  test('fills the family\'s pins into the sketch and the wiring, falling back chip → esp32 → default', () => {
+    const dht = COMPONENTS.find((c) => c.id === 'dht');
+    expect(recipeFor(dht, 'avr').sketch).toMatch(/#define DHTPIN 2\b/);
+    expect(recipeFor(dht, 'esp32s3').sketch).toMatch(/#define DHTPIN 4\b/); // no S3 table: the esp32 one
+    expect(recipeFor(dht, 'esp32s3').wiring.join(' ')).toMatch(/DATA → pin 4/);
+    expect(recipeFor(dht, 'avr').libs).toEqual(['DHT sensor library', 'Adafruit Unified Sensor']);
+    const lcd = COMPONENTS.find((c) => c.id === 'lcd-parallel');
+    expect(recipeFor(lcd, 'esp32c3').sketch).toMatch(/LiquidCrystal lcd\(2, 3, 4, 5, 6, 7\)/); // the C3 has its own table
+    expect(recipeFor(lcd, 'esp32').sketch).toMatch(/LiquidCrystal lcd\(4, 5, 15, 16, 17, 18\)/);
+  });
+
+  test('switches library and sketch where the API differs between families', () => {
+    const servo = COMPONENTS.find((c) => c.id === 'servo');
+    expect(recipeFor(servo, 'avr').libs).toEqual(['Servo']);
+    expect(recipeFor(servo, 'avr').sketch).toMatch(/#include <Servo.h>/);
+    expect(recipeFor(servo, 'esp32s3').libs).toEqual(['ESP32Servo']);
+    expect(recipeFor(servo, 'esp32s3').sketch).toMatch(/#include <ESP32Servo.h>/);
+    const sd = COMPONENTS.find((c) => c.id === 'sd-card');
+    expect(recipeFor(sd, 'avr').libs).toEqual(['SD']);
+    expect(recipeFor(sd, 'esp32').libs).toEqual([]); // the core ships SD
+    expect(recipeFor(sd, 'esp32').sketch).toMatch(/FILE_APPEND/);
+  });
+
+  test('gives no recipe rather than a wrong one', () => {
+    const touch = COMPONENTS.find((c) => c.id === 'esp32-touch');
+    expect(recipeFor(touch, 'esp32s3').sketch).toMatch(/TOUCH_PIN = 1;/);
+    expect(recipeFor(touch, 'esp32c3')).toBeNull(); // the C3 has no touch pads: no pin, no recipe
+    expect(recipeFor(touch, 'avr')).toBeNull(); // an ESP32-only feature
+    expect(recipeFor(COMPONENTS.find((c) => c.id === 'esp32-wifi'), 'avr')).toBeNull();
+    expect(recipeFor(COMPONENTS.find((c) => c.id === 'compass'), 'avr')).toBeNull(); // no recipe written yet
+  });
+
+  test('every recipe belongs to a component, has a sketch with setup and loop, and names real pins', () => {
+    const ids = new Set(COMPONENTS.map((c) => c.id));
+    for (const [id, r] of Object.entries(RECIPES)) {
+      expect(ids.has(id)).toBe(true);
+      const bodies = typeof r.sketch === 'string' ? [r.sketch] : Object.values(r.sketch);
+      for (const body of bodies) {
+        expect(body).toMatch(/void setup\(\)/);
+        expect(body).toMatch(/void loop\(\)/);
+      }
+      for (const table of Object.values(r.pins || {})) if (table !== null) for (const v of Object.values(table)) expect(['number', 'string']).toContain(typeof v); // null = this chip has none
+    }
+    expect(Object.keys(RECIPES).length).toBeGreaterThanOrEqual(45);
+  });
+
+  test('the guide text carries the wiring and the sketch for the board\'s family, the sketch only when asked', () => {
+    const dht = findComponents('DHT22')[0];
+    const text = componentText(dht, { family: 'esp32s3' });
+    expect(text).toMatch(/Wiring for the ESP32-S3/);
+    expect(text).toMatch(/Install: DHT sensor library/);
+    expect(text).toMatch(/Known-good sketch for the ESP32-S3/);
+    expect(text).toMatch(/```cpp\n#include <DHT.h>/);
+    expect(componentText(dht, { family: 'esp32s3', withSketch: false })).not.toMatch(/```cpp/);
+    expect(componentText(dht)).not.toMatch(/Wiring for/); // no family: the plain guide
+    expect(findComponents('WiFi')[0].id).toBe('esp32-wifi');
+    expect(findComponents('deep sleep')[0].id).toBe('esp32-deep-sleep');
+  });
+});
+
+describe('component facts that ride with a request', () => {
+  test('finds the parts a message names as whole words, most specific first, two at most', () => {
+    expect(componentsNamedIn('Show DHT22 readings on an OLED and blink the LED').map((c) => c.id)).toEqual(['dht', 'ssd1306']);
+    expect(componentsNamedIn('I called the function but the led is off').map((c) => c.id)).toEqual(['led']); // "called" is not an LED
+    expect(componentsNamedIn('use the MPU-6050 to detect a tap').map((c) => c.id)).toEqual(['mpu6050']);
+    expect(componentsNamedIn('Scan for Wi-Fi networks').map((c) => c.id)).toEqual(['esp32-wifi']);
+    expect(componentsNamedIn('a relay, a buzzer, a servo and a DHT11').length).toBe(2);
+    expect(componentsNamedIn('hello there')).toEqual([]);
+    expect(componentsNamedIn('')).toEqual([]);
+  });
+
+  test('writes a [COMPONENT FACTS] block with the sketch for the board, or nothing', () => {
+    const facts = componentFacts('Show DHT22 readings on an LCD', { fqbn: 'esp32:esp32:esp32s3' });
+    expect(facts).toMatch(/^\[COMPONENT FACTS\] The message names DHT11 and LCD 16x2 I2C/);
+    expect(facts).toMatch(/Known-good sketch for the ESP32-S3/);
+    expect(facts.match(/```cpp/g)).toHaveLength(1); // the sketch only for the first part
+    expect(componentFacts('make it faster', { fqbn: 'arduino:avr:uno' })).toBeNull();
   });
 });
 

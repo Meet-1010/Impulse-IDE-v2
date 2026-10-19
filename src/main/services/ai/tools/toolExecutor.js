@@ -3,7 +3,7 @@ const { boundedOutput } = require('./retain');
 const { circuitToolResult } = require('../knowledge/circuitFacts');
 const { checkSketchPins, pinReport } = require('../knowledge/pinCheck');
 const BoardKnowledge = require('../knowledge/boardKnowledge');
-const { findComponents, componentText, COMPONENTS } = require('../knowledge/components');
+const { findComponents, componentText, familyKey, COMPONENTS } = require('../knowledge/components');
 
 /**
  * Tool Executor
@@ -143,7 +143,7 @@ class ToolExecutor {
           result = await this.executeGetMcuGuide(toolCall.arguments);
           break;
         case 'get_component_guide':
-          result = this.executeGetComponentGuide(toolCall.arguments);
+          result = await this.executeGetComponentGuide(toolCall.arguments);
           break;
         case 'search_boards':
           result = await this.executeSearchBoards(toolCall.arguments);
@@ -589,12 +589,15 @@ class ToolExecutor {
     }
   }
 
-  executeGetComponentGuide(args = {}) {
+  async executeGetComponentGuide(args = {}) {
     const found = findComponents(args.query);
     if (!found.length) {
       return { success: true, found: 0, guide: `Nothing in the component guide matches "${args.query}". Known: ${COMPONENTS.map((c) => c.names[0]).join(', ')}.` };
     }
-    return { success: true, found: found.length, guide: found.map(componentText).join('\n\n') };
+    // Wiring and the known-good sketch follow the selected board's family; the sketch only for the best match.
+    const fqbn = args.fqbn || await this.selectedFqbn().catch(() => '');
+    const family = familyKey(fqbn);
+    return { success: true, found: found.length, family, guide: found.map((c, i) => componentText(c, { family, withSketch: i === 0 })).join('\n\n') };
   }
 
   async executeSearchBoards(args = {}) {

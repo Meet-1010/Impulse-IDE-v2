@@ -56,6 +56,7 @@ export function createApp({ config, pool, background, log = (m) => console.log(m
   app.get('/v1/config', () => account.config());
   app.get('/v1/me', (c) => account.me(c.req.raw));
   app.get('/v1/models', (c) => account.models(c.req.raw));
+  app.post('/v1/route', (c) => account.route(c.req.raw));
   app.get('/v1/usage', (c) => account.usage(c.req.raw));
   app.get('/v1/plans', (c) => account.plans(c.req.raw));
   app.post('/v1/upgrade-request', (c) => account.requestUpgrade(c.req.raw));

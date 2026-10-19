@@ -337,7 +337,7 @@ const TOOL_SCHEMA = {
 
   GET_COMPONENT_GUIDE: {
     name: 'get_component_guide',
-    description: 'How to use a sensor, display, motor, driver or module with an Arduino-compatible board: interface, supply and logic voltage, I2C address(es), the library to use, wiring and the mistakes that make it not work.',
+    description: 'How to use a sensor, display, motor, driver or module with an Arduino-compatible board: interface, supply and logic voltage, I2C address(es), the library to use, the mistakes that make it not work, and for common parts the wiring and a known-good sketch for the selected board\'s family (compiled by Impulse): start from that sketch instead of memory.',
     parameters: {
       type: 'object',
       properties: {

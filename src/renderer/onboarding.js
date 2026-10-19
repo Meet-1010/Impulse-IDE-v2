@@ -351,13 +351,14 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
     const id = `welcome-${Date.now()}`;
-    window.notifications.info('Welcome to Impulse! Click here to take a quick tour.', {
+    window.notifications.info('New here? A two-minute tour shows where everything is.', {
       id,
+      title: 'Welcome to Impulse',
       duration: 8000,
       actions: [
         {
           id: 'start-tour',
-          label: 'Start Tour',
+          label: 'Start tour',
           callback: () => window.onboarding.start(true)
         },
         {

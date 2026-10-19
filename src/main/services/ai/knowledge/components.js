@@ -2,13 +2,16 @@
  * Modules, sensors and actuators people wire to Arduino-compatible boards:
  * how they connect, their supply and logic voltage, I2C addresses, the
  * library to use, and the mistakes that make them "not work". Addresses are
- * 7-bit, as Wire and I2C scanners print them.
+ * 7-bit, as Wire and I2C scanners print them. recipes.js adds the wiring and
+ * a compiled, known-good sketch for the common ones.
  */
+
+const { RECIPES } = require('./recipes');
 
 const COMPONENTS = [
   // ── Displays ──────────────────────────────────────────────────────────────
   {
-    id: 'ssd1306', names: ['SSD1306', 'OLED 128x64', 'OLED 128x32', '0.96 inch OLED', '0.91 inch OLED'],
+    id: 'ssd1306', names: ['SSD1306', 'OLED', 'OLED display', 'OLED 128x64', 'OLED 128x32', '0.96 inch OLED', '0.91 inch OLED'],
     interface: 'I2C (most modules) or SPI', voltage: '3.3–5 V modules (onboard regulator)', i2c: ['0x3C', '0x3D'],
     library: 'Adafruit SSD1306 + Adafruit GFX, or U8g2',
     notes: [
@@ -23,13 +26,14 @@ const COMPONENTS = [
     notes: ['Driving it with the SSD1306 library shows a shifted image with a stripe of noise: use an SH1106 driver.'],
   },
   {
-    id: 'lcd-i2c', names: ['LCD 16x2 I2C', 'LCD 20x4 I2C', 'LCD1602 I2C', 'LCD2004', 'PCF8574 LCD backpack', 'LiquidCrystal I2C'],
+    id: 'lcd-i2c', names: ['LCD 16x2 I2C', 'LCD', 'LCD 20x4 I2C', 'LCD1602 I2C', 'LCD2004', 'PCF8574 LCD backpack', 'LiquidCrystal I2C', 'character LCD'],
     interface: 'I2C (PCF8574 backpack)', voltage: '5 V (backlight and contrast need 5 V)', i2c: ['0x27 (PCF8574T)', '0x3F (PCF8574AT)'],
     library: 'LiquidCrystal I2C (Frank de Brabander) or hd44780',
     notes: [
       'Blank screen or only blocks: turn the contrast potentiometer on the backpack.',
       'Wrong address is the most common fault: run an I2C scanner (0x27 vs 0x3F).',
       'The backpack runs from 5 V and its pull-ups hold SDA/SCL at 5 V, which 3.3 V-only boards (ESP32, RP2040, SAMD) must not see: use an I2C level shifter, or remove the backpack\'s pull-up resistors and pull up to 3.3 V instead.',
+      'A bare 16-pin LCD without the backpack is the parallel kind: see LCD 16x2 (LiquidCrystal).',
     ],
   },
   {
@@ -50,8 +54,8 @@ const COMPONENTS = [
   },
   {
     id: 'max7219', names: ['MAX7219', 'LED matrix 8x8', 'dot matrix', '7-segment MAX7219'], interface: 'SPI-like (DIN, CS, CLK)', voltage: '5 V',
-    library: 'MD_Parola + MD_MAX72XX (scrolling text) or LedControl',
-    notes: ['Set the hardware type in MD_MAX72XX (FC16_HW for most cheap modules) or the text appears mirrored or rotated.'],
+    library: 'MD_Parola + MD_MAX72XX (scrolling text, every board); LedControl only on AVR',
+    notes: ['Set the hardware type in MD_MAX72XX (FC16_HW for most cheap modules) or the text appears mirrored or rotated.', 'LedControl includes avr/pgmspace.h and does not build on the ESP32 family: use MD_MAX72XX there.'],
   },
   {
     id: 'tm1637', names: ['TM1637', '4-digit 7-segment display'], interface: '2-wire CLK/DIO (not I2C)', voltage: '3.3–5 V',
@@ -324,6 +328,52 @@ const COMPONENTS = [
   {
     id: 'mlx90614', names: ['MLX90614', 'IR thermometer', 'contactless temperature'], interface: 'I2C (SMBus)', voltage: '3.3 V or 5 V versions', i2c: ['0x5A'], library: 'Adafruit MLX90614', notes: [],
   },
+  // ── ESP32 features (no part to buy: the chip's own radio, sleep, storage) ──
+  {
+    id: 'esp32-wifi', names: ['Wi-Fi', 'WiFi', 'HTTP request', 'HTTPClient', 'internet', 'REST API call', 'web request'], interface: 'built in (ESP32 family, ESP8266)', voltage: 'needs a solid 5 V supply: Wi-Fi peaks above 400 mA',
+    library: 'WiFi.h + HTTPClient.h (core); WiFiClientSecure for https; ArduinoJson to parse answers',
+    notes: ['2.4 GHz networks only. WiFi.begin() then wait for WL_CONNECTED; print WiFi.localIP(). For https, WiFiClientSecure with setInsecure() skips certificate checks (or load the root CA).', 'An Uno/Nano has no Wi-Fi: it needs an ESP8266/ESP32 module or an Uno R4 WiFi.'],
+  },
+  {
+    id: 'esp32-webserver', names: ['web server', 'WebServer', 'web page', 'control from the browser', 'control from the phone', 'dashboard on the board'], interface: 'built in (ESP32 family)', voltage: 'as Wi-Fi',
+    library: 'WebServer.h (core, synchronous) or ESPAsyncWebServer + AsyncTCP (async)',
+    notes: ['server.handleClient() must run every loop pass with no long delay(): use millis() timing.', 'The phone and the board must be on the same network; the URL is the board\'s IP (printed at boot), or <name>.local with ESPmDNS.'],
+  },
+  {
+    id: 'esp32-mqtt', names: ['MQTT', 'PubSubClient', 'HiveMQ', 'Mosquitto', 'broker', 'publish subscribe', 'Node-RED'], interface: 'over Wi-Fi', voltage: 'as Wi-Fi',
+    library: 'PubSubClient (Nick O\'Leary)',
+    notes: ['Messages over 256 bytes are dropped unless client.setBufferSize(512) is called.', 'Call client.loop() every loop pass; reconnect in a loop when client.connected() is false.', 'TLS brokers (port 8883) need WiFiClientSecure in place of WiFiClient.'],
+  },
+  {
+    id: 'esp-now', names: ['ESP-NOW', 'ESPNOW', 'board to board', 'two ESP32 talking', 'wireless between boards without Wi-Fi', 'remote control between ESP32'], interface: 'built in (ESP32 family, ESP8266)', voltage: 'as Wi-Fi',
+    library: 'esp_now.h + WiFi.h (core)',
+    notes: ['No router: boards talk directly, 200 m or more line of sight, 250 bytes per message.', 'WiFi.mode(WIFI_STA) before esp_now_init(); the receiver prints WiFi.macAddress() so the sender can address it, or send to FF:FF:FF:FF:FF:FF (broadcast).', 'Core 3.x changed the receive callback signature to (const esp_now_recv_info_t*, const uint8_t*, int).'],
+  },
+  {
+    id: 'esp32-deep-sleep', names: ['deep sleep', 'sleep', 'low power', 'battery', 'wake up timer', 'wake on button', 'RTC memory'], interface: 'built in (ESP32 family)', voltage: 'about 10 µA for the chip; a dev kit\'s USB-serial chip and regulator add 1–10 mA',
+    library: 'esp_sleep.h (core)',
+    notes: ['Everything restarts in setup() after a wake; only RTC_DATA_ATTR variables and Preferences survive.', 'Timer wake works on every chip; pin wake uses RTC-capable pins (ext0/ext1 on the classic/S2/S3, esp_deep_sleep_enable_gpio_wakeup on the C3/C6).', 'On native-USB boards the port vanishes during sleep and comes back 1–2 s after wake: wait before printing, or the first lines are lost.'],
+  },
+  {
+    id: 'esp32-preferences', names: ['Preferences', 'save settings', 'NVS', 'remember a value after reset', 'EEPROM on ESP32', 'store Wi-Fi credentials'], interface: 'built in (ESP32 family)', voltage: 'any',
+    library: 'Preferences.h (core)',
+    notes: ['Namespaces and keys are 15 characters at most.', 'EEPROM.h works too, but Preferences spreads wear across the flash and keeps its values across re-uploads (not across "Erase All Flash").'],
+  },
+  {
+    id: 'esp32-ledc', names: ['LEDC', 'PWM on ESP32', 'ledcAttach', 'ledcWrite', 'fade on ESP32', 'analogWrite on ESP32'], interface: 'built in (ESP32 family)', voltage: 'any output pin',
+    library: 'core (esp32-hal-ledc)',
+    notes: ['Core 3.x: ledcAttach(pin, freq, bits) and ledcWrite(pin, duty); ledcSetup()/ledcAttachPin() with channels are gone (code from tutorials written for core 2.x fails to compile).', 'analogWrite(pin, 0–255) works on the ESP32 core as well.', 'Frequency × resolution is limited: 5 kHz at 13 bits or 40 MHz at 1 bit; servos want 50 Hz with 16 bits (or ESP32Servo).'],
+  },
+  {
+    id: 'esp32-touch', names: ['touch pad', 'touchRead', 'capacitive touch on ESP32', 'touch button', 'T0', 'touch sensor pin'], interface: 'built in (classic ESP32, S2, S3)', voltage: 'any',
+    library: 'core (touchRead, touchAttachInterrupt, touchSleepWakeUpEnable)',
+    notes: ['Classic ESP32: 10 pads T0–T9 with readings around 70 that drop when touched. S2/S3: 14 pads T1–T14 (GPIO1–14) with readings around 20,000–30,000 that rise when touched. C3, C6, H2: no touch.', 'Calibrate at boot (average a few readings) and compare against a margin; the value drifts with humidity.'],
+  },
+  {
+    id: 'esp32-ble', names: ['BLE', 'Bluetooth Low Energy', 'Bluetooth on ESP32', 'BLE server', 'nRF Connect', 'Bluetooth to phone app'], interface: 'built in (ESP32 family except the S2)', voltage: 'as Wi-Fi',
+    library: 'BLE (core, Neil Kolban) or NimBLE-Arduino (smaller); BluetoothSerial only on the classic ESP32',
+    notes: ['A BLE sketch is about 1.2 MB: choose Partition Scheme "Huge APP (3MB No OTA)" or "Minimal SPIFFS" when it does not fit the default 1.3 MB app slot.', 'Classic Bluetooth (BluetoothSerial, serial terminal apps) exists only on the original ESP32; the S3/C3/C6 are BLE-only, so a phone app must speak BLE (nRF Connect, a custom app, or Web Bluetooth).', 'Phones see the device by the name in BLEDevice::init(); keep it short.'],
+  },
   // ── I/O expansion, audio ─────────────────────────────────────────────────
   {
     id: 'io-expander', names: ['PCF8574', 'MCP23017', 'I/O expander', 'GPIO expander'], interface: 'I2C', voltage: '2.5–5.5 V (PCF8574), 1.8–5.5 V (MCP23017)',
@@ -368,12 +418,135 @@ function findComponents(query, limit = 4) {
   return scored.sort((a, b) => b[0] - a[0]).slice(0, limit).map(([, c]) => c);
 }
 
-function componentText(c) {
+/** Board families the recipes know, from an FQBN's platform. */
+const FAMILY_OF_PLATFORM = {
+  'arduino:avr': 'avr', 'arduino:megaavr': 'avr', 'ATTinyCore:avr': 'avr', 'MiniCore:avr': 'avr', 'MegaCore:avr': 'avr',
+  'esp32:esp32': 'esp32', 'arduino:esp32': 'esp32',
+  'esp8266:esp8266': 'esp8266',
+  'rp2040:rp2040': 'rp2040', 'arduino:mbed_rp2040': 'rp2040',
+  'arduino:samd': 'samd', 'Seeeduino:samd': 'samd', 'adafruit:samd': 'samd',
+  'arduino:renesas_uno': 'renesas', 'STMicroelectronics:stm32': 'stm32', 'teensy:avr': 'teensy',
+  'arduino:mbed_nano': 'mbed', 'Seeeduino:nrf52': 'mbed', 'adafruit:nrf52': 'nrf52',
+};
+const FAMILY_LABEL = {
+  avr: 'Arduino Uno/Nano/Mega (AVR)', esp32: 'classic ESP32 (Arduino core 3.x)', esp32s2: 'ESP32-S2 (core 3.x)', esp32s3: 'ESP32-S3 (core 3.x)', esp32c3: 'ESP32-C3 (core 3.x)', esp32c6: 'ESP32-C6 (core 3.x)', esp32h2: 'ESP32-H2 (core 3.x)', esp8266: 'ESP8266 (NodeMCU, D1 mini)',
+  rp2040: 'Raspberry Pi Pico (RP2040/RP2350)', samd: 'SAMD boards', renesas: 'Arduino Uno R4', stm32: 'STM32 boards', teensy: 'Teensy', mbed: 'Nano 33 BLE / nRF52', nrf52: 'nRF52 boards',
+};
+
+/** 'avr', 'esp32', 'esp8266', 'rp2040'… for an FQBN; 'avr' when unknown (the default pins). */
+function familyKey(fqbn) {
+  const parts = String(fqbn || '').split(':');
+  const platform = parts.slice(0, 2).join(':');
+  let family = FAMILY_OF_PLATFORM[platform];
+  if (!family) {
+    if (/esp32/i.test(platform)) family = 'esp32';
+    else if (/esp8266/i.test(platform)) family = 'esp8266';
+    else if (/rp2040|rp2350|pico/i.test(platform)) family = 'rp2040';
+    else family = 'avr';
+  }
+  if (family === 'esp32') {
+    // The chips differ in pins (ADC, SPI, which GPIOs exist): the board id usually names the chip.
+    const board = (parts[2] || '').toLowerCase();
+    const chip = /s3|nano_nora|heltec_wifi_lora_32_v3|heltec_wifi_kit_32_v3|atoms3|t_display_s3|lolin_s3|qtpy_esp32s3|feather_esp32s3|tinys3|prolite|um_/.test(board) ? 'esp32s3'
+      : /s2/.test(board) ? 'esp32s2'
+        : /c3|xiao_esp32c3|lolin_c3|supermini_c3/.test(board) ? 'esp32c3'
+          : /c6/.test(board) ? 'esp32c6'
+            : /h2/.test(board) ? 'esp32h2'
+              : 'esp32';
+    return chip;
+  }
+  return family;
+}
+
+/** The lookup order for a family's pins, libraries and sketch: the chip, then the family, then the default. */
+function familyChain(family) {
+  if (/^esp32.+/.test(family)) return ['default', 'esp32', family];
+  return ['default', family];
+}
+
+/**
+ * The recipe of a component for a board family: libraries, wiring and a
+ * known-good sketch with the family's pins filled in; null when there is none.
+ * @returns {{ family: string, pins: object, libs: string[], wiring: string[], sketch: string } | null}
+ */
+function recipeFor(c, family = 'avr') {
+  const r = RECIPES[c?.id];
+  if (!r) return null;
+  const chain = familyChain(family);
+  // A table entry set to null says this chip has no such thing (the C3 has no touch pads): no recipe at all.
+  if ((r.pins && r.pins[family] === null) || (r.sketch && typeof r.sketch === 'object' && r.sketch[family] === null)) return null;
+  const pick = (table) => {
+    if (table === undefined || table === null) return undefined;
+    if (typeof table === 'string' || Array.isArray(table)) return table;
+    for (const key of [...chain].reverse()) if (table[key] !== undefined) return table[key];
+    return undefined;
+  };
+  const body = pick(r.sketch);
+  if (!body) return null;
+  const pins = Object.assign({}, ...chain.map((key) => r.pins?.[key] || {}));
+  const fill = (text) => String(text).replace(/\{\{(\w+)\}\}/g, (m, k) => (k in pins ? String(pins[k]) : m));
+  const sketch = `${fill(body).trim()}\n`;
+  if (/\{\{\w+\}\}/.test(sketch)) return null; // a pin this family does not have: no recipe rather than a wrong one
+  const libs = pick(r.libs) || [];
+  return { family, pins, libs, wiring: (r.wiring || []).map(fill).filter((w) => !/\{\{\w+\}\}/.test(w)), sketch };
+}
+
+/**
+ * The guide text for one component. With a family, the wiring and the
+ * known-good sketch for that family's boards come along.
+ */
+function componentText(c, { family = null, withSketch = true } = {}) {
   const lines = [`# ${c.names[0]}${c.names.length > 1 ? ` (${c.names.slice(1, 5).join(', ')})` : ''}`, `- Interface: ${c.interface}`, `- Voltage: ${c.voltage}`];
   if (c.i2c?.length) lines.push(`- I2C address: ${c.i2c.join(' or ')}`);
   if (c.library) lines.push(`- Library: ${c.library}`);
   for (const n of c.notes || []) lines.push(`- ${n}`);
+  const r = family ? recipeFor(c, family) : null;
+  if (r) {
+    const label = FAMILY_LABEL[family] || family;
+    if (r.wiring.length) lines.push(`- Wiring for the ${label}: ${r.wiring.join('; ')}.`);
+    if (r.libs.length) lines.push(`- Install: ${r.libs.join(', ')} (Library Manager names; Impulse installs what is missing when it compiles).`);
+    if (withSketch) lines.push('', `Known-good sketch for the ${label} (Impulse compiled it; adapt it rather than starting from memory):`, '```cpp', r.sketch.trim(), '```');
+  }
   return lines.join('\n');
 }
 
-module.exports = { COMPONENTS, findComponents, componentText };
+const GENERIC_PARTS = new Set(['led', 'button', 'potentiometer']);
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * The components a message names, as whole words ("the DHT22 on an OLED"),
+ * longest name first, at most `max`. Short generic names (LED, pot) only count
+ * when nothing more specific was named.
+ */
+function componentsNamedIn(message, { max = 2 } = {}) {
+  const text = String(message || '');
+  if (!text.trim()) return [];
+  const hits = [];
+  for (const c of COMPONENTS) {
+    let best = null;
+    for (const name of c.names) {
+      if (name.length < 3) continue;
+      const re = new RegExp(`(^|[^A-Za-z0-9])${escapeRe(name).replace(/[\s-]+/g, '[\\s-]*')}(?=$|[^A-Za-z0-9])`, 'i');
+      if (re.test(text) && (!best || name.length > best.length)) best = name;
+    }
+    if (best) hits.push({ component: c, name: best });
+  }
+  hits.sort((a, b) => b.name.length - a.name.length);
+  // "LED" and "button" are in most messages about anything: they count only when nothing else was named.
+  const specific = hits.filter((h) => !GENERIC_PARTS.has(h.component.id));
+  return (specific.length ? specific : hits).slice(0, max).map((h) => h.component);
+}
+
+/**
+ * [COMPONENT FACTS] for the parts a message names, with the known-good sketch
+ * for the board's family on the first; null when it names none.
+ */
+function componentFacts(message, { fqbn = '', max = 2 } = {}) {
+  const found = componentsNamedIn(message, { max });
+  if (!found.length) return null;
+  const family = familyKey(fqbn);
+  const blocks = found.map((c, i) => componentText(c, { family, withSketch: i === 0 }));
+  return `[COMPONENT FACTS] The message names ${found.map((c) => c.names[0]).join(' and ')}; this is how they are used (get_component_guide has more):\n${blocks.join('\n\n')}`;
+}
+
+module.exports = { COMPONENTS, RECIPES, FAMILY_LABEL, findComponents, componentText, familyKey, familyChain, recipeFor, componentsNamedIn, componentFacts };

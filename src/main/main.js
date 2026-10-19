@@ -468,6 +468,9 @@ app.whenReady().then(() => {
   }
   // Gateway requests say which app version sent them.
   aiAgent.providerOptions = { impulse: { version: app.getVersion() }, 'impulse-openai': { version: app.getVersion() } };
+  // One Impulse AI: the server picks the model per turn; the lane takes the account's session.
+  aiAgent.router = ({ kind, escalate }) => cloudAccount.route(kind, escalate);
+  aiAgent.credential = () => cloudAccount.sessionToken();
 
   if (aiAgent.toolExecutor) {
     aiAgent.toolExecutor.setUICallbacks({

@@ -2396,9 +2396,7 @@ body::after {
     font-weight: 500;
     cursor: pointer;
     transition: background var(--transition-fast);
-    font-family: var(--font-mono);
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
+    font-family: inherit; /* a button, in the same type as every other button */
 }
 
 .serial-input-row button:hover {

@@ -34,7 +34,7 @@ describe('AIAgent', () => {
     it('should register and list providers', () => {
       const agent = createAgent();
       agent.registerProvider('mock', MockProvider);
-      expect(agent.getAvailableProviders()).toContain('mock');
+      expect([...agent.providers.keys()]).toContain('mock');
     });
 
     it('should set current provider with valid API key', () => {
@@ -70,10 +70,39 @@ describe('AIAgent', () => {
     it('registers both cloud lanes and nothing that runs on this computer', () => {
       const agent = createAgent();
       agent.initializeProviders();
-      expect(agent.getAvailableProviders()).toEqual(['impulse-openai', 'impulse']);
-      const list = agent.getUnifiedModelList();
-      expect(list[0]).toMatchObject({ id: 'impulse:gpt-5.4', displayName: 'GPT-5.4', provider: 'impulse-openai', latest: true });
-      expect(list.some((m) => m.provider === 'ollama')).toBe(false);
+      expect([...agent.providers.keys()]).toEqual(['impulse-openai', 'impulse']);
+    });
+
+    it('asks the server which model answers, caches it, and points at that lane', async () => {
+      const agent = createAgent();
+      agent.initializeProviders();
+      agent.credential = () => 'session-token-0123456789';
+      const router = jest.fn(async ({ kind, escalate }) => ({ ok: true, data: { model: escalate ? 'gpt-5.5' : kind === 'ask' ? 'gpt-5.4-mini' : 'gpt-5.4', ttlSeconds: 300 } }));
+      agent.router = router;
+      expect(await agent.chooseModel('agent')).toBe('impulse:gpt-5.4');
+      expect(await agent.chooseModel('agent')).toBe('impulse:gpt-5.4');
+      expect(router).toHaveBeenCalledTimes(1); // cached
+      expect(await agent.chooseModel('ask')).toBe('impulse:gpt-5.4-mini');
+      expect(await agent.chooseModel('agent', { escalate: 1 })).toBe('impulse:gpt-5.5');
+      const provider = agent.useModel('impulse:gpt-5.5');
+      expect(provider.name).toBe('impulse-openai');
+      expect(provider.appModel).toBe('impulse:gpt-5.5');
+      expect(agent.useModel('impulse:gpt-5.5')).toBe(provider); // the same lane and model: nothing rebuilt
+      agent.forgetRoutes();
+      await agent.chooseModel('agent');
+      expect(router).toHaveBeenCalledTimes(4);
+    });
+
+    it('refuses to pick a model without a session, and falls back when the server is silent', async () => {
+      const agent = createAgent();
+      agent.initializeProviders();
+      agent.credential = () => null;
+      expect(() => agent.useModel('impulse:gpt-5.4')).toThrow(expect.objectContaining({ code: 'signed_out' }));
+      agent.credential = () => 'session-token-0123456789';
+      agent.router = async () => ({ ok: false, error: 'offline' });
+      expect(await agent.chooseModel('agent')).toBeNull();
+      const provider = await agent.ready();
+      expect(provider.appModel).toBe('impulse:gpt-5.4'); // the default when the server cannot be asked
     });
 
     it('should return null for unknown models', () => {
@@ -237,6 +266,87 @@ describe('AIAgent', () => {
       jest.useRealTimers();
       expect((await pending).response).toBe('Mock response');
       expect(await agent.boardFacts('')).toBeNull();
+    });
+  });
+
+  describe('when a turn runs out of steps', () => {
+    const buildAgent = () => {
+      const agent = createAgent();
+      agent.config.maxIterations = 2;
+      agent.registerProvider('mock', MockProvider);
+      agent.setProvider('mock', 'key');
+      agent.toolExecutor = { execute: async () => ({ success: true, tool: 'compile_sketch' }) };
+      return agent;
+    };
+
+    it('answers with a tool-less summary instead of an error line', async () => {
+      const agent = buildAgent();
+      const calls = [];
+      agent.currentProvider.chat = async (msgs, opts) => {
+        calls.push({ tools: opts.tools, last: msgs[msgs.length - 1] });
+        if (Array.isArray(opts.tools) && opts.tools.length === 0) return { content: 'Compiled and uploaded; the board prints "hi". Nothing is left.', toolCalls: [], model: 'mock-model' };
+        return { content: null, toolCalls: [{ id: `t${calls.length}`, name: 'compile_sketch', arguments: {} }] };
+      };
+      const steps = [];
+      const result = await agent.processQuery('build it', {}, 'agent', { onStep: (s) => steps.push(s.type) });
+      expect(result.warning).toBe('max_iterations_reached');
+      expect(result.response).toMatch(/Compiled and uploaded/);
+      expect(result.toolResults).toHaveLength(2);
+      expect(calls).toHaveLength(3);
+      expect(calls[2].tools).toEqual([]);
+      expect(calls[2].last).toMatchObject({ role: 'user' });
+      expect(calls[2].last.content).toMatch(/used all of its tool steps/);
+      expect(steps.filter((s) => s === 'thinking')).toHaveLength(3);
+    });
+
+    it('falls back to a plain sentence when the summary call fails', async () => {
+      const agent = buildAgent();
+      let n = 0;
+      agent.currentProvider.chat = async (msgs, opts) => {
+        if (Array.isArray(opts.tools) && opts.tools.length === 0) throw new Error('upstream down');
+        return { content: null, toolCalls: [{ id: `t${++n}`, name: 'compile_sketch', arguments: {} }] };
+      };
+      const result = await agent.processQuery('build it', {}, 'agent');
+      expect(result.warning).toBe('max_iterations_reached');
+      expect(result.response).toBe('I ran out of steps for this turn after 2 tool calls (2 succeeded). Send "continue" and I will pick up where I stopped.');
+    });
+
+    it('still stops when the person presses Stop during the summary', async () => {
+      const agent = buildAgent();
+      const turn = new AbortController();
+      let n = 0;
+      agent.currentProvider.chat = async (msgs, opts) => {
+        if (Array.isArray(opts.tools) && opts.tools.length === 0) { turn.abort(); throw new Error('Request was aborted.'); }
+        return { content: null, toolCalls: [{ id: `t${++n}`, name: 'compile_sketch', arguments: {} }] };
+      };
+      await expect(agent.processQuery('build it', {}, 'agent', { signal: turn.signal })).rejects.toMatchObject({ stopped: true });
+    });
+  });
+
+  describe('component facts with a request', () => {
+    it('puts the wiring and sketch of a named part in the system message, not in the history', async () => {
+      const agent = createAgent();
+      agent.registerProvider('mock', MockProvider);
+      agent.setProvider('mock', 'key');
+      let seen = null;
+      agent.currentProvider.chat = async (msgs) => { seen = msgs; return { content: 'ok', toolCalls: [] }; };
+      await agent.processQuery('Read a DHT22 and print it', { selectedBoard: 'esp32:esp32:esp32s3' }, 'agent');
+      expect(seen[0].role).toBe('system');
+      expect(seen[0].content).toMatch(/\[COMPONENT FACTS\] The message names DHT11/);
+      expect(seen[0].content).toMatch(/Known-good sketch for the ESP32-S3/);
+      expect(agent.conversationHistory.some((m) => /COMPONENT FACTS/.test(String(m.content)))).toBe(false);
+      await agent.processQuery('make it print twice a second', { selectedBoard: 'esp32:esp32:esp32s3' }, 'agent');
+      expect(seen[0].content).not.toMatch(/COMPONENT FACTS/); // nothing named this time
+    });
+
+    it('leaves them out of ask mode (a question, not a build)', async () => {
+      const agent = createAgent();
+      agent.registerProvider('mock', MockProvider);
+      agent.setProvider('mock', 'key');
+      let seen = null;
+      agent.currentProvider.chat = async (msgs) => { seen = msgs; return { content: 'ok', toolCalls: [] }; };
+      await agent.processQuery('What is a DHT22?', { selectedBoard: 'arduino:avr:uno' }, 'ask');
+      expect(seen[0].content).not.toMatch(/COMPONENT FACTS/);
     });
   });
 

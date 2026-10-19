@@ -47,7 +47,6 @@ const schemas = {
   }),
   aiAnalyzeError: z.object({ errorMessage: requiredString, context: z.record(z.unknown()).optional() }),
   aiAnalyzeSerial: z.object({ serialOutput: z.string().optional().default(''), lines: z.array(z.string()).optional().default([]) }),
-  aiSetModel: z.object({ modelId: requiredString, manual: z.boolean().optional() }),
   aiExecuteTool: z.object({ toolName: requiredString, args: z.record(z.unknown()).optional().default({}) }),
   problemDetails: z.object({ crashId: z.string().max(120).regex(/^[\w-]+$/).optional().nullable() }),
   problemReport: z.object({

@@ -153,7 +153,7 @@ try {
 
   await step('chat mode menus open, close and are accessible', async () => {
     const esc = () => evaluate(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); !document.querySelector('.v-pop, .v-overlay')`);
-    for (const [sel, what] of [['.v-chip[title=Model]', 'model'], ['.v-chip[title=Mode]', 'mode'], ['.v-icon-btn[aria-label="More tools"]', 'tools'], ['.v-board-chip', 'board'], ['.v-folder-chip', 'folder'], ['.v-icon-btn[aria-label=Settings]', 'settings']]) {
+    for (const [sel, what] of [['.v-chip[title=Mode]', 'mode'], ['.v-icon-btn[aria-label="More tools"]', 'tools'], ['.v-board-chip', 'board'], ['.v-folder-chip', 'folder'], ['.v-icon-btn[aria-label=Settings]', 'settings']]) {
       await evaluate(`document.querySelector(${JSON.stringify(sel)}).click()`);
       await waitFor(`!!document.querySelector('.v-pop [role=menu] .v-item')`, 2000, `the ${what} menu`);
       await audit(`the ${what} menu`);
@@ -367,7 +367,7 @@ try {
 
   // Real clicks, where a person would click: the pill's glow layers once
   // swallowed them, so the field didn't focus and the menus below didn't open.
-  await step('the chat pill and the model menu take real clicks', async () => {
+  await step('the chat pill and the mode menu take real clicks', async () => {
     if (!await evaluate(`window.state.aiPanelOpen`)) await evaluate(`document.getElementById('aiAgentTab').click()`);
     await waitFor(`window.impulse.chatPhase === 'idle' && document.querySelector('#aiPanel .ai-panel-inner').getBoundingClientRect().width > 200`, 5000, 'the AI panel');
     const rect = (sel) => evaluate(`(() => { const b = document.querySelector(${JSON.stringify(sel)}).getBoundingClientRect(); return [b.left, b.top, b.width, b.height] })()`);
@@ -393,7 +393,7 @@ try {
     const [cx, cy] = [px + pw * 0.62, py + ph - 8];
     await click(cx, cy);
     if (await focused() !== 'aiInput') throw new Error(`a click on the pill focused "${await focused()}", not the field (the click landed on ${await hitAt(cx, cy)})`);
-    for (const id of ['aiModelSelect', 'aiModeSelect']) {
+    for (const id of ['aiModeSelect']) {
       const [x, y, w] = await rect(`#${id}`);
       await evaluate(`document.activeElement?.blur(); 1`);
       await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: x + w / 2, y: y + 3, button: 'left', clickCount: 1 });

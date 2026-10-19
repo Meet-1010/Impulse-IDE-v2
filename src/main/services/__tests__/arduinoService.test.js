@@ -91,6 +91,39 @@ describe('ArduinoService', () => {
     });
   });
 
+  describe('waiting for a port that comes and goes', () => {
+    const jobOf = () => { const lines = []; return { lines, line: (l) => lines.push(l), stage: () => {} }; };
+
+    it('goes ahead at once when the port is listed, or when the list cannot be read', async () => {
+      const service = new ArduinoService();
+      service.listPorts = async () => [{ port: '/dev/cu.usbmodem1101' }];
+      const job = jobOf();
+      expect(await service._waitForPort('/dev/cu.usbmodem1101', job, { maxMs: 200, everyMs: 10 })).toBe(true);
+      expect(job.lines).toEqual([]);
+      service.listPorts = async () => { throw new Error('arduino-cli board list failed'); };
+      expect(await service._waitForPort('/dev/cu.usbmodem1101', jobOf(), { maxMs: 200, everyMs: 10 })).toBe(true);
+    });
+
+    it('waits for a sleeping board to show its port again, saying so', async () => {
+      const service = new ArduinoService();
+      let calls = 0;
+      service.listPorts = async () => (++calls < 4 ? [] : [{ port: '/dev/cu.usbmodem1101' }]);
+      const job = jobOf();
+      expect(await service._waitForPort('/dev/cu.usbmodem1101', job, { maxMs: 2000, everyMs: 10 })).toBe(true);
+      expect(job.lines[0]).toMatch(/Waiting for \/dev\/cu\.usbmodem1101 to come back/);
+      expect(job.lines[1]).toBe('/dev/cu.usbmodem1101 is back.');
+      expect(calls).toBe(4);
+    });
+
+    it('gives up after the wait', async () => {
+      const service = new ArduinoService();
+      service.listPorts = async () => [{ port: '/dev/cu.other' }];
+      const job = jobOf();
+      expect(await service._waitForPort('/dev/cu.usbmodem1101', job, { maxMs: 60, everyMs: 10 })).toBe(false);
+      expect(job.lines).toHaveLength(1);
+    });
+  });
+
   describe('parseUploadOutput', () => {
     it('should detect successful AVR upload', () => {
       const stderr = 'avrdude done. Thank you.';

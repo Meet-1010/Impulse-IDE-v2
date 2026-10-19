@@ -42,6 +42,37 @@ const lower = (v) => String(v || '').toLowerCase();
  * win), so the well-known ones are spelled out. `null` means the board's own
  * core provides the header: there is nothing to install.
  */
+/**
+ * Headers that belong to a core's SDK or the toolchain rather than to any
+ * library: ESP-IDF (esp_*.h, driver/, freertos/, soc/…), the ESP8266 SDK,
+ * avr-libc, and the C/C++ standard headers. The Library Manager index lists
+ * a few libraries that ship copies of these; installing one shadows the real
+ * header and breaks builds.
+ */
+const CORE_HEADER_PATTERNS = {
+  '*': [
+    /^(stdint|stdlib|stdio|string|strings|math|stdbool|inttypes|ctype|limits|errno|time|assert|stdarg|stddef|float|setjmp|signal|unistd|fcntl)\.h$/,
+    /^(vector|string|map|unordered_map|set|array|functional|algorithm|memory|utility|cstdint|cstring|cmath|cstdio|cstdlib|cstddef|cstdarg|cctype|climits|cerrno|cassert|iterator|tuple|optional|variant|type_traits|initializer_list|new|atomic|chrono|numeric|deque|list|queue|stack|bitset|iostream|sstream|iomanip|limits|exception|stdexcept)$/,
+    /^Arduino\.h$/, /^pins_arduino\.h$/, /^sys\//,
+  ],
+  esp32: [/^esp_/, /^esp32-hal/, /^(driver|freertos|soc|hal|rom|lwip|mbedtls|nvs|esp_private|xtensa|riscv|esp_system|spi_flash|bootloader_support|hal)\//, /^sdkconfig\.h$/, /^nvs(_flash)?\.h$/, /^rtc_wdt\.h$/, /^sd_protocol_types\.h$/],
+  esp8266: [/^(user_interface|osapi|ets_sys|espnow|os_type|mem|c_types|eagle_soc|gpio|uart|sntp|ping|smartconfig|spi_flash|umm_malloc)\.h$/, /^(lwip|umm_malloc)\//, /^core_esp8266/],
+  avr: [/^(avr|util)\//],
+  megaavr: [/^(avr|util)\//],
+  mbed: [/^mbed/, /^rtos/],
+  rp2040: [/^(hardware|pico)\//],
+};
+// Unambiguous names (esp_*.h, driver/, avr/io.h, hardware/pwm.h) mean the core
+// whatever the board: a sketch for another board is still not a library to
+// install. The ESP8266 SDK's short names (gpio.h, mem.h) count only on it.
+const CORE_HEADERS_ALWAYS = ['*', 'esp32', 'avr', 'rp2040'];
+function isCoreHeader(header, arch = '') {
+  const h = String(header || '').replace(/^<|>$/g, '').replace(/^"|"$/g, '');
+  const groups = CORE_HEADERS_ALWAYS.map((k) => CORE_HEADER_PATTERNS[k]);
+  if (arch && !CORE_HEADERS_ALWAYS.includes(arch) && CORE_HEADER_PATTERNS[arch]) groups.push(CORE_HEADER_PATTERNS[arch]);
+  return groups.flat().some((re) => re.test(h));
+}
+
 const KNOWN_HEADERS = {
   // the core's own
   'Arduino.h': null, 'Wire.h': null, 'SPI.h': null, 'EEPROM.h': null, 'SoftwareSerial.h': null, 'WiFi.h': null,
@@ -203,10 +234,13 @@ class LibraryService {
    * that does not. A header the core provides has no providers at all.
    */
   async providersOf(header, { fqbn = '' } = {}) {
+    const arch = String(fqbn || '').split(':')[1] || '';
+    // SDK and toolchain headers (esp_sleep.h, driver/ledc.h, avr/io.h, <vector>)
+    // come with the core: a library that claims them must never be installed.
+    if (isCoreHeader(header, arch)) return [];
     const key = Object.keys(KNOWN_HEADERS).find((h) => lower(h) === lower(String(header).split('/').pop()));
     const want = lower(header);
     const bare = want.replace(/\.(h|hpp)$/, '');
-    const arch = String(fqbn || '').split(':')[1] || '';
     const libraries = await this.index();
     const installed = new Set((await this.installed().catch(() => [])).map((l) => lower(l.name)));
     const squash = (v) => lower(v).replace(/[^a-z0-9]/g, '');
@@ -312,4 +346,4 @@ class LibraryService {
   }
 }
 
-module.exports = { LibraryService, includesOf, missingHeadersOf, KNOWN_HEADERS };
+module.exports = { LibraryService, includesOf, missingHeadersOf, KNOWN_HEADERS, CORE_HEADER_PATTERNS, isCoreHeader };

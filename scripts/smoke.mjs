@@ -88,7 +88,7 @@ try {
   const chatSteps = [
     [`document.documentElement.dataset.shell`, 'vibe'],
     [`!document.querySelector('.v-empty').hidden && document.querySelectorAll('.v-launch-row').length >= 3 && !!document.querySelector('.v-field')`, true],
-    [`document.querySelector('.v-chip[title=Model]').click(); !!document.querySelector('.v-pop [role=menu] .v-item')`, true],
+    [`document.querySelector('.v-chip[title=Mode]').click(); !!document.querySelector('.v-pop [role=menu] .v-item')`, true],
     [esc, true],
     [`document.querySelector('.v-chip[title=Mode]').click(); document.querySelectorAll('.v-pop [role=menuitemradio]').length`, 3],
     [esc, true],

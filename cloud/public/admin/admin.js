@@ -395,6 +395,24 @@ async function settings(main) {
   const defaultModel = h('select', { class: 'input' }, models.map((m) => h('option', { value: m.id, selected: s.defaultModel === m.id }, m.name)));
   defaultModel.addEventListener('change', () => { s.defaultModel = defaultModel.value; dirty(); });
 
+  // Routing: which model answers which kind of work, and where to escalate.
+  const KINDS = [['agent', 'Agent (builds and edits code)'], ['plan', 'Plan'], ['debug', 'Debug'], ['ask', 'Ask (explanations, no tools)'], ['summary', 'Summaries of long chats']];
+  const modelSelect = (value, onChange, { allowNone = false } = {}) => {
+    const sel = h('select', { class: 'input' },
+      allowNone ? h('option', { value: '', selected: !value }, 'none') : null,
+      ...models.map((m) => h('option', { value: m.id, selected: value === m.id }, `${m.name} · $${m.input}/$${m.output} per M tokens`)));
+    sel.addEventListener('change', () => onChange(sel.value));
+    return sel;
+  };
+  const routingRows = KINDS.map(([kind, label]) => h('label', { class: 'field' }, h('span', { text: label }), modelSelect(s.routing[kind], (v) => { s.routing[kind] = v; dirty(); })));
+  const ladder = [0, 1].map((i) => h('label', { class: 'field' }, h('span', { text: i === 0 ? 'When a turn fails once, escalate to' : 'and if it fails again, to' }),
+    modelSelect(s.routing.escalation[i] || '', (v) => {
+      const next = [...s.routing.escalation];
+      if (v) next[i] = v; else next.splice(i);
+      s.routing.escalation = next.filter(Boolean).slice(0, 3);
+      dirty();
+    }, { allowNone: true })));
+
   const maintenance = h('input', { type: 'checkbox', checked: s.maintenance });
   maintenance.addEventListener('change', () => { s.maintenance = maintenance.checked; dirty(); });
   const announcement = h('textarea', { class: 'input', rows: '2', maxlength: '280', style: 'height:auto;padding:8px 12px;resize:vertical' });
@@ -429,7 +447,11 @@ async function settings(main) {
       h('section', { class: 'panel' }, h('h2', { text: 'Plans' }), h('div', { class: 'plans' }, planCols)),
       h('section', { class: 'panel' }, h('h2', { text: 'Models' }),
         h('div', { class: 'field' }, h('span', { text: 'Available' }), enabled),
-        h('label', { class: 'field', style: 'max-width:320px' }, h('span', { text: 'Default model' }), defaultModel)),
+        h('label', { class: 'field', style: 'max-width:320px' }, h('span', { text: 'Fallback model' }), defaultModel)),
+      h('section', { class: 'panel' }, h('h2', { text: 'Routing' }),
+        h('p', { class: 'muted', style: 'margin:0 0 10px;font-size:12.5px', text: 'People see one Impulse AI. These decide which model answers each kind of work, cheapest first; a turn that already failed climbs the escalation list.' }),
+        h('div', { class: 'fields' }, ...routingRows),
+        h('div', { class: 'fields' }, ...ladder)),
       h('section', { class: 'panel' }, h('h2', { text: 'Limits' }),
         h('div', { class: 'fields' },
           numberField('Requests per minute, per user', 'rateLimitPerMinute', { min: '1' }),
@@ -440,7 +462,8 @@ async function settings(main) {
         h('label', { class: 'field' }, h('span', { text: 'Announcement (shown under the chat box, up to 280 characters)' }), announcement)),
       h('section', { class: 'panel' }, h('h2', { text: 'This server' }),
         h('ul', { class: 'status-list' },
-          check(srv.anthropic, srv.anthropic ? 'Anthropic API key is set' : 'No Anthropic API key: AI requests fail'),
+          check(srv.openai, srv.openai ? 'OpenAI API key is set' : 'No OpenAI API key: GPT models are not offered'),
+          check(srv.anthropic, srv.anthropic ? 'Anthropic API key is set' : 'No Anthropic API key: Claude models are not offered'),
           check(srv.google, srv.google ? 'Google sign-in is on' : 'Google sign-in is off (no client id)'),
           check(srv.github, srv.github ? 'GitHub sign-in is on' : 'GitHub sign-in is off (no client id)'),
           check(srv.email === 'resend', srv.email === 'resend' ? 'Email codes go out through Resend' : srv.email === 'log' ? 'Email codes are only printed to the server log' : 'Email sign-up is off'),

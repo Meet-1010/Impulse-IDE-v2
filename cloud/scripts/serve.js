@@ -17,6 +17,9 @@ if (process.env.MIGRATE_ON_START !== '0') await migrate({ config, pool, log: (m)
 
 const { app } = createApp({ config, pool, staticFiles: serveStatic({ root: './public' }) });
 const port = Number(process.env.PORT) || 8787;
-serve({ fetch: app.fetch, port, hostname: '127.0.0.1' }, () => {
-  console.log(`Impulse Cloud on ${config.baseURL} (listening on 127.0.0.1:${port})`);
+// On this machine the server stays on localhost; in a container (Cloud Run,
+// Render) HOST=0.0.0.0 lets the platform reach it.
+const hostname = process.env.HOST || '127.0.0.1';
+serve({ fetch: app.fetch, port, hostname }, () => {
+  console.log(`Impulse Cloud on ${config.baseURL} (listening on ${hostname}:${port})`);
 });
