@@ -152,7 +152,7 @@ export class SimulationManager {
 
     // Bottom pane: serial monitor, logic analyzer, circuit checks.
     this.serialOut = h('div', { id: 'simSerialOut', class: 'sim-serial-out', role: 'log', 'aria-label': 'Simulated serial output', tabindex: '0' });
-    this.serialInput = h('input', { type: 'text', id: 'simSerialInput', placeholder: 'Message to send to the board — press Enter', autocomplete: 'off', spellcheck: 'false' });
+    this.serialInput = h('input', { type: 'text', id: 'simSerialInput', placeholder: 'Send to the board…', 'aria-label': 'Send to the board', autocomplete: 'off', spellcheck: 'false' });
     this.lineEnding = h('select', { class: 'sim-select small', title: 'Line ending', 'aria-label': 'Line ending' },
       h('option', { value: 'newline' }, 'Newline'), h('option', { value: 'none' }, 'No line ending'), h('option', { value: 'cr' }, 'Carriage return'), h('option', { value: 'both' }, 'Both NL & CR'));
     try { this.lineEnding.value = localStorage.getItem('impulse-sim-line-ending') || 'newline'; } catch { /* default */ }
@@ -1021,6 +1021,8 @@ export class SimulationManager {
       return;
     }
     await window.impulse?.openSketch?.(res.folderPath, res.filePath);
+    // With no board chosen yet, the example's own board is the obvious one (Verify works right away).
+    if (!window.impulse?.board?.current?.()?.fqbn && BOARDS[example.board]?.fqbn) window.impulse.board.choose?.(BOARDS[example.board].fqbn);
     if (window.impulse?.showSimulator) window.impulse.showSimulator();
     const missing = [];
     if (example.libraries?.length) {

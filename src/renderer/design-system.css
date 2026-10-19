@@ -1327,6 +1327,9 @@ li.CodeMirror-hint-active {
     gap: 2px;
 }
 
+/* An item waiting for something to say stays out of sight (display would otherwise beat [hidden]). */
+.status-item[hidden] { display: none; }
+
 .status-item {
     display: inline-flex;
     align-items: center;
@@ -1769,6 +1772,11 @@ li.CodeMirror-hint-active {
     color: var(--ds-text-3);
     font-size: 12.5px;
     line-height: 1.5;
+}
+
+.tests-hint code {
+    font: 12px var(--font-mono);
+    color: var(--ds-text-2);
 }
 
 .tests-head {

@@ -30,7 +30,7 @@ class OnboardingManager {
       },
       {
         id: 'select-board',
-        title: 'Select Board',
+        title: 'Choose a board',
         content: 'Choose your Arduino board from this dropdown. This tells the compiler what type of Arduino you\'re using.',
         target: '#boardPortDropdown',
         position: 'bottom'
@@ -44,14 +44,14 @@ class OnboardingManager {
       },
       {
         id: 'ai-assistant',
-        title: 'AI Assistant',
-        content: 'Need help? Click here to open the AI assistant. It can help with code, errors, and Arduino questions.',
+        title: 'Impulse AI',
+        content: 'Stuck? Open Impulse AI here: it writes and fixes code, explains errors and answers questions about your board.',
         target: '#aiAgentTab',
         position: 'left'
       },
       {
         id: 'serial-monitor',
-        title: 'Serial Monitor',
+        title: 'Serial monitor',
         content: 'Monitor communication between your computer and Arduino using the serial monitor.',
         target: '#serialMonitorBtn',
         position: 'left'

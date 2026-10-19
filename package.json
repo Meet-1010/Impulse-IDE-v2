@@ -48,7 +48,8 @@
     "build:cli": "node scripts/build-cli.mjs",
     "field-lab": "node scripts/build-field-lab.mjs",
     "knowledge:probe": "node scripts/knowledge-probe.mjs",
-    "knowledge:audit": "node scripts/knowledge-audit.mjs"
+    "knowledge:audit": "node scripts/knowledge-audit.mjs",
+    "knowledge:recipes": "node scripts/knowledge-recipes.mjs"
   },
   "keywords": [
     "arduino",

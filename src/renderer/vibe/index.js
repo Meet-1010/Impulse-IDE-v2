@@ -669,6 +669,15 @@ function boardLabel(fqbn) {
   return base ? base.split(':').pop() : 'the board';
 }
 
+/** A port as the board chip names it: usbmodem1101 for /dev/cu.usbmodem1101, COM3 as it is. */
+const shortPort = (port) => String(port || '').replace(/^\/dev\/(?:cu|tty)\./, '');
+
+/** "Traffic light" for the project folder traffic-light; null without a project. */
+function projectTitle() {
+  const name = impulse.project.current()?.name;
+  return name ? name.replace(/[-_]+/g, ' ').trim().replace(/^./, (c) => c.toUpperCase()) : null;
+}
+
 function liveBuildCard(info) {
   const started = performance.now();
   const timer = h('span', { class: 'v-step-time', text: '0.0s' });
@@ -719,15 +728,52 @@ function fixPrompt(m) {
   return lines.join('\n');
 }
 
+/** "313 KB", "1.25 MB", "640 bytes". */
+function sizeText(bytes) {
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(2).replace(/\.?0+$/, '')} MB`;
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(bytes >= 100 * 1024 ? 0 : 1).replace(/\.0$/, '')} KB`;
+  return `${bytes} bytes`;
+}
+
+/** Flash and RAM from Arduino IDE's summary sentences, as label / meter / value rows; null when there are none. */
+function memoryRows(lines) {
+  const num = (v) => Number(String(v).replace(/,/g, ''));
+  // One sentence each; the used size, the percentage and the maximum are read from it separately.
+  const read = (start) => {
+    const line = lines.find((l) => l.startsWith(start));
+    const used = line && /([\d,]+) bytes/.exec(line);
+    if (!used) return null;
+    const pct = /\((\d+)%\)/.exec(line);
+    const max = /Maximum is ([\d,]+) bytes/.exec(line);
+    return { used: num(used[1]), pct: pct ? Number(pct[1]) : null, max: max ? num(max[1]) : null };
+  };
+  const rows = [['Flash', read('Sketch uses')], ['RAM', read('Global variables use')]].filter(([, v]) => v);
+  if (!rows.length) return null;
+  return h('div', { class: 'v-build-mem' }, rows.flatMap(([label, v]) => {
+    const pct = v.pct ?? (v.max ? Math.round((v.used / v.max) * 100) : null);
+    const level = pct >= 90 ? 'empty' : pct >= 75 ? 'low' : null;
+    return [
+      h('span', { class: 'v-mem-label', text: label }),
+      pct === null ? h('span') : h('div', { class: 'v-meter', role: 'meter', 'aria-label': `${label} used`, 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': String(pct), dataset: level ? { level } : {} }, h('span', { style: `width:${Math.min(100, pct)}%` })),
+      h('span', { class: 'v-mem-value', text: `${sizeText(v.used)}${v.max ? ` of ${sizeText(v.max)}` : ''}${pct !== null ? ` · ${pct}%` : ''}` }),
+    ];
+  }));
+}
+
 function buildRecordCard(m) {
   const stopped = m.error?.code === 'CANCELLED';
   const card = h('div', { class: 'v-card v-build' },
     h('div', { class: 'v-card-head' }, led(m.ok ? 'green' : stopped ? 'amber' : 'red'), h('span', { text: m.title }), m.ms ? h('span', { class: 'v-step-time', text: seconds(m.ms) }) : null));
   if (!m.ok && !stopped && m.error?.hint) card.append(h('p', { text: m.error.hint }));
   if (!m.ok && !stopped && m.error?.excerpt) card.append(h('pre', { class: 'v-card-log', text: m.error.excerpt }));
+  // Arduino IDE's two memory sentences become two short meters; the full
+  // sentences stay in the Output below.
+  const memory = memoryRows(m.summary || []);
+  if (memory) card.append(memory);
   for (const line of m.summary || []) {
+    if (memory && /^(Sketch uses|Global variables use) /.test(line)) continue;
     // The pin check's lines are a finding, not a size report.
-    card.append(h('p', { class: /^\[PIN CHECK\]|^- /.test(line) ? 'v-build-pin' : 'v-build-summary', text: line.replace(/^\[PIN CHECK\] /, '') }));
+    card.append(h('p', { class: /^\[PIN CHECK\]|^- |^Low memory/.test(line) ? 'v-build-pin' : 'v-build-summary', text: line.replace(/^\[PIN CHECK\] /, '') }));
   }
   const actions = [];
   if (!m.ok && !stopped) actions.push(h('button', { type: 'button', class: 'v-btn primary', onclick: () => send(fixPrompt(m), { mode: 'debug' }) }, icon(ICON.debug), 'Fix it'));
@@ -755,15 +801,15 @@ function buildRecordCard(m) {
 function askUpload(request) {
   const board = impulse.board.current();
   setEmpty(false);
-  chats.begin(`Upload to ${board.name || 'the board'}`);
+  chats.begin(projectTitle() || `Upload to ${board.name || 'the board'}`);
   const card = h('div', { class: 'v-card' },
     h('div', { class: 'v-card-head' }, led('amber', { pulse: true }), 'Upload to the board?'),
-    h('p', { text: `Impulse wants to put ${request.name} on ${board.name || request.boardFQBN} on ${request.port}. Anything wired to the board runs the new code.` }));
+    h('p', { text: `Impulse wants to put ${request.name} on ${board.name || request.boardFQBN} (${shortPort(request.port)}). Anything wired to the board runs the new code.` }));
   const answer = (allowed) => {
     api.ui.replyConfirmUpload(request.id, allowed);
     card.replaceChildren(
       h('div', { class: 'v-card-head' }, led(allowed ? 'green' : null), allowed ? 'Uploading…' : 'Upload cancelled'),
-      h('p', { text: allowed ? `${request.name} is going to ${request.port}.` : 'Nothing was sent to the board.' }));
+      h('p', { text: allowed ? `${request.name} is going to ${board.name || 'the board'} (${shortPort(request.port)}).` : 'Nothing was sent to the board.' }));
   };
   card.append(h('div', { class: 'v-answer-actions' },
     h('button', { type: 'button', class: 'v-btn primary', onclick: () => answer(true) }, icon(ICON.upload), 'Upload'),
@@ -775,9 +821,10 @@ function onBuildEvent(ev) {
   if (ev.phase === 'start') {
     liveBuild?.stop();
     const name = boardLabel(ev.fqbn);
-    const title = ev.kind === 'upload' ? `Uploading to ${name}${ev.port ? ` on ${ev.port}` : ''}` : `Compiling for ${name}`;
+    const title = ev.kind === 'upload' ? `Uploading to ${name}${ev.port ? ` on ${shortPort(ev.port)}` : ''}` : `Compiling for ${name}`;
     liveBuild = liveBuildCard({ id: ev.jobId, kind: ev.kind, title, name, port: ev.port, fqbn: ev.fqbn });
-    chats.begin(title);
+    // A chat that starts with a build is about the project, not about "Compiling…".
+    chats.begin(projectTitle() || title);
     setEmpty(false);
     // During an agent turn the card goes above the live answer; otherwise at the end.
     const working = thread.querySelector('.v-msg-ai[aria-busy="true"]:not([data-build])');
@@ -796,7 +843,7 @@ function onBuildEvent(ev) {
     live.stop();
     setAnnounce('');
     const title = ev.ok
-      ? (live.kind === 'upload' ? `Uploaded to ${live.name}${ev.port || live.port ? ` on ${ev.port || live.port}` : ''}` : `Compiled for ${live.name}`)
+      ? (live.kind === 'upload' ? `Uploaded to ${live.name}${ev.port || live.port ? ` on ${shortPort(ev.port || live.port)}` : ''}` : `Compiled for ${live.name}`)
       : ev.error?.code === 'CANCELLED' ? (live.kind === 'upload' ? 'The upload was stopped' : 'The build was stopped') : (ev.error?.title || 'Failed');
     const record = chats.add({
       role: 'card', kind: 'build', build: live.kind, ok: !!ev.ok, title,

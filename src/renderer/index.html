@@ -41,13 +41,13 @@
                     </svg>
                 </button>
                 <div class="board-port-selector">
-                    <button id="boardPortDropdown" class="board-port-btn" title="Select Board and Port">
+                    <button id="boardPortDropdown" class="board-port-btn" title="Choose a board and port">
                         <svg class="board-port-btn-icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                             <rect x="5" y="5" width="14" height="14" rx="2" />
                             <rect x="9" y="9" width="6" height="6" rx="1" />
                             <path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3" />
                         </svg>
-                        <span id="boardPortDisplay" class="board-port-display">Select Board and Port</span>
+                        <span id="boardPortDisplay" class="board-port-display">Choose a board</span>
                         <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor"
                             stroke-width="2">
                             <polyline points="6 9 12 15 18 9" />
@@ -56,8 +56,7 @@
                     <div id="boardPortDropdownMenu" class="board-port-dropdown-menu">
                         <div id="boardPortSavedOptions" class="board-port-saved-options"></div>
                         <div class="board-port-divider"></div>
-                        <button id="selectOtherBoardPort" class="board-port-other-btn">Select other board and
-                            port...</button>
+                        <button id="selectOtherBoardPort" class="board-port-other-btn">Choose another board and port…</button>
                         <button id="boardOptionsBtn" class="board-port-other-btn">Board options…</button>
                     </div>
                 </div>
@@ -68,19 +67,19 @@
                     <button type="button" id="shellIdeBtn" aria-pressed="true" title="The IDE (⌘E)">IDE</button>
                 </div>
                 <span class="toolbar-divider" aria-hidden="true"></span>
-                <button id="serialMonitorBtn" class="action-btn serial-monitor" title="Serial Monitor (Ctrl+Shift+M)">
+                <button id="serialMonitorBtn" class="action-btn serial-monitor" title="Serial monitor (Ctrl+Shift+M)">
                     <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
                         <rect x="3" y="3" width="18" height="18" rx="2" />
                         <path d="M7 8h4M7 12h8M7 16h6" />
                     </svg>
                 </button>
-                <button id="serialPlotterBtn" class="action-btn serial-plotter" title="Serial Plotter">
+                <button id="serialPlotterBtn" class="action-btn serial-plotter" title="Serial plotter">
                     <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
                         <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
                     </svg>
                 </button>
                 <span class="toolbar-divider" aria-hidden="true"></span>
-                <button id="aiAgentTab" class="ai-agent-tab" title="AI Assistant (Ctrl+Shift+A)">
+                <button id="aiAgentTab" class="ai-agent-tab" title="Impulse AI (Ctrl+Shift+A)">
                     <svg viewBox="0 0 24 24" class="ai-agent-tab-icon" width="16" height="16" fill="none"
                         stroke="currentColor" stroke-width="2">
                         <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
@@ -101,7 +100,7 @@
 
         <!-- Workspace: Activity Bar + Sidebar (Explorer a step down) + Main Area -->
         <div class="workspace-row">
-            <!-- Activity Bar: Sketchbook, Board Manager, Library Manager, Debug, Search -->
+            <!-- Activity bar: sketchbook, boards, libraries, debug, search -->
             <nav class="activity-bar" aria-label="Activity bar">
                 <div class="activity-bar-top">
                     <button class="activity-icon active" data-panel="explorer" title="Sketchbook (Ctrl+Shift+E)">
@@ -109,7 +108,7 @@
                             <path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
                         </svg>
                     </button>
-                    <button class="activity-icon" data-panel="scm" title="Source Control (Ctrl+Shift+G)">
+                    <button class="activity-icon" data-panel="scm" title="Source control (Ctrl+Shift+G)">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                             <circle cx="6" cy="5" r="2.2" />
                             <circle cx="6" cy="19" r="2.2" />
@@ -117,7 +116,7 @@
                             <path d="M6 7.2v9.6M18 10.2c0 4.2-6.5 3.6-11.2 6.9" />
                         </svg>
                     </button>
-                    <button class="activity-icon" data-panel="boards" title="Board Manager (Ctrl+Shift+B)">
+                    <button class="activity-icon" data-panel="boards" title="Board manager (Ctrl+Shift+B)">
                         <svg viewBox="0 0 24 24" class="activity-icon-img" width="24" height="24" fill="none"
                             stroke="currentColor" stroke-width="2">
                             <rect x="4" y="4" width="16" height="16" rx="2" ry="2" />
@@ -132,7 +131,7 @@
                             <line x1="1" y1="14" x2="4" y2="14" />
                         </svg>
                     </button>
-                    <button class="activity-icon" data-panel="libraries" title="Library Manager (Ctrl+Shift+I)">
+                    <button class="activity-icon" data-panel="libraries" title="Library manager (Ctrl+Shift+I)">
                         <svg viewBox="0 0 24 24" class="activity-icon-img" width="24" height="24" fill="none"
                             stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <rect x="5" y="3" width="14" height="18" rx="2" />
@@ -153,13 +152,13 @@
                             <path d="m21 21-4.35-4.35" />
                         </svg>
                     </button>
-                    <button class="activity-icon" data-panel="serial" title="Serial Monitor (Ctrl+Shift+M)">
+                    <button class="activity-icon" data-panel="serial" title="Serial monitor (Ctrl+Shift+M)">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <rect x="3" y="4" width="18" height="16" rx="2" />
                             <path d="M7 9l3 3-3 3M13 15h4" />
                         </svg>
                     </button>
-                    <button class="activity-icon" data-panel="simulate" title="2D Simulator (Ctrl+Shift+D)">
+                    <button class="activity-icon" data-panel="simulate" title="Simulator (Ctrl+Shift+D)">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <rect x="2" y="3" width="20" height="14" rx="2"/>
                             <path d="M8 21h8M12 17v4"/>
@@ -230,7 +229,7 @@
                 <!-- Boards Panel -->
                 <div class="sidebar-panel" id="boardsPanel">
                     <div class="sidebar-header">
-                        <span class="sidebar-title">Board Manager</span>
+                        <span class="sidebar-title">Board manager</span>
                         <button class="sidebar-collapse-btn" title="Collapse">
                             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
                                 stroke-width="2">
@@ -240,15 +239,15 @@
                     </div>
                     <div class="sidebar-content">
                         <div class="sidebar-section">
-                            <div class="section-header">Select Board</div>
+                            <div class="section-header">Board</div>
                             <select id="boardSelectSidebar" class="sidebar-select">
-                                <option value="">Select Board...</option>
+                                <option value="">Choose a board…</option>
                             </select>
                         </div>
                         <div class="sidebar-section">
-                            <div class="section-header">Select Port</div>
+                            <div class="section-header">Port</div>
                             <select id="portSelectSidebar" class="sidebar-select">
-                                <option value="">Select Port...</option>
+                                <option value="">Choose a port…</option>
                             </select>
                             <button id="refreshPortsSidebar" class="btn-small" style="margin-top: 8px;">
                                 <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor"
@@ -256,7 +255,7 @@
                                     <path d="M23 4v6h-6M1 20v-6h6" />
                                     <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15" />
                                 </svg>
-                                Refresh Ports
+                                Refresh ports
                             </button>
                         </div>
                         <div class="sidebar-section board-manager-section">
@@ -271,7 +270,7 @@
                             <div id="coreInstalledList" class="core-list"></div>
                         </div>
                         <div class="sidebar-section">
-                            <div id="cliStatus" class="cli-status">Checking CLI...</div>
+                            <div id="cliStatus" class="cli-status">Checking arduino-cli…</div>
                         </div>
                     </div>
                 </div>
@@ -310,7 +309,7 @@
                 <!-- Source Control Panel -->
                 <div class="sidebar-panel" id="scmPanel">
                     <div class="sidebar-header">
-                        <span class="sidebar-title">Source Control</span>
+                        <span class="sidebar-title">Source control</span>
                         <button class="sidebar-collapse-btn" title="Collapse">
                             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
                                 stroke-width="2">
@@ -334,7 +333,7 @@
                     </div>
                     <div class="sidebar-content">
                         <div class="sidebar-section">
-                            <input type="text" id="searchInput" class="sidebar-input" placeholder="Search in sketch...">
+                            <input type="text" id="searchInput" class="sidebar-input" placeholder="Search in the sketch…">
                             <button id="searchBtn" class="btn-small" style="margin-top: 8px; width: 100%;">Find</button>
                             <div id="searchResults" class="search-results-list"></div>
                         </div>
@@ -344,7 +343,7 @@
                 <!-- Libraries Panel -->
                 <div class="sidebar-panel" id="librariesPanel">
                     <div class="sidebar-header">
-                        <span class="sidebar-title">Library Manager</span>
+                        <span class="sidebar-title">Library manager</span>
                         <button class="sidebar-collapse-btn" title="Collapse">
                             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
                                 stroke-width="2">
@@ -356,7 +355,7 @@
                         <div class="sidebar-section">
                             <div class="lib-search-row">
                                 <input type="text" id="libSearchInput" class="sidebar-input"
-                                    placeholder="Search libraries...">
+                                    placeholder="Search libraries…">
                                 <button id="libSearchBtn" class="btn-small">Search</button>
                             </div>
                             <button id="libUpdateIndex" class="btn-small" style="width: 100%;">
@@ -365,7 +364,7 @@
                                     <path d="M23 4v6h-6M1 20v-6h6" />
                                     <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15" />
                                 </svg>
-                                Update Library Index
+                                Update the library index
                             </button>
                         </div>
                         <div class="sidebar-section">
@@ -391,7 +390,7 @@
                             Add components from the library on the right.<br>
                             Connect pins by clicking them.<br>
                             Press <strong>Run</strong> to simulate.<br><br>
-                            <kbd>Ctrl+Shift+S</kbd> toggles the simulator.
+                            <kbd>Ctrl+Shift+D</kbd> toggles the simulator.
                         </div>
                     </div>
                 </div>
@@ -399,7 +398,7 @@
                 <!-- Serial Panel -->
                 <div class="sidebar-panel" id="serialPanel">
                     <div class="sidebar-header">
-                        <span class="sidebar-title">Serial Monitor</span>
+                        <span class="sidebar-title">Serial monitor</span>
                         <button class="sidebar-collapse-btn" title="Collapse">
                             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
                                 stroke-width="2">
@@ -422,7 +421,7 @@
                                 <option value="115200" selected>115200</option>
                             </select>
                             <button id="toggleSerial" class="serial-btn">
-                                Open Serial Monitor
+                                Open serial monitor
                             </button>
                         </div>
                     </div>
@@ -438,7 +437,7 @@
                 <div id="boardPortModal" class="board-port-modal">
                     <div class="board-port-modal-content">
                         <div class="board-port-modal-header">
-                            <h2>Select Other Board and Port</h2>
+                            <h2>Choose a board and port</h2>
                             <button class="board-port-modal-close" id="boardPortModalClose">
                                 <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"
                                     stroke-width="2">
@@ -447,8 +446,7 @@
                             </button>
                         </div>
                         <div class="board-port-modal-description">
-                            Select both a Board and a Port if you want to upload a sketch. If you only select a Board
-                            you will be able to compile, but not to upload your sketch.
+                            Choose a board to verify your sketch, and its port as well to upload it.
                         </div>
                         <div class="board-port-modal-body">
                             <div class="board-port-modal-section">
@@ -512,7 +510,7 @@
                                         <li><span>New sketch</span><span class="keys"><kbd>Ctrl</kbd><kbd>N</kbd></span></li>
                                         <li><span>Verify</span><span class="keys"><kbd>Ctrl</kbd><kbd>R</kbd></span></li>
                                         <li><span>Upload</span><span class="keys"><kbd>Ctrl</kbd><kbd>U</kbd></span></li>
-                                        <li><span>AI assistant</span><span class="keys"><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>A</kbd></span></li>
+                                        <li><span>Impulse AI</span><span class="keys"><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>A</kbd></span></li>
                                     </ul>
                                 </div>
                             </div>
@@ -528,8 +526,8 @@
                         <div id="outputResizer" class="resizer-horizontal"></div>
                         <div class="output-tabs">
                             <button class="output-tab active" data-tab="console">Console</button>
-                            <button class="output-tab" data-tab="serial">Serial Monitor</button>
-                            <button class="output-tab" data-tab="plotter">Serial Plotter</button>
+                            <button class="output-tab" data-tab="serial">Serial monitor</button>
+                            <button class="output-tab" data-tab="plotter">Serial plotter</button>
                             <button class="output-tab" data-tab="problems">Problems</button>
                             <button class="output-tab" data-tab="tests">Tests</button>
                             <button class="output-tab" data-tab="playground">Playground</button>
@@ -553,14 +551,15 @@
                             <div class="plotter-toolbar">
                                 <span class="plotter-label">Channels: <span id="plotterChannelCount">0</span></span>
                                 <span class="plotter-label">Points: <span id="plotterPointCount">0</span></span>
-                                <button id="plotterPauseBtn" class="plotter-ctrl-btn" title="Pause">⏸</button>
-                                <button id="plotterClearBtn" class="plotter-ctrl-btn" title="Clear">✕</button>
+                                <button id="plotterPauseBtn" class="plotter-ctrl-btn" title="Pause" aria-label="Pause"><svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg></button>
+                                <button id="plotterClearBtn" class="plotter-ctrl-btn" title="Clear the plot" aria-label="Clear the plot"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg></button>
                             </div>
                             <canvas id="plotterCanvas" class="plotter-canvas"></canvas>
+                            <div class="plotter-empty" id="plotterEmpty"><strong>Waiting for data</strong><span>Print numbers, one line each, like 100 or 100,200,300</span></div>
                         </div>
-                        <div id="problemsOutput" class="output-content"></div>
+                        <div id="problemsOutput" class="output-content"><div class="panel-empty problems-empty"><strong>No problems</strong><span>Errors and warnings from your last build show here.</span></div></div>
                         <div id="testsOutput" class="output-content tests-content">
-                            <p class="tests-hint">Run Sketch › Run Hardware Tests to compile this sketch, run it in the simulator and check its // @expect lines.</p>
+                            <p class="tests-hint">Choose Sketch › Run Hardware Tests to build this sketch, run it in the simulator and check its <code>// @expect</code> lines.</p>
                         </div>
                         <div id="playgroundOutput" class="output-content playground-content">
                             <div class="playground-toolbar">
@@ -568,14 +567,14 @@
                                     <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
                                         <path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/>
                                     </svg>
-                                    Hardware Tasks
+                                    Hardware tasks
                                 </span>
-                                <button id="playgroundClearBtn" class="plotter-ctrl-btn" title="Clear playground">✕</button>
+                                <button id="playgroundClearBtn" class="plotter-ctrl-btn" title="Clear hardware tasks" aria-label="Clear hardware tasks"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg></button>
                             </div>
                             <div id="playgroundEntries" class="playground-entries"></div>
                         </div>
                         <div class="serial-input-row" id="serialInputRow" style="display: none;">
-                            <input type="text" id="serialInput" placeholder="Send to serial...">
+                            <input type="text" id="serialInput" placeholder="Send to the board…" aria-label="Send to the board">
                             <button id="sendSerial">Send</button>
                         </div>
                     </div>
@@ -594,7 +593,7 @@
             <div class="ai-resize-handle" id="aiResizeHandle" title="Drag to resize"></div>
             <div class="ai-panel-inner">
                 <div class="ai-panel-header">
-                    <span class="ai-panel-title">AI Assistant</span>
+                    <span class="ai-panel-title">Impulse AI</span>
                     <div class="ai-panel-header-actions">
                         <span id="aiTokenCounter" class="ai-token-counter" title="Tokens used this session (auto-compacts at 70k)"></span>
                         <button id="aiCompactBtn" class="ai-panel-header-btn" title="Compact conversation (summarise and clear context)">
@@ -712,7 +711,7 @@
                 <button type="button" id="examplesDropdownClose" class="examples-dropdown-close"
                     title="Close">×</button>
             </div>
-            <input type="text" id="examplesDropdownFilter" class="sidebar-input" placeholder="Filter by library...">
+            <input type="text" id="examplesDropdownFilter" class="sidebar-input" placeholder="Filter by library…">
             <button id="examplesDropdownLoad" class="btn-small" style="width: 100%; margin-top: 6px;">Load
                 examples</button>
             <div id="examplesDropdownList" class="examples-dropdown-list"></div>

@@ -116,41 +116,17 @@ plan. The defaults are the cheapest model that does the job per kind, with
 
 ## Deploy on Google Cloud Run (free tier)
 
-Cloud Run runs the server as a container and scales it to zero between
-requests; its free tier (2 million requests and 180,000 vCPU-seconds a month
-in Tier 1 regions) covers a launch at no cost, and commercial use is allowed.
-The database stays on Neon's free plan. Billing in India works with UPI: the
-billing account takes a prepayment of ₹500–1,000 and then manual or monthly
-recurring UPI payments (Google Cloud docs: "Use UPI for Google Cloud payments").
+The production target. **[DEPLOY.md](DEPLOY.md)** is the full walkthrough:
+billing with UPI, the project, Neon in Singapore, an OpenAI key with a hard
+cap, Secret Manager, the deploy command, Google and GitHub sign-in, Resend,
+pointing the app at the server, updates, rollbacks and costs.
 
-1. **Google Cloud**: create a project, enable billing (UPI), install
-   `gcloud`, run `gcloud auth login` and `gcloud config set project <id>`.
-2. **Neon**: a project with a Postgres database; copy the pooled connection
-   string (`sslmode=require`) as `DATABASE_URL`.
-3. **Secrets**: put the values from `.env.example` in Secret Manager or pass
-   them with `--set-env-vars` (the key values never go in the repository):
-   `DATABASE_URL`, `BETTER_AUTH_SECRET`, `IMPULSE_CLOUD_URL` (the service URL,
-   known after the first deploy), `OPENAI_API_KEY`, `ADMIN_EMAILS`, and for
-   sign-in `GOOGLE_CLIENT_ID/SECRET`, `GITHUB_CLIENT_ID/SECRET`; `RESEND_API_KEY`
-   and `EMAIL_FROM` once a sending domain is verified.
-4. **Deploy** from the repository root:
-
-   ```bash
-   gcloud run deploy impulse-cloud --source cloud --region asia-south1 \
-     --allow-unauthenticated --min-instances 0 --max-instances 3 \
-     --memory 512Mi --timeout 900 \
-     --set-env-vars "IMPULSE_CLOUD_URL=https://<service url>,ADMIN_EMAILS=you@example.com" \
-     --set-secrets "DATABASE_URL=impulse-database-url:latest,BETTER_AUTH_SECRET=impulse-auth-secret:latest,OPENAI_API_KEY=impulse-openai-key:latest"
-   ```
-
-   The first deploy prints the service URL; set `IMPULSE_CLOUD_URL` to it and
-   deploy once more. The server migrates the database on start. A long
-   `--timeout` keeps streamed answers alive; `asia-south1` (Mumbai) is closest
-   to India (a Tier 2 region, with a smaller free allowance that is still ample).
-5. **Check**: `GET /health` answers `{"ok":true}`, `/v1/config` lists the
-   sign-in methods, and `/admin/` opens for the addresses in `ADMIN_EMAILS`.
-6. **Point the app at it**: set `"impulse": { "cloudUrl": "https://<service url>" }`
-   in the root `package.json`, rebuild, and release.
+In short: the container is `cloud/Dockerfile` (`.gcloudignore` keeps the local
+`.env` out of the upload), the server listens on `HOST`/`PORT`, migrates the
+database when it starts, and reads every secret from the environment. Cloud
+Run and the database share a region (`asia-southeast1` with Neon's AWS
+Singapore), because each AI request makes several database queries before the
+first token streams.
 
 ## Deploy on Vercel
 

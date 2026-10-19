@@ -46,7 +46,12 @@ export function authOptions({ config, pool, sendCode, onVerified = async () => {
         '/sign-up/email': { window: 60, max: 5 },
       },
     },
-    advanced: { ipAddress: { ipAddressHeaders: ['x-forwarded-for', 'x-real-ip'] } },
+    // The client IP for rate limits. Only a single-address X-Forwarded-For is
+    // trusted (Better Auth's rule): behind Cloud Run a client that adds its own
+    // X-Forwarded-For gets a multi-address header, which lands in one shared
+    // bucket instead of a fresh limit per invented address. X-Real-IP is not
+    // read: nothing in front of the server sets it, so a client could.
+    advanced: { ipAddress: { ipAddressHeaders: ['x-forwarded-for'] } },
     databaseHooks: {
       user: {
         create: {

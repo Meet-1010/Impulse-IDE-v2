@@ -226,7 +226,7 @@ class ToolExecutor {
       return { success: false, error: 'No sketch open. Please open a .ino file first (Open Sketch in the sidebar).' };
     }
     if (!boardFQBN) {
-      return { success: false, error: 'No board selected. Please select a board from the Board dropdown in the sidebar.' };
+      return { success: false, error: 'No board is chosen. Ask the user to click Choose a board at the top of the window, or pass the board FQBN.' };
     }
     // Save editor content to disk before compiling
     if (this.uiCallbacks && this.uiCallbacks.saveSketch) {
@@ -272,7 +272,7 @@ class ToolExecutor {
       return { success: false, error: 'No sketch open. Please open a .ino file first (Open Sketch in the sidebar).' };
     }
     if (!boardFQBN) {
-      return { success: false, error: 'No board selected. Please select a board from the Board dropdown.' };
+      return { success: false, error: 'No board is chosen. Ask the user to click Choose a board at the top of the window, or pass the board FQBN.' };
     }
     if (!port) {
       return {

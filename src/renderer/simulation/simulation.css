@@ -960,7 +960,7 @@
   border-radius: 6px;
   background: var(--ds-canvas);
   color: var(--ds-text);
-  font: 12px var(--font-mono);
+  font: 12.5px var(--font-ui);
 }
 .sim-serial-inputrow input:focus { outline: none; border-color: var(--ds-line-strong); }
 .sim-serial-btn {

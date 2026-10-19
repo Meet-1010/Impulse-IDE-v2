@@ -81,6 +81,7 @@ const KNOWN_HEADERS = {
   'BLEDevice.h': null, 'BLEServer.h': null, 'BLEUtils.h': null, 'esp_now.h': null, 'ESP8266WiFi.h': null,
   'ESP8266WebServer.h': null, 'ESP8266HTTPClient.h': null, 'ArduinoOTA.h': null, 'Ticker.h': null, 'HardwareSerial.h': null,
   'USB.h': null, 'USBHIDKeyboard.h': null, 'USBHIDMouse.h': null, 'Keyboard.h': null, 'Mouse.h': null, 'avr/sleep.h': null,
+  'ETH.h': null, 'BLE2902.h': null, 'BluetoothSerial.h': null, 'ESP_I2S.h': null,
   // displays
   'Adafruit_GFX.h': 'Adafruit GFX Library', 'Adafruit_SSD1306.h': 'Adafruit SSD1306', 'Adafruit_SH110X.h': 'Adafruit SH110X',
   'Adafruit_ST7735.h': 'Adafruit ST7735 and ST7789 Library', 'Adafruit_ST7789.h': 'Adafruit ST7735 and ST7789 Library',
@@ -88,6 +89,7 @@ const KNOWN_HEADERS = {
   'U8g2lib.h': 'U8g2', 'U8x8lib.h': 'U8g2', 'TFT_eSPI.h': 'TFT_eSPI', 'LiquidCrystal.h': 'LiquidCrystal',
   'LiquidCrystal_I2C.h': 'LiquidCrystal I2C', 'hd44780.h': 'hd44780', 'TM1637Display.h': 'TM1637', 'TM1637.h': 'TM1637',
   'LedControl.h': 'LedControl', 'MD_MAX72xx.h': 'MD_MAX72XX', 'MD_Parola.h': 'MD_Parola', 'SevSeg.h': 'SevSeg',
+  'GxEPD2_BW.h': 'GxEPD2', 'GxEPD2_3C.h': 'GxEPD2', 'GxEPD2_7C.h': 'GxEPD2',
   'Adafruit_NeoPixel.h': 'Adafruit NeoPixel', 'FastLED.h': 'FastLED', 'Adafruit_LEDBackpack.h': 'Adafruit LED Backpack Library',
   // sensors
   'DHT.h': 'DHT sensor library', 'DHT_U.h': 'DHT sensor library', 'DHTesp.h': 'DHT sensor library for ESPx',
@@ -96,7 +98,11 @@ const KNOWN_HEADERS = {
   'Adafruit_AHTX0.h': 'Adafruit AHTX0', 'Adafruit_SGP30.h': 'Adafruit SGP30 Sensor', 'Adafruit_TCS34725.h': 'Adafruit TCS34725',
   'Adafruit_VL53L0X.h': 'Adafruit_VL53L0X', 'VL53L0X.h': 'VL53L0X', 'BH1750.h': 'BH1750', 'Adafruit_ADS1X15.h': 'Adafruit ADS1X15',
   'Adafruit_INA219.h': 'Adafruit INA219', 'Adafruit_MAX31865.h': 'Adafruit MAX31865 library', 'max6675.h': 'MAX6675 library',
-  'OneWire.h': 'OneWire', 'DallasTemperature.h': 'DallasTemperature', 'HX711.h': 'HX711', 'NewPing.h': 'NewPing',
+  'OneWire.h': 'OneWire', 'DallasTemperature.h': 'DallasTemperature', 'HX711.h': 'HX711 Arduino Library', 'NewPing.h': 'NewPing',
+  'OneWireNg_CurrentPlatform.h': 'OneWireNg', 'OneWireNg.h': 'OneWireNg', 'DSTherm.h': 'OneWireNg',
+  'Adafruit_BMP085.h': 'Adafruit BMP085 Library', 'Adafruit_SHT31.h': 'Adafruit SHT31 Library', 'Adafruit_ADXL345_U.h': 'Adafruit ADXL345',
+  'Adafruit_MLX90614.h': 'Adafruit MLX90614 Library', 'MAX30105.h': 'SparkFun MAX3010x Pulse and Proximity Sensor Library',
+  'heartRate.h': 'SparkFun MAX3010x Pulse and Proximity Sensor Library', 'spo2_algorithm.h': 'SparkFun MAX3010x Pulse and Proximity Sensor Library',
   'Ultrasonic.h': 'Ultrasonic', 'MFRC522.h': 'MFRC522', 'TinyGPS++.h': 'TinyGPSPlus', 'TinyGPSPlus.h': 'TinyGPSPlus',
   'Adafruit_Fingerprint.h': 'Adafruit Fingerprint Sensor Library', 'IRremote.h': 'IRremote', 'IRremote.hpp': 'IRremote',
   'IRremoteESP8266.h': 'IRremoteESP8266', 'RTClib.h': 'RTClib', 'Keypad.h': 'Keypad', 'Encoder.h': 'Encoder',
@@ -108,6 +114,7 @@ const KNOWN_HEADERS = {
   // comms and data
   'PubSubClient.h': 'PubSubClient', 'ArduinoJson.h': 'ArduinoJson', 'NTPClient.h': 'NTPClient', 'TimeLib.h': 'Time',
   'ArduinoBLE.h': 'ArduinoBLE', 'WiFiNINA.h': 'WiFiNINA', 'Ethernet.h': 'Ethernet', 'LoRa.h': 'LoRa', 'RF24.h': 'RF24',
+  'WebSocketsServer.h': 'WebSockets', 'WebSocketsClient.h': 'WebSockets',
   'WiFiManager.h': 'WiFiManager', 'ESPAsyncWebServer.h': 'ESP Async WebServer', 'AsyncTCP.h': 'Async TCP',
   'ThingSpeak.h': 'ThingSpeak', 'SD.h': 'SD', 'TaskScheduler.h': 'TaskScheduler', 'Adafruit_LiquidCrystal.h': 'Adafruit LiquidCrystal',
 };

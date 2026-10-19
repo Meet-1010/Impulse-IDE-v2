@@ -1,3 +1,10 @@
+// Shortcuts are native menu accelerators (CmdOrCtrl): on a Mac they read ⌘ and ⇧.
+const TOOLTIP_MAC = /Mac/i.test(navigator.platform || navigator.userAgent);
+function macKeys(text) {
+  if (!TOOLTIP_MAC || typeof text !== 'string') return text;
+  return text.replace(/Ctrl\+Shift\+/g, '⇧⌘').replace(/Ctrl\+/g, '⌘');
+}
+
 /**
  * Tooltip System
  * Provides contextual help and information
@@ -110,7 +117,7 @@ class TooltipManager {
     this.hide();
 
     this.activeTooltip = element;
-    this.tooltip.textContent = content;
+    this.tooltip.textContent = macKeys(content);
     this.tooltip.style.display = 'block';
     
     // Position tooltip after content is set
@@ -193,11 +200,11 @@ class TooltipManager {
   addDefaultTooltips() {
     // Add helpful tooltips to common elements
     const tooltips = {
-      '#compileBtn': 'Compile (verify) your Arduino sketch without uploading. Use Ctrl+R as shortcut.',
-      '#uploadBtn': 'Compile and upload your sketch to the connected Arduino board. Use Ctrl+U as shortcut.',
-      '#serialMonitorBtn': 'Open the serial monitor to communicate with your Arduino. Use Ctrl+Shift+M as shortcut.',
+      '#compileBtn': 'Compile (verify) your Arduino sketch without uploading (Ctrl+R).',
+      '#uploadBtn': 'Compile and upload your sketch to the connected Arduino board (Ctrl+U).',
+      '#serialMonitorBtn': 'Open the serial monitor to communicate with your Arduino (Ctrl+Shift+M).',
       '#serialPlotterBtn': 'Open the serial plotter to visualize numeric data from your Arduino.',
-      '#aiAgentTab': 'Open the AI assistant for help with code, errors, and Arduino questions. Use Ctrl+Shift+A as shortcut.',
+      '#aiAgentTab': 'Open Impulse AI for help with code, errors and your board (Ctrl+Shift+A).',
       '#boardPortDropdown': 'Select your Arduino board type and connection port. Both are required for uploading.',
       '#themeToggleBtn': 'Switch between light and dark themes.',
       '#openFolder': 'Open a folder containing Arduino sketches (.ino files).',
@@ -208,7 +215,7 @@ class TooltipManager {
       '#baudRate': 'Set the communication speed for the serial monitor. Must match your Arduino code.',
       '#toggleSerial': 'Connect or disconnect the serial monitor.',
       '#sendSerial': 'Send the typed message to your Arduino via serial.',
-      '#aiSend': 'Send your message to the AI assistant.',
+      '#aiSend': 'Send your message to Impulse AI.',
       '#aiModeSelect': 'Agent builds and changes the project, Plan lays out parts, wiring and steps without changing anything, Debug finds out why something fails and fixes it.',
       '#aiModelSelect': 'Select the AI model to use for assistance.'
     };
@@ -265,13 +272,13 @@ class TooltipManager {
       const isConnected = serialStatus.textContent.includes('Connected');
       const tooltip = isConnected
         ? 'Serial monitor is connected and receiving data.'
-        : 'Serial monitor is disconnected. Select a port and click "Open Serial Monitor" to connect.';
+        : 'The serial monitor is not connected. Choose a port, then click "Open serial monitor".';
       serialStatus.setAttribute('data-tooltip', tooltip);
     }
 
     // Update board/port selection tooltip
     const boardPortDisplay = document.querySelector('#boardPortDisplay');
-    if (boardPortDisplay && boardPortDisplay.textContent !== 'Select Board and Port') {
+    if (boardPortDisplay && boardPortDisplay.textContent !== 'Choose a board') {
       boardPortDisplay.setAttribute('data-tooltip', 
         'Current selection: ' + boardPortDisplay.textContent + '. Click to change.');
     }
@@ -299,7 +306,7 @@ class TooltipManager {
     this.hide(); // Hide any existing tooltip
     
     this.activeTooltip = element;
-    this.tooltip.textContent = content;
+    this.tooltip.textContent = macKeys(content);
     this.tooltip.className = `tooltip ${options.className || ''}`;
     this.tooltip.style.display = 'block';
     
@@ -374,7 +381,7 @@ class TooltipManager {
       'serial': 'The serial monitor shows messages from your Arduino. Use Serial.println() in your code to send messages.',
       'boards': 'Select the exact Arduino model you\'re using. This affects how the code is compiled.',
       'ports': 'The port is how your computer connects to the Arduino. Usually COM3, COM4 on Windows or /dev/ttyUSB0 on Linux.',
-      'ai': 'The AI assistant can help with code problems, explain errors, and answer Arduino questions.',
+      'ai': 'Impulse AI writes and fixes code, explains errors and answers questions about your board.',
       'libraries': 'Libraries add extra functions to Arduino. Install them here and include them in your code with #include.'
     };
     

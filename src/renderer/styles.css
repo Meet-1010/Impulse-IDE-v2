@@ -981,15 +981,13 @@ body::after {
     border: var(--border-width) solid var(--border);
     border-radius: var(--radius-sm);
     color: var(--foreground);
-    font-size: 11px;
+    font-size: 12px;
     cursor: pointer;
     transition: all var(--transition-fast);
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    font-family: var(--font-mono);
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
+    font-family: var(--font-ui);
 }
 
 .btn-small:hover {
@@ -1083,13 +1081,11 @@ body::after {
     border: var(--border-width) solid var(--accent);
     border-radius: var(--radius-sm);
     color: var(--text-on-accent);
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 600;
     cursor: pointer;
     transition: background var(--transition-fast);
-    font-family: var(--font-mono);
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
+    font-family: var(--font-ui);
 }
 
 .lib-install-btn:hover {
@@ -1098,12 +1094,10 @@ body::after {
 }
 
 .lib-installed {
-    font-size: 11px;
+    font-size: 12px;
     color: inherit;
     font-weight: 500;
-    font-family: var(--font-mono);
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
+    font-family: var(--font-ui);
 }
 
 .lib-msg {
@@ -1768,6 +1762,10 @@ body::after {
     color: var(--accent);
     font-weight: 500;
 }
+
+/* No saved boards yet: no empty block and no divider above the menu's actions. */
+.board-port-saved-options:empty,
+.board-port-saved-options:empty + .board-port-divider { display: none; }
 
 .board-port-divider {
     height: 1px;
@@ -2463,17 +2461,17 @@ body::after {
 .error-analysis {
     padding: 12px;
     margin-top: 8px;
+    font-family: var(--font-ui);
+    white-space: normal;
     background: var(--bg-primary);
     border-radius: var(--radius-md);
     border: var(--border-width) solid var(--border);
 }
 
 .error-analysis h4 {
-    color: var(--foreground);
-    margin-bottom: 8px;
-    font-size: 13px;
-    font-family: var(--font-display);
-    font-style: italic;
+    color: var(--ds-text-2);
+    margin: 0 0 8px;
+    font: 600 12.5px var(--font-ui);
 }
 
 .error-analysis h5 {
@@ -2493,7 +2491,9 @@ body::after {
 }
 
 .error-analysis li strong {
-    color: var(--accent);
+    display: block;
+    color: var(--ds-text);
+    font-weight: 600;
 }
 
 /* ============================================
@@ -2504,7 +2504,25 @@ body::after {
     flex-direction: column;
     height: 100%;
     overflow: hidden;
+    position: relative;
 }
+
+/* Shown over the plot until numbers arrive. */
+.plotter-empty {
+    position: absolute;
+    inset: 36px 0 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    pointer-events: none;
+    text-align: center;
+    padding: 0 24px;
+}
+.plotter-empty[hidden] { display: none; }
+.plotter-empty strong { font: 500 13px var(--font-ui); color: var(--ds-text-2); }
+.plotter-empty span { font: 12px var(--font-ui); color: var(--ds-text-3); }
 
 .plotter-content.active {
     display: flex;
@@ -2545,7 +2563,7 @@ body::after {
     justify-content: center;
     font-size: 12px;
     transition: all var(--transition-fast);
-    border-radius: 0;
+    border-radius: var(--radius-sm);
 }
 
 .plotter-ctrl-btn:hover {
@@ -2564,12 +2582,7 @@ body::after {
     flex: 1;
     width: 100%;
     min-height: 0;
-    background: #0A0A14;
-    image-rendering: pixelated;
-}
-
-[data-theme="light"] .plotter-canvas {
-    background: #F5F5FA;
+    background: var(--ds-canvas);
 }
 
 /* ============================================
@@ -2638,15 +2651,15 @@ body::after {
 }
 
 .serial-ctrl-btn {
-    padding: 2px 10px;
+    padding: 3px 10px;
     border: 1px solid var(--border-light);
     background: transparent;
     color: var(--text-secondary);
     cursor: pointer;
-    font-size: 11px;
-    font-family: var(--font-mono);
+    font-size: 12px;
+    font-family: var(--font-ui);
     transition: all var(--transition-fast);
-    border-radius: 0;
+    border-radius: var(--radius-sm);
     margin-left: auto;
 }
 
@@ -2732,16 +2745,27 @@ body::after {
     text-transform: uppercase;
 }
 
-.playground-empty {
-    flex: 1;
+/* Empty states of the output panels, like the plotter's. */
+.panel-empty {
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
-    color: var(--text-muted);
-    font-size: 12px;
-    font-family: var(--font-mono);
-    font-style: italic;
+    gap: 4px;
+    text-align: center;
+    padding: 0 24px;
+    white-space: normal;
 }
+.panel-empty strong { font: 500 13px var(--font-ui); color: var(--ds-text-2); }
+.panel-empty span { font: 12px var(--font-ui); color: var(--ds-text-3); }
+.playground-empty { flex: 1; }
+/* These panels are built from indented markup, which is not content: without
+   this the indentation shows as a blank line or a run of spaces. Their output
+   blocks (entries, errors, serial) keep their own pre-wrap. */
+.tests-content,
+.playground-content { white-space: normal; }
+#problemsOutput { position: relative; }
+.problems-empty { position: absolute; inset: 0; pointer-events: none; }
 
 /* ============================================
    AI Panel (1/3 width, minimal)
@@ -3889,12 +3913,28 @@ textarea:focus-visible {
     line-height: 1.4;
 }
 
+/* Raw compiler lines ("In function…", carets): plain monospace context. */
 .problem-line {
-    color: var(--text-secondary);
-    padding: 2px 4px;
-    font-style: italic;
+    color: var(--ds-text-3);
+    padding: 1px 4px;
+    margin-bottom: 0;
+    background: none;
+    border-left: none;
     white-space: pre-wrap;
-    font-size: 11px;
+    font-size: 11.5px;
+}
+
+/* Impulse's own explanation of a problem: a sentence, not compiler output. */
+.problem-note {
+    padding: 8px 12px;
+    margin-bottom: 6px;
+    background: var(--ds-surface-1);
+    border-left: 2px solid var(--ds-danger);
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+    font: 12.5px/1.5 var(--font-ui);
+    color: var(--ds-text);
+    white-space: pre-wrap;
+    word-break: break-word;
 }
 
 /* CodeMirror Error Highlight */

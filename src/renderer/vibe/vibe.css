@@ -545,6 +545,9 @@
 .v-build-meter { width: 100%; max-width: 220px; }
 .v-build-log { max-height: 96px; }
 .v-build-summary { font: 12px/1.5 var(--v-mono); color: var(--v-text-2); }
+.v-build-mem { display: grid; grid-template-columns: auto minmax(80px, 1fr) auto; align-items: center; gap: 8px 12px; max-width: 520px; }
+.v-mem-label { font-size: 12.5px; color: var(--v-text-3); }
+.v-mem-value { font: 12px var(--v-mono); color: var(--v-text-2); font-variant-numeric: tabular-nums; text-align: right; }
 .v-card .v-build-summary { margin: 0; }
 .v-card .v-answer-actions .v-steps-toggle { margin-left: 0; }
 

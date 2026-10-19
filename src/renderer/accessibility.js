@@ -102,14 +102,14 @@ class AccessibilityManager {
     const fileTabs = document.getElementById('fileTabs');
     if (fileTabs) {
       fileTabs.setAttribute('role', 'tablist');
-      fileTabs.setAttribute('aria-label', 'Open Files');
+      fileTabs.setAttribute('aria-label', 'Open files');
     }
 
     // Output tabs = tablist
     const outputTabs = document.querySelector('.output-tabs');
     if (outputTabs) {
       outputTabs.setAttribute('role', 'tablist');
-      outputTabs.setAttribute('aria-label', 'Output Panels');
+      outputTabs.setAttribute('aria-label', 'Output panels');
       outputTabs.querySelectorAll('.output-tab').forEach(tab => {
         tab.setAttribute('role', 'tab');
         const tabId = tab.dataset.tab;
@@ -125,7 +125,7 @@ class AccessibilityManager {
 
     // Modals
     const modals = [
-      { id: 'boardPortModal', label: 'Select Board and Port' },
+      { id: 'boardPortModal', label: 'Choose a board and port' },
       { id: 'examplesDropdown', label: 'Examples' }
     ];
     modals.forEach(({ id, label }) => {
@@ -141,14 +141,14 @@ class AccessibilityManager {
     const aiPanel = document.getElementById('aiPanel');
     if (aiPanel) {
       aiPanel.setAttribute('role', 'complementary');
-      aiPanel.setAttribute('aria-label', 'AI Assistant');
+      aiPanel.setAttribute('aria-label', 'Impulse AI');
     }
 
     // AI messages area
     const aiMessages = document.getElementById('aiMessages');
     if (aiMessages) {
       aiMessages.setAttribute('role', 'log');
-      aiMessages.setAttribute('aria-label', 'AI Conversation');
+      aiMessages.setAttribute('aria-label', 'Conversation with Impulse AI');
       aiMessages.setAttribute('aria-live', 'polite');
     }
 
@@ -156,14 +156,14 @@ class AccessibilityManager {
     const serialOutput = document.getElementById('serialOutput');
     if (serialOutput) {
       serialOutput.setAttribute('role', 'log');
-      serialOutput.setAttribute('aria-label', 'Serial Monitor Output');
+      serialOutput.setAttribute('aria-label', 'Serial monitor output');
     }
 
     // Console output = log
     const consoleOutput = document.getElementById('consoleOutput');
     if (consoleOutput) {
       consoleOutput.setAttribute('role', 'log');
-      consoleOutput.setAttribute('aria-label', 'Console Output');
+      consoleOutput.setAttribute('aria-label', 'Console output');
       consoleOutput.tabIndex = 0; // scrollable with the keyboard
     }
 
@@ -176,11 +176,11 @@ class AccessibilityManager {
 
     // Toolbar buttons with labels
     const toolbarButtons = {
-      'compileBtn': 'Verify / Compile sketch',
+      'compileBtn': 'Verify (compile) the sketch',
       'uploadBtn': 'Upload sketch to board',
-      'serialMonitorBtn': 'Open Serial Monitor',
-      'serialPlotterBtn': 'Open Serial Plotter',
-      'aiAgentTab': 'Open AI Assistant'
+      'serialMonitorBtn': 'Open the serial monitor',
+      'serialPlotterBtn': 'Open the serial plotter',
+      'aiAgentTab': 'Open Impulse AI'
     };
     Object.entries(toolbarButtons).forEach(([id, label]) => {
       const btn = document.getElementById(id);

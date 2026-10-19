@@ -84,6 +84,7 @@ const COMPONENTS = [
       'Needs a 4.7 kΩ pull-up from DQ to VCC (bare sensors and probes don\'t have one).',
       '-127 °C means the sensor isn\'t found (wiring or missing pull-up); 85 °C is the power-on value read before a conversion finished.',
       'A 12-bit conversion takes 750 ms. Several sensors share one pin, each with its own 64-bit address.',
+      'OneWire 2.3.8 does not compile for the ESP32-C6 with the esp32 core 3.x (its GPIO register access no longer matches the chip; Impulse\'s compile check, 2026-10-19). On a C6 use OneWireNg instead: its DSTherm driver reads the DS18B20 without OneWire or DallasTemperature, and the C6 recipe does exactly that.',
     ],
   },
   {
@@ -374,6 +375,41 @@ const COMPONENTS = [
     library: 'BLE (core, Neil Kolban) or NimBLE-Arduino (smaller); BluetoothSerial only on the classic ESP32',
     notes: ['A BLE sketch is about 1.2 MB: choose Partition Scheme "Huge APP (3MB No OTA)" or "Minimal SPIFFS" when it does not fit the default 1.3 MB app slot.', 'Classic Bluetooth (BluetoothSerial, serial terminal apps) exists only on the original ESP32; the S3/C3/C6 are BLE-only, so a phone app must speak BLE (nRF Connect, a custom app, or Web Bluetooth).', 'Phones see the device by the name in BLEDevice::init(); keep it short.'],
   },
+  {
+    id: 'esp32-ota', names: ['OTA', 'over the air', 'over-the-air update', 'ArduinoOTA', 'wireless upload', 'update firmware over Wi-Fi'], interface: 'built in (ESP32 family, ESP8266), over Wi-Fi', voltage: 'as Wi-Fi',
+    library: 'ArduinoOTA (core) for uploads from the IDE over the network; Update + HTTPUpdate (core) to pull firmware from a server',
+    notes: ['The partition scheme needs two app slots (the default has them; "Huge APP" does not).', 'The board and the computer must be on the same network; the board shows up as a network port named after its hostname.', 'Protect it with ArduinoOTA.setPassword(): without one, anyone on the network can flash the board.'],
+  },
+  {
+    id: 'esp32-littlefs', names: ['LittleFS', 'SPIFFS', 'FFat', 'file system on the board', 'save a file on the board', 'store files in flash'], interface: 'built in (a file system in flash)', voltage: 'any',
+    library: 'LittleFS (core); SPIFFS is the older one',
+    notes: ['LittleFS.begin(true) formats the partition the first time; without true, a fresh board fails to mount.', 'The partition scheme sets its size (about 1.5 MB on a 4 MB board with the default scheme).', 'Paths start with "/". Files survive resets and uploads, not "Erase All Flash".'],
+  },
+  {
+    id: 'esp32-cam', names: ['ESP32-CAM', 'camera', 'OV2640', 'OV5640', 'video stream', 'take a photo', 'AI Thinker camera'], interface: 'parallel camera bus (DVP) + SCCB (I2C-like)', voltage: '5 V supply for the ESP32-CAM board with 2 A peaks (Wi-Fi + camera); 3.3 V logic',
+    library: 'esp_camera (core, ESP32 and ESP32-S3 only)',
+    notes: ['The ESP32-CAM has no USB: upload through a USB-serial adapter (adapter TX → U0R, RX → U0T, 5 V, GND) with GPIO0 tied to GND while it resets, then remove that link and reset to run.', 'Pick Tools › Board "AI Thinker ESP32-CAM": it turns on the PSRAM the camera needs above QVGA.', '"Camera init failed with error 0x105" or "0x20001" is nearly always the wrong pin map for the board, a loose ribbon cable, or a weak 5 V supply.', 'Camera pins differ per board (AI Thinker, XIAO ESP32S3 Sense, ESP32-S3-EYE, Freenove): take the map for the exact board from its maker.'],
+  },
+  {
+    id: 'esp32-bt-serial', names: ['BluetoothSerial', 'Bluetooth serial', 'Bluetooth terminal', 'classic Bluetooth', 'Serial Bluetooth Terminal app', 'SPP'], interface: 'built in (classic ESP32 only)', voltage: 'as Wi-Fi',
+    library: 'BluetoothSerial (core, classic ESP32 only)',
+    notes: ['Only the original ESP32 has classic Bluetooth. The S2 has no Bluetooth; the S3, C3 and C6 have BLE only, so "Bluetooth serial" (SPP) phone apps cannot connect to them: use BLE or an HC-05 module.', 'A BluetoothSerial sketch is about 1 MB: it fits the default partition scheme of a 4 MB board.'],
+  },
+  {
+    id: 'esp32-ntp', names: ['NTP', 'internet time', 'network time', 'configTime', 'getLocalTime', 'clock from the internet'], interface: 'over Wi-Fi', voltage: 'as Wi-Fi',
+    library: 'core (configTime, getLocalTime); no library needed',
+    notes: ['India is UTC+5:30 with no daylight saving: configTime(19800, 0, "pool.ntp.org").', 'The time is lost at power-off (deep sleep keeps it); for time without Wi-Fi add an RTC module (DS3231).'],
+  },
+  {
+    id: 'esp32-https', names: ['HTTPS', 'WiFiClientSecure', 'SSL', 'TLS', 'secure request', 'HTTPS request'], interface: 'over Wi-Fi', voltage: 'as Wi-Fi',
+    library: 'WiFiClientSecure + HTTPClient (core)',
+    notes: ['client.setInsecure() skips the certificate check: fine for a test, not for a product. Load the server\'s root certificate with client.setCACert().', 'A TLS connection needs about 40 KB of RAM and a second or two to open on a classic ESP32.'],
+  },
+  {
+    id: 'esp32-websocket', names: ['WebSocket', 'WebSockets', 'websocket server', 'live updates in the browser', 'real-time dashboard'], interface: 'over Wi-Fi', voltage: 'as Wi-Fi',
+    library: 'WebSockets (Markus Sattler); ESPAsyncWebServer has its own AsyncWebSocket',
+    notes: ['Call webSocket.loop() on every pass of loop(), with no long delay().', 'Port 80 for the page and 81 for the WebSocket is the usual split.'],
+  },
   // ── I/O expansion, audio ─────────────────────────────────────────────────
   {
     id: 'io-expander', names: ['PCF8574', 'MCP23017', 'I/O expander', 'GPIO expander'], interface: 'I2C', voltage: '2.5–5.5 V (PCF8574), 1.8–5.5 V (MCP23017)',
@@ -421,19 +457,24 @@ function findComponents(query, limit = 4) {
 /** Board families the recipes know, from an FQBN's platform. */
 const FAMILY_OF_PLATFORM = {
   'arduino:avr': 'avr', 'arduino:megaavr': 'avr', 'ATTinyCore:avr': 'avr', 'MiniCore:avr': 'avr', 'MegaCore:avr': 'avr',
-  'esp32:esp32': 'esp32', 'arduino:esp32': 'esp32',
+  'esp32:esp32': 'esp32',
+  // The Nano ESP32 numbers its pins like a Nano (D2, A0…) by default: the ESP32's API with Arduino pin numbers.
+  'arduino:esp32': 'nano-esp32',
   'esp8266:esp8266': 'esp8266',
-  'rp2040:rp2040': 'rp2040', 'arduino:mbed_rp2040': 'rp2040',
+  'rp2040:rp2040': 'rp2040',
+  // The Nano RP2040 Connect numbers pins like a Nano too, not by GPIO.
+  'arduino:mbed_rp2040': 'mbed',
   'arduino:samd': 'samd', 'Seeeduino:samd': 'samd', 'adafruit:samd': 'samd',
   'arduino:renesas_uno': 'renesas', 'STMicroelectronics:stm32': 'stm32', 'teensy:avr': 'teensy',
   'arduino:mbed_nano': 'mbed', 'Seeeduino:nrf52': 'mbed', 'adafruit:nrf52': 'nrf52',
 };
 const FAMILY_LABEL = {
   avr: 'Arduino Uno/Nano/Mega (AVR)', esp32: 'classic ESP32 (Arduino core 3.x)', esp32s2: 'ESP32-S2 (core 3.x)', esp32s3: 'ESP32-S3 (core 3.x)', esp32c3: 'ESP32-C3 (core 3.x)', esp32c6: 'ESP32-C6 (core 3.x)', esp32h2: 'ESP32-H2 (core 3.x)', esp8266: 'ESP8266 (NodeMCU, D1 mini)',
-  rp2040: 'Raspberry Pi Pico (RP2040/RP2350)', samd: 'SAMD boards', renesas: 'Arduino Uno R4', stm32: 'STM32 boards', teensy: 'Teensy', mbed: 'Nano 33 BLE / nRF52', nrf52: 'nRF52 boards',
+  'nano-esp32': 'Arduino Nano ESP32 (Arduino pin numbers)',
+  rp2040: 'Raspberry Pi Pico (RP2040/RP2350)', samd: 'SAMD boards', renesas: 'Arduino Uno R4', stm32: 'STM32 boards', teensy: 'Teensy', mbed: 'Nano-format boards (Arduino pin numbers)', nrf52: 'nRF52 boards',
 };
 
-/** 'avr', 'esp32', 'esp8266', 'rp2040'… for an FQBN; 'avr' when unknown (the default pins). */
+/** 'avr', 'esp32', 'esp32s3', 'rp2040'… for an FQBN; 'avr' when unknown (the default pins). */
 function familyKey(fqbn) {
   const parts = String(fqbn || '').split(':');
   const platform = parts.slice(0, 2).join(':');
@@ -444,10 +485,12 @@ function familyKey(fqbn) {
     else if (/rp2040|rp2350|pico/i.test(platform)) family = 'rp2040';
     else family = 'avr';
   }
+  // The Nano ESP32 uses Arduino pin numbers by default on Arduino's core and on Espressif's.
+  if ((parts[2] || '').toLowerCase() === 'nano_nora') return 'nano-esp32';
   if (family === 'esp32') {
     // The chips differ in pins (ADC, SPI, which GPIOs exist): the board id usually names the chip.
     const board = (parts[2] || '').toLowerCase();
-    const chip = /s3|nano_nora|heltec_wifi_lora_32_v3|heltec_wifi_kit_32_v3|atoms3|t_display_s3|lolin_s3|qtpy_esp32s3|feather_esp32s3|tinys3|prolite|um_/.test(board) ? 'esp32s3'
+    const chip = /s3|heltec_wifi_lora_32_v3|heltec_wifi_kit_32_v3|atoms3|t_display_s3|lolin_s3|qtpy_esp32s3|feather_esp32s3|tinys3|prolite|um_/.test(board) ? 'esp32s3'
       : /s2/.test(board) ? 'esp32s2'
         : /c3|xiao_esp32c3|lolin_c3|supermini_c3/.test(board) ? 'esp32c3'
           : /c6/.test(board) ? 'esp32c6'
@@ -458,23 +501,59 @@ function familyKey(fqbn) {
   return family;
 }
 
-/** The lookup order for a family's pins, libraries and sketch: the chip, then the family, then the default. */
+/** Where the code and libraries come from for a family: the chip, then the family, then the default. */
 function familyChain(family) {
   if (/^esp32.+/.test(family)) return ['default', 'esp32', family];
+  if (family === 'nano-esp32') return ['default', 'esp32', 'esp32s3', family];
   return ['default', family];
+}
+
+/** Where the pins come from: like the code, except boards numbered like a Nano take the Nano's pins. */
+function pinChain(family) {
+  if (family === 'nano-esp32') return ['default', family];
+  return familyChain(family);
+}
+
+// Which recipes Impulse has compiled, for which family, with which core
+// (written by `npm run knowledge:recipes`). A sketch is called known-good only
+// when it is in here.
+let VERIFIED = { results: {} };
+try {
+  VERIFIED = require('./recipes.verified.json');
+} catch {
+  // Not generated yet: every sketch is offered as unverified.
+}
+
+/** A short fingerprint of a sketch's exact text: a compile proves only the text it compiled. */
+function sketchHash(text) {
+  return require('crypto').createHash('sha256').update(String(text)).digest('hex').slice(0, 12);
+}
+
+/**
+ * How Impulse knows a recipe works for a family: `{ fqbn, core, sketch }`, or
+ * null when it was not compiled, or the sketch changed since it was.
+ */
+function verifiedFor(id, family, sketch = null) {
+  const proof = VERIFIED.results?.[id]?.[family] || null;
+  if (!proof) return null;
+  if (sketch !== null && proof.sketch !== sketchHash(sketch)) return null;
+  return proof;
 }
 
 /**
  * The recipe of a component for a board family: libraries, wiring and a
- * known-good sketch with the family's pins filled in; null when there is none.
- * @returns {{ family: string, pins: object, libs: string[], wiring: string[], sketch: string } | null}
+ * sketch with the family's pins filled in, and whether Impulse compiled it;
+ * null when there is none for this family.
+ * @returns {{ family: string, pins: object, libs: string[], wiring: string[], sketch: string, verified: { fqbn: string, core: string } | null } | null}
  */
 function recipeFor(c, family = 'avr') {
   const r = RECIPES[c?.id];
   if (!r) return null;
   const chain = familyChain(family);
+  const pchain = pinChain(family);
   // A table entry set to null says this chip has no such thing (the C3 has no touch pads): no recipe at all.
-  if ((r.pins && r.pins[family] === null) || (r.sketch && typeof r.sketch === 'object' && r.sketch[family] === null)) return null;
+  const lacks = (key) => r.pins?.[key] === null || (r.sketch && typeof r.sketch === 'object' && r.sketch[key] === null);
+  if (chain.some(lacks)) return null;
   const pick = (table) => {
     if (table === undefined || table === null) return undefined;
     if (typeof table === 'string' || Array.isArray(table)) return table;
@@ -483,12 +562,19 @@ function recipeFor(c, family = 'avr') {
   };
   const body = pick(r.sketch);
   if (!body) return null;
-  const pins = Object.assign({}, ...chain.map((key) => r.pins?.[key] || {}));
-  const fill = (text) => String(text).replace(/\{\{(\w+)\}\}/g, (m, k) => (k in pins ? String(pins[k]) : m));
+  const allPins = Object.assign({}, ...pchain.map((key) => r.pins?.[key] || {}));
+  // Words and numbers that are not pins (a wiring hint, a calibration value) fill in the same way.
+  const values = { ...allPins, ...Object.assign({}, ...pchain.map((key) => r.params?.[key] || {})) };
+  const fill = (text) => String(text).replace(/\{\{(\w+)\}\}/g, (m, k) => (k in values ? String(values[k]) : m));
   const sketch = `${fill(body).trim()}\n`;
   if (/\{\{\w+\}\}/.test(sketch)) return null; // a pin this family does not have: no recipe rather than a wrong one
   const libs = pick(r.libs) || [];
-  return { family, pins, libs, wiring: (r.wiring || []).map(fill).filter((w) => !/\{\{\w+\}\}/.test(w)), sketch };
+  // Wiring may differ per family too (an MCP2515 on SPI against the ESP32's own CAN).
+  const lines = (pick(r.wiring) || []).filter((w) => !/\{\{(\w+)\}\}/.test(w) || [...w.matchAll(/\{\{(\w+)\}\}/g)].every(([, k]) => k in values));
+  // The pins this family's sketch and wiring actually use.
+  const used = new Set([...body.matchAll(/\{\{(\w+)\}\}/g), ...lines.join(' ').matchAll(/\{\{(\w+)\}\}/g)].map(([, k]) => k));
+  const pins = Object.fromEntries(Object.entries(allPins).filter(([k]) => used.has(k)));
+  return { family, pins, libs, wiring: lines.map(fill), sketch, verified: verifiedFor(c.id, family, sketch) };
 }
 
 /**
@@ -505,7 +591,12 @@ function componentText(c, { family = null, withSketch = true } = {}) {
     const label = FAMILY_LABEL[family] || family;
     if (r.wiring.length) lines.push(`- Wiring for the ${label}: ${r.wiring.join('; ')}.`);
     if (r.libs.length) lines.push(`- Install: ${r.libs.join(', ')} (Library Manager names; Impulse installs what is missing when it compiles).`);
-    if (withSketch) lines.push('', `Known-good sketch for the ${label} (Impulse compiled it; adapt it rather than starting from memory):`, '```cpp', r.sketch.trim(), '```');
+    if (withSketch) {
+      const intro = r.verified
+        ? `Known-good sketch for the ${label} (Impulse compiled it for ${r.verified.fqbn} with ${r.verified.core}; adapt it rather than starting from memory):`
+        : `Sketch for the ${label}, written for this family but not compiled by Impulse for it yet: compile before relying on it.`;
+      lines.push('', intro, '```cpp', r.sketch.trim(), '```');
+    }
   }
   return lines.join('\n');
 }
@@ -549,4 +640,4 @@ function componentFacts(message, { fqbn = '', max = 2 } = {}) {
   return `[COMPONENT FACTS] The message names ${found.map((c) => c.names[0]).join(' and ')}; this is how they are used (get_component_guide has more):\n${blocks.join('\n\n')}`;
 }
 
-module.exports = { COMPONENTS, RECIPES, FAMILY_LABEL, findComponents, componentText, familyKey, familyChain, recipeFor, componentsNamedIn, componentFacts };
+module.exports = { COMPONENTS, RECIPES, FAMILY_LABEL, findComponents, componentText, familyKey, familyChain, pinChain, recipeFor, verifiedFor, sketchHash, componentsNamedIn, componentFacts };

@@ -69,7 +69,7 @@ function setupStatusBar() {
     const syncBoard = () => {
         if (!boardSrc || !boardEl) return;
         const t = boardSrc.textContent.trim();
-        const none = !t || t === 'Select Board and Port';
+        const none = !t || t === 'Choose a board';
         boardEl.dataset.state = none ? 'empty' : 'set';
         boardEl.querySelector('.status-text').textContent = none ? 'No board selected' : t;
     };
@@ -108,6 +108,7 @@ function localizeShortcutLabels() {
     document.querySelectorAll('kbd').forEach((k) => {
         if (k.textContent === 'Ctrl') k.textContent = '⌘';
         else if (k.textContent === 'Shift') k.textContent = '⇧';
+        else k.textContent = k.textContent.replace(/Ctrl\+Shift\+/g, '⇧⌘').replace(/Ctrl\+/g, '⌘');
     });
     document.querySelectorAll('[title*="Ctrl+"]').forEach((el) => {
         el.title = el.title.replace(/Ctrl\+Shift\+/g, '⇧⌘').replace(/Ctrl\+/g, '⌘');

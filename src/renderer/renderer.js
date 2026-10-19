@@ -757,7 +757,7 @@ function setupPlayground() {
     showPlaygroundEmpty();
 
     function showPlaygroundEmpty() {
-        entriesEl.innerHTML = '<div class="playground-empty">AI hardware tasks will appear here</div>';
+        entriesEl.innerHTML = '<div class="panel-empty playground-empty"><strong>No hardware tasks yet</strong><span>When Impulse AI runs a task on your board, each step shows here.</span></div>';
     }
 
     function addEntry(content) {
@@ -1181,7 +1181,7 @@ async function uploadUsingProgrammer() {
     const list = await window.electronAPI.arduino.listProgrammers(state.selectedBoard);
     const programmers = list?.data || [];
     if (programmers.length === 0) {
-        logToConsole('This board has no programmers listed. Install its core in Board Manager.', 'warning');
+        logToConsole('This board has no programmers listed. Install its core in the board manager.', 'warning');
         return;
     }
     const programmerId = await askDialog({
@@ -1306,7 +1306,7 @@ async function archiveSketch() {
 async function getBoardInfo() {
     const port = state.selectedPort || document.getElementById('portSelectSidebar')?.value;
     if (!port) {
-        logToConsole('Select a port first (Board Manager or Tools > Port)', 'warning');
+        logToConsole('Choose a port first (the board manager, or Tools › Port).', 'warning');
         window.notifications?.warning?.('Plug the board in and choose its port first, then ask for its info.');
         document.getElementById('boardPortDropdown')?.click();
         return;
@@ -1589,7 +1589,18 @@ function initializeCodeMirror() {
         lineWrapping: true,
         styleActiveLine: true,
         extraKeys: { "Ctrl-Space": "autocomplete" },
-        hintOptions: { hint: CodeMirror.hint.arduino }
+        hintOptions: { hint: CodeMirror.hint.arduino },
+        // The search and go-to-line bars' words, in the app's voice.
+        phrases: {
+            'Jump to line:': 'Go to line',
+            '(Use line:column or scroll% syntax)': 'A line, or line:column',
+            'Search:': 'Find',
+            '(Use /re/ syntax for regexp search)': 'Text, or /pattern/ for a regular expression',
+            'Replace:': 'Replace',
+            'Replace all:': 'Replace all',
+            'With:': 'With',
+            'Replace?': 'Replace this one?',
+        }
     });
     // CodeMirror types into a hidden textarea; give it a name for screen readers.
     state.editor.getInputField().setAttribute('aria-label', 'Code editor');
@@ -2001,7 +2012,7 @@ async function loadPorts() {
                 options = '<option value="">No ports found</option>';
                 logToConsole('No serial ports detected', 'warning');
             } else {
-                options = '<option value="">Select Port...</option>' +
+                options = '<option value="">Choose a port…</option>' +
                     sortPorts(result.data).map(port =>
                         `<option value="${escapeHtml(port.port)}">${escapeHtml(port.port)} - ${escapeHtml(describePort(port))}</option>`
                     ).join('');
@@ -2065,7 +2076,7 @@ async function refreshPortsQuiet() {
         const current = sel.value;
         sel.innerHTML = ports.length === 0
             ? '<option value="">No ports found</option>'
-            : '<option value="">Select Port...</option>' + sortPorts(ports).map(p =>
+            : '<option value="">Choose a port…</option>' + sortPorts(ports).map(p =>
                 `<option value="${escapeHtml(p.port)}">${escapeHtml(p.port)} - ${escapeHtml(describePort(p))}</option>`
             ).join('');
         if (current && ports.some(p => p.port === current)) {
@@ -2285,7 +2296,7 @@ async function loadExamplesIntoDropdown(listEl, filter = '') {
         const result = await window.electronAPI.arduino.libExamplesWithPaths(filter || '');
         const examples = result.success && result.data ? result.data : [];
         if (examples.length === 0) {
-            listEl.innerHTML = '<div class="lib-msg">No examples found. Install libraries from Library Manager, then load again.</div>';
+            listEl.innerHTML = '<div class="lib-msg">No examples found. Install libraries from the library manager, then load again.</div>';
             return;
         }
         listEl.innerHTML = examples.map(ex => {
@@ -2846,24 +2857,27 @@ async function compileSketch() {
     const boardFQBN = document.getElementById('boardSelectSidebar')?.value;
 
     if (!state.currentSketch) {
-        logToConsole('Please open a sketch file first', 'warning');
-        showProblem('No sketch file selected. Open a folder and select a .ino file.');
+        logToConsole('Open a sketch first.', 'warning');
+        clearProblems();
+        showProblem('Open a sketch first: use File › Open, or pick an .ino file in the sidebar.', { note: true });
         return { ok: false, error: 'Open a sketch first.' };
     }
 
     const pio = inPioProject(state.currentSketch);
     if (!boardFQBN && !pio) {
-        logToConsole('Please select a board', 'warning');
-        showProblem('No board selected. Please select a board from the dropdown.');
+        logToConsole('Choose a board first.', 'warning');
+        clearProblems();
+        showProblem('Choose a board first: click Choose a board at the top of the window.', { note: true });
         return { ok: false, error: 'Choose a board first.', needsBoard: true };
     }
 
     if (!await saveAllFiles()) {
-        showProblem('The sketch could not be saved, so the build would use old code. Fix the save error and try again.');
+        clearProblems();
+        showProblem('The sketch could not be saved, so the build would use old code. Fix the save error and try again.', { note: true });
         return { ok: false, error: 'The sketch could not be saved, so the build would use old code.' };
     }
 
-    setButtonState('compileBtn', true, 'Compiling...');
+    setButtonState('compileBtn', true, 'Verifying…');
     clearProblems();
 
     try {
@@ -2905,7 +2919,7 @@ async function compileSketch() {
                 errors: result.errors || (result.error ? [result.error] : []),
                 output: result.output || result.error || ''
             });
-            if (result.error) showProblem(problemText(result));
+            if (result.error) showBuildProblem(result);
             if (result.analyzedError) {
                 displayErrorAnalysis(result.analyzedError);
             }
@@ -2913,7 +2927,7 @@ async function compileSketch() {
         }
     } catch (error) {
         logToConsole(`Compilation error: ${error.message}`, 'error');
-        showProblem(error.message);
+        showProblem(error.message, { note: true });
         return { ok: false, error: error.message };
     } finally {
         setButtonState('compileBtn', false, 'Verify');
@@ -2925,32 +2939,36 @@ async function uploadSketch() {
     const port = document.getElementById('portSelectSidebar')?.value;
 
     if (!state.currentSketch) {
-        logToConsole('Please open a sketch file first', 'warning');
-        showProblem('No sketch file selected. Open a folder and select a .ino file.');
+        logToConsole('Open a sketch first.', 'warning');
+        clearProblems();
+        showProblem('Open a sketch first: use File › Open, or pick an .ino file in the sidebar.', { note: true });
         return { ok: false, error: 'Open a sketch first.' };
     }
 
     const pio = inPioProject(state.currentSketch);
     if (!boardFQBN && !pio) {
-        logToConsole('Please select a board', 'warning');
-        showProblem('No board selected. Please select a board from the dropdown.');
+        logToConsole('Choose a board first.', 'warning');
+        clearProblems();
+        showProblem('Choose a board first: click Choose a board at the top of the window.', { note: true });
         return { ok: false, error: 'Choose a board first.', needsBoard: true };
     }
 
     if (!port) {
-        logToConsole('Please select a port', 'warning');
-        showProblem('No port selected. Please select a port from the dropdown.');
+        logToConsole('Choose a port first.', 'warning');
+        clearProblems();
+        showProblem('Plug in the board, then choose its port at the top of the window.', { note: true });
         return { ok: false, error: 'Plug in the board and choose its port first.', needsBoard: true };
     }
 
     if (!await saveAllFiles()) {
-        showProblem('The sketch could not be saved, so the build would use old code. Fix the save error and try again.');
+        clearProblems();
+        showProblem('The sketch could not be saved, so the build would use old code. Fix the save error and try again.', { note: true });
         return { ok: false, error: 'The sketch could not be saved, so the upload would use old code.' };
     }
 
     // The main process closes the port for the upload and reopens it afterwards
     // (serialMonitor.holdForUpload / resumeAfterUpload), like Arduino IDE.
-    setButtonState('uploadBtn', true, 'Uploading...');
+    setButtonState('uploadBtn', true, 'Uploading…');
     clearProblems();
 
     try {
@@ -2964,7 +2982,7 @@ async function uploadSketch() {
                 logToConsole(result.error, 'warning');
                 return { ok: false, busy: true, code: 'BUSY', error: result.error, port };
             }
-            if (result.error) showProblem(problemText(result));
+            if (result.error) showBuildProblem(result);
             if (result.analyzedError) {
                 displayErrorAnalysis(result.analyzedError);
             }
@@ -2972,7 +2990,7 @@ async function uploadSketch() {
         }
     } catch (error) {
         logToConsole(`Upload error: ${error.message}`, 'error');
-        showProblem(error.message);
+        showProblem(error.message, { note: true });
         return { ok: false, error: error.message, port };
     } finally {
         setButtonState('uploadBtn', false, 'Upload');
@@ -2999,7 +3017,7 @@ async function connectSerial() {
         // Make the issue visible in the Serial panel too
         const statusText = document.getElementById('serialStatusText');
         if (statusText) statusText.textContent = 'Select a port first';
-        appendSerialOutput('Select a port first (Board Manager or toolbar).', new Date().toISOString(), 'info');
+        appendSerialOutput('Choose a port first (the board manager, or the board button in the toolbar).', new Date().toISOString(), 'info');
         return;
     }
 
@@ -3054,7 +3072,7 @@ function updateSerialUI(connected) {
     const statusText = document.getElementById('serialStatusText');
 
     if (toggleBtn) {
-        toggleBtn.textContent = connected ? 'Close Serial Monitor' : 'Open Serial Monitor';
+        toggleBtn.textContent = connected ? 'Close serial monitor' : 'Open serial monitor';
         toggleBtn.classList.toggle('active', connected);
     }
 
@@ -3351,8 +3369,9 @@ function setupSerialPlotter() {
         pauseBtn.addEventListener('click', () => {
             state.plotter.paused = !state.plotter.paused;
             pauseBtn.classList.toggle('active', state.plotter.paused);
-            pauseBtn.textContent = state.plotter.paused ? '▶' : '⏸';
+            pauseBtn.innerHTML = state.plotter.paused ? PLOTTER_ICON.play : PLOTTER_ICON.pause;
             pauseBtn.title = state.plotter.paused ? 'Resume' : 'Pause';
+            pauseBtn.setAttribute('aria-label', pauseBtn.title);
         });
     }
 
@@ -3382,6 +3401,35 @@ function stopPlotterRendering() {
     }
 }
 
+/** The plotter's icons (the pause button swaps between them). */
+const PLOTTER_ICON = {
+    pause: '<svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>',
+    play: '<svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>',
+};
+
+/** The plotter's colours and fonts, read from the design tokens (so both themes match the app). */
+let plotterThemeCache = null;
+function plotterTheme() {
+    const key = document.documentElement.getAttribute('data-theme') || 'dark';
+    if (plotterThemeCache?.key === key) return plotterThemeCache;
+    const probe = document.createElement('span');
+    probe.style.display = 'none';
+    document.body.appendChild(probe);
+    const resolve = (token) => { probe.style.color = `var(${token})`; return getComputedStyle(probe).color; };
+    const css = getComputedStyle(document.documentElement);
+    plotterThemeCache = {
+        key,
+        canvas: resolve('--ds-canvas'),
+        grid: resolve('--ds-line'),
+        muted: resolve('--ds-text-4'),
+        text: resolve('--ds-text-2'),
+        mono: css.getPropertyValue('--font-mono').trim() || 'monospace',
+        ui: css.getPropertyValue('--font-ui').trim() || 'system-ui, sans-serif',
+    };
+    probe.remove();
+    return plotterThemeCache;
+}
+
 function renderPlotterFrame() {
     if (!state.plotter.running) return;
 
@@ -3407,24 +3455,20 @@ function renderPlotterFrame() {
         ctx.scale(dpr, dpr);
     }
 
-    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    const theme = plotterTheme();
 
     // Clear canvas
     ctx.clearRect(0, 0, w, h);
-    ctx.fillStyle = isDark ? '#0A0A14' : '#F5F5FA';
+    ctx.fillStyle = theme.canvas;
     ctx.fillRect(0, 0, w, h);
 
     const data = state.plotter.data;
     const channels = state.plotter.channelCount;
+    const empty = data.length < 2 || channels === 0;
+    const emptyEl = document.getElementById('plotterEmpty');
+    if (emptyEl) emptyEl.hidden = !empty;
 
-    if (data.length < 2 || channels === 0) {
-        // Draw empty state
-        ctx.fillStyle = isDark ? '#4A4A6A' : '#9898B0';
-        ctx.font = '12px monospace';
-        ctx.textAlign = 'center';
-        ctx.fillText('Waiting for serial data...', w / 2, h / 2);
-        ctx.font = '10px monospace';
-        ctx.fillText('Send numeric values (e.g. "100" or "100,200,300")', w / 2, h / 2 + 18);
+    if (empty) {
         state.plotter.animFrameId = requestAnimationFrame(renderPlotterFrame);
         return;
     }
@@ -3450,7 +3494,7 @@ function renderPlotterFrame() {
     const plotH = h - pad.top - pad.bottom;
 
     // Grid lines
-    ctx.strokeStyle = isDark ? '#1A1A2E' : '#E0E0E8';
+    ctx.strokeStyle = theme.grid;
     ctx.lineWidth = 1;
 
     const ySteps = 5;
@@ -3463,8 +3507,8 @@ function renderPlotterFrame() {
 
         // Y axis labels
         const val = yMax - ((yMax - yMin) * i) / ySteps;
-        ctx.fillStyle = isDark ? '#6A6A8A' : '#8888A0';
-        ctx.font = '9px monospace';
+        ctx.fillStyle = theme.muted;
+        ctx.font = `10px ${theme.mono}`;
         ctx.textAlign = 'right';
         ctx.fillText(val.toFixed(val >= 100 || val <= -100 ? 0 : 1), pad.left - 6, y + 3);
     }
@@ -3507,12 +3551,12 @@ function renderPlotterFrame() {
     if (channels > 0) {
         const legendX = pad.left + 8;
         let legendY = pad.top + 14;
-        ctx.font = '10px monospace';
+        ctx.font = `11px ${theme.ui}`;
         for (let ch = 0; ch < channels; ch++) {
             const color = PLOTTER_COLORS[ch % PLOTTER_COLORS.length];
             ctx.fillStyle = color;
             ctx.fillRect(legendX, legendY - 8, 10, 10);
-            ctx.fillStyle = isDark ? '#C0C0D0' : '#3A3A52';
+            ctx.fillStyle = theme.text;
             const lastVal = data[data.length - 1]?.values[ch];
             const label = `Ch${ch + 1}: ${lastVal !== undefined ? lastVal.toFixed(2) : '--'}`;
             ctx.textAlign = 'left';
@@ -4359,9 +4403,19 @@ function logToConsole(message, type = 'info') {
     consoleEl.scrollTop = consoleEl.scrollHeight;
 }
 
-function showProblem(message) {
+// note: the message is Impulse's own sentence (UI font), not compiler output.
+function showProblem(message, { note = false } = {}) {
     const problemsEl = document.getElementById('problemsOutput');
     if (!problemsEl) return;
+    problemsEl.querySelector('.problems-empty')?.remove();
+    if (note) {
+        const noteEl = document.createElement('div');
+        noteEl.className = 'problem-note';
+        noteEl.textContent = message;
+        problemsEl.appendChild(noteEl);
+        document.querySelector('.output-tab[data-tab="problems"]')?.click();
+        return;
+    }
 
     // Split message by newlines to handle multiple errors
     const lines = message.split('\n');
@@ -4430,34 +4484,46 @@ function showProblem(message) {
 
 function clearProblems() {
     const problemsEl = document.getElementById('problemsOutput');
-    if (problemsEl) problemsEl.innerHTML = '';
+    if (!problemsEl) return;
+    const empty = document.createElement('div');
+    empty.className = 'panel-empty problems-empty';
+    const title = document.createElement('strong');
+    title.textContent = 'No problems';
+    const text = document.createElement('span');
+    text.textContent = 'Errors and warnings from your last build show here.';
+    empty.append(title, text);
+    problemsEl.replaceChildren(empty);
 }
 
 function displayErrorAnalysis(analysis) {
-    if (!analysis) return;
-
+    // Only fixes that worked before are worth showing: the error's type is internal.
+    const fixes = (analysis?.suggestions || []).filter((fix) => fix && (fix.title || fix.solution));
     const problemsEl = document.getElementById('problemsOutput');
-    if (!problemsEl) return;
+    if (!fixes.length || !problemsEl) return;
+    problemsEl.querySelector('.problems-empty')?.remove();
 
-    const errorDiv = document.createElement('div');
-    errorDiv.className = 'error-analysis';
-
-    let html = `<h4>Error Analysis</h4>`;
-
-    if (analysis.error && analysis.error.pattern) {
-        html += `<p><strong>Type:</strong> ${analysis.error.pattern.type}</p>`;
+    // Text nodes only: fix text can hold "#include <Wire.h>", which innerHTML would swallow.
+    const box = document.createElement('div');
+    box.className = 'error-analysis';
+    const heading = document.createElement('h4');
+    heading.textContent = fixes.length === 1 ? 'A fix that worked before' : 'Fixes that worked before';
+    const list = document.createElement('ul');
+    for (const fix of fixes) {
+        const item = document.createElement('li');
+        if (fix.title) {
+            const title = document.createElement('strong');
+            title.textContent = fix.title;
+            item.append(title);
+        }
+        if (fix.solution) {
+            const text = document.createElement('div');
+            text.textContent = fix.solution;
+            item.append(text);
+        }
+        list.append(item);
     }
-
-    if (analysis.suggestions && analysis.suggestions.length > 0) {
-        html += `<h5>Suggestions:</h5><ul>`;
-        analysis.suggestions.forEach(s => {
-            html += `<li><strong>${s.title}</strong> (${Math.round(s.confidence * 100)}% confidence)<br>${s.solution}</li>`;
-        });
-        html += `</ul>`;
-    }
-
-    errorDiv.innerHTML = html;
-    problemsEl.appendChild(errorDiv);
+    box.append(heading, list);
+    problemsEl.append(box);
 
     document.querySelector('.output-tab[data-tab="problems"]')?.click();
 }
@@ -4844,7 +4910,7 @@ function updateBoardPortDisplay(boardName, port) {
         } else if (boardName) {
             display.textContent = boardName;
         } else {
-            display.textContent = 'Select Board and Port';
+            display.textContent = 'Choose a board';
         }
     }
 }
@@ -4985,7 +5051,7 @@ async function fqbnFor(board) {
     const own = loadChoices()[base] || {};
     if (suggested.CDCOnBoot && !own.CDCOnBoot && !announcedSuggestions.has(base)) {
         announcedSuggestions.add(base);
-        logToConsole('This ESP32 is on its built-in USB port, so "USB CDC On Boot" is on: Serial output appears in the Serial Monitor. Change it in Tools › Board Options.', 'info');
+        logToConsole('This ESP32 is on its built-in USB port, so "USB CDC On Boot" is on: Serial output appears in the serial monitor. Change it in Tools › Board Options.', 'info');
     }
     return composeFqbn(base, options, effectiveChoices(base, options, port));
 }
@@ -5116,13 +5182,17 @@ function setupBuildStream() {
  * to do, then each diagnostic as "file:line:col: level: message" (the panel
  * makes those clickable). The whole log stays in the console.
  */
-function problemText(result) {
+// A failed build: Impulse's explanation first (a sentence when the main process
+// recognised the failure), then the compiler lines it rests on.
+function showBuildProblem(result) {
+    const head = result.title || result.error || '';
+    const headLine = head && result.hint ? `${/[.!?:]$/.test(head) ? head : `${head}.`} ${result.hint}` : head;
+    if (headLine) showProblem(headLine, { note: !!result.title });
     const lines = [];
-    const title = result.title || result.error;
-    if (title) lines.push(result.hint ? `${title} ${result.hint}` : title);
     for (const d of result.diagnostics || []) lines.push(`${d.file}:${d.line}:${d.col ?? 1}: ${d.level}: ${d.message}`);
-    if (!(result.diagnostics || []).length && result.excerpt && result.excerpt !== title) lines.push(result.excerpt);
-    return lines.join('\n') || result.output || result.error || 'The build failed.';
+    if (!(result.diagnostics || []).length && result.excerpt && result.excerpt !== head) lines.push(result.excerpt);
+    if (lines.length) showProblem(lines.join('\n'));
+    if (!headLine && !lines.length) showProblem(result.output || 'The build failed.');
 }
 
 function setButtonState(buttonId, disabled, text) {
@@ -5326,6 +5396,18 @@ function currentBoard() {
     };
 }
 
+/** Select a board by FQBN (options ignored) when its core is installed; false when it is not. */
+function chooseBoard(fqbn) {
+    const base = baseFqbn(fqbn || '');
+    const boardSel = document.getElementById('boardSelectSidebar');
+    if (!base || !boardSel || !(state.boards || []).some(b => b.fqbn === base)) return false;
+    if (state.selectedBoard !== base) {
+        boardSel.value = base;
+        boardSel.dispatchEvent(new Event('change'));
+    }
+    return true;
+}
+
 /** Use a plugged-in board's port, and the board arduino-cli recognises on it. */
 function chooseBoardPort(port) {
     const p = (state.ports || []).find(x => x.port === port);
@@ -5472,6 +5554,7 @@ Object.assign(window.impulse, {
             boardName: p.boards?.length === 1 ? p.boards[0].name : null,
         })),
         choosePort: chooseBoardPort,
+        choose: chooseBoard,
         openPicker: openBoardPortModal,
         openOptions: openBoardOptions,
         verify: compileSketch,

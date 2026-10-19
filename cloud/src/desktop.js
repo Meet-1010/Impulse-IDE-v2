@@ -91,7 +91,8 @@ export function createDesktopHandoff({ pool, auth, config }) {
       if (!user || user.banned) return Response.json({ error: 'invalid_grant' }, { status: 400 });
       const forwarded = request.headers.get('x-forwarded-for');
       const details = { userAgent: (request.headers.get('user-agent') || 'Impulse IDE').slice(0, 200) };
-      if (forwarded) details.ipAddress = forwarded.split(',')[0].trim();
+      // Recorded only when it is a single address (a list's first entry is the client's own claim).
+      if (forwarded && !forwarded.includes(',')) details.ipAddress = forwarded.trim();
       const session = await ctx.internalAdapter.createSession(user.id, false, details);
       return Response.json({
         token: session.token,

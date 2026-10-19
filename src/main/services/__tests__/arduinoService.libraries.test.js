@@ -77,6 +77,20 @@ describe('compiles that need libraries', () => {
     expect(result.hex).toBe(':00000001FF');
   });
 
+  it('installs a library once when the sketch includes several of its headers', async () => {
+    const libs = fakeLibraries();
+    const one = { name: 'OneWireNg', version: '0.14.1' };
+    libs.missingFor = async () => [
+      { header: 'OneWireNg_CurrentPlatform.h', suggestion: one, alternatives: [] },
+      { header: 'drivers/DSTherm.h', suggestion: one, alternatives: [] },
+    ];
+    const s = service(libs);
+    const sketch = sketchWith('#include <OneWireNg_CurrentPlatform.h>\n#include <drivers/DSTherm.h>\nvoid setup(){} void loop(){}');
+    const result = await s._withLibraries(async () => ({ success: true }), { fqbn: 'esp32:esp32:esp32c6', sketchPath: sketch });
+    expect(libs.calls).toEqual(['install OneWireNg']);
+    expect(result.installedLibraries.map((l) => l.name)).toEqual(['OneWireNg']);
+  });
+
   it('installs what the compiler misses in a secondary file and compiles again', async () => {
     const libs = fakeLibraries();
     const s = service(libs);

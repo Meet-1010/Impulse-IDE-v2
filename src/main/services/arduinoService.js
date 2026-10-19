@@ -624,7 +624,7 @@ class ArduinoService {
     const warnings = diagnostics.filter((d) => d.level === 'warning').map((d) => `${path.basename(d.file)}:${d.line}: ${d.message}`);
     if (code === 0) {
       const summary = summaryLines(memory);
-      if (installedLibraries.length) summary.unshift(`Installed ${installedLibraries.map((l) => l.name).join(', ')} to build this sketch.`);
+      if (installedLibraries.length) summary.unshift(`Installed ${[...new Set(installedLibraries.map((l) => l.name))].join(', ')} to build this sketch.`);
       // It compiles; whether the pins exist on this board is another question.
       const pins = this.pinInspector ? await this.pinInspector({ sketchPath, fqbn: boardFQBN }).catch(() => null) : null;
       if (pins?.report) summary.push(...pins.report.split('\n'));
@@ -792,7 +792,9 @@ class ArduinoService {
       try {
         const code = await fs.readFile(sketchPath, 'utf8');
         const missing = await this.libraries.missingFor(code, { fqbn });
-        for (const m of missing.slice(0, 6)) {
+        // Several headers can come from one library (OneWireNg_CurrentPlatform.h and drivers/DSTherm.h): install it once.
+        const unique = missing.filter((m, i) => missing.findIndex((o) => o.suggestion.name === m.suggestion.name) === i);
+        for (const m of unique.slice(0, 6)) {
           say(`Installing ${m.suggestion.name} for ${m.header}…`);
           try {
             await this.libraries.install(m.suggestion.name);

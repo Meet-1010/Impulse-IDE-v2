@@ -99,4 +99,15 @@ describe('accounts', () => {
     const signIn = await t.json('/api/auth/sign-in/email', { email, password: 'a brand new password' });
     assert.equal(signIn.status, 200);
   });
+  test('sign-up limits cannot be dodged with made-up client addresses', async () => {
+    // Five sign-ups a minute per address. A client that prepends its own
+    // X-Forwarded-For (Cloud Run then appends the real address) and invents an
+    // X-Real-IP per request must not get a fresh allowance per invented address.
+    const tryOnce = (i, headers) => t.json('/api/auth/sign-up/email', { name: 'Spoof', email: `spoof-${i}-${Date.now()}@impulse.test`, password: 'correct horse battery' }, { headers });
+    const statuses = [];
+    for (let i = 0; i < 6; i++) {
+      statuses.push((await tryOnce(i, { 'x-forwarded-for': `198.51.100.${i + 1}, 203.0.113.7`, 'x-real-ip': `192.0.2.${i + 1}` })).status);
+    }
+    assert.deepEqual(statuses, [200, 200, 200, 200, 200, 429]);
+  });
 });

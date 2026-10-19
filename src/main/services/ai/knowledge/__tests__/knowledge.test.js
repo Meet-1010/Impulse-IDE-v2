@@ -4,7 +4,7 @@
 const path = require('path');
 const { readDefinitions, pinFacts, resolve } = require('../pinsHeader');
 const { FAMILIES, familyOf, familyById, guideText } = require('../mcuGuide');
-const { COMPONENTS, RECIPES, findComponents, componentText, familyKey, recipeFor, componentsNamedIn, componentFacts } = require('../components');
+const { COMPONENTS, RECIPES, findComponents, componentText, familyKey, recipeFor, verifiedFor, componentsNamedIn, componentFacts } = require('../components');
 const BoardKnowledge = require('../boardKnowledge');
 const ToolExecutor = require('../../tools/toolExecutor');
 
@@ -103,7 +103,9 @@ describe('component recipes (compiled sketches)', () => {
     expect(familyKey('esp32:esp32:esp32s3')).toBe('esp32s3');
     expect(familyKey('esp32:esp32:XIAO_ESP32C3')).toBe('esp32c3');
     expect(familyKey('esp32:esp32:heltec_wifi_lora_32_V3')).toBe('esp32s3');
-    expect(familyKey('arduino:esp32:nano_nora')).toBe('esp32s3');
+    expect(familyKey('arduino:esp32:nano_nora')).toBe('nano-esp32'); // Arduino pin numbers, the ESP32's API
+    expect(familyKey('esp32:esp32:nano_nora')).toBe('nano-esp32'); // Espressif's core numbers it the Arduino way too
+    expect(familyKey('arduino:mbed_rp2040:nanorp2040connect')).toBe('mbed'); // Arduino pin numbers, not GPIO
     expect(familyKey('esp32:esp32:esp32c6')).toBe('esp32c6');
     expect(familyKey('rp2040:rp2040:rpipico')).toBe('rp2040');
     expect(familyKey('')).toBe('avr');
@@ -116,8 +118,9 @@ describe('component recipes (compiled sketches)', () => {
     expect(recipeFor(dht, 'esp32s3').wiring.join(' ')).toMatch(/DATA → pin 4/);
     expect(recipeFor(dht, 'avr').libs).toEqual(['DHT sensor library', 'Adafruit Unified Sensor']);
     const lcd = COMPONENTS.find((c) => c.id === 'lcd-parallel');
-    expect(recipeFor(lcd, 'esp32c3').sketch).toMatch(/LiquidCrystal lcd\(2, 3, 4, 5, 6, 7\)/); // the C3 has its own table
-    expect(recipeFor(lcd, 'esp32').sketch).toMatch(/LiquidCrystal lcd\(4, 5, 15, 16, 17, 18\)/);
+    expect(recipeFor(lcd, 'esp32c3').sketch).toMatch(/LiquidCrystal lcd\(10, 3, 4, 5, 6, 7\)/); // the C3 has its own table (no strapping GPIO 2)
+    expect(recipeFor(lcd, 'esp32').sketch).toMatch(/LiquidCrystal lcd\(4, 13, 14, 16, 17, 18\)/);
+    expect(recipeFor(lcd, 'nano-esp32').sketch).toMatch(/LiquidCrystal lcd\(12, 11, 5, 4, 3, 2\)/); // Nano pin numbers
   });
 
   test('switches library and sketch where the API differs between families', () => {
@@ -138,7 +141,10 @@ describe('component recipes (compiled sketches)', () => {
     expect(recipeFor(touch, 'esp32c3')).toBeNull(); // the C3 has no touch pads: no pin, no recipe
     expect(recipeFor(touch, 'avr')).toBeNull(); // an ESP32-only feature
     expect(recipeFor(COMPONENTS.find((c) => c.id === 'esp32-wifi'), 'avr')).toBeNull();
-    expect(recipeFor(COMPONENTS.find((c) => c.id === 'compass'), 'avr')).toBeNull(); // no recipe written yet
+    expect(recipeFor(COMPONENTS.find((c) => c.id === 'esp32-bt-serial'), 'esp32s3')).toBeNull(); // BLE only on the S3
+    expect(recipeFor(COMPONENTS.find((c) => c.id === 'esp32-bt-serial'), 'nano-esp32')).toBeNull(); // an S3 too
+    expect(recipeFor(COMPONENTS.find((c) => c.id === 'esp32-cam'), 'esp32c3')).toBeNull(); // no camera interface
+    expect(recipeFor(COMPONENTS.find((c) => c.id === 'i2s-audio'), 'nano-esp32')).toBeNull(); // no Nano-numbered pins written for it
   });
 
   test('every recipe belongs to a component, has a sketch with setup and loop, and names real pins', () => {
@@ -152,7 +158,7 @@ describe('component recipes (compiled sketches)', () => {
       }
       for (const table of Object.values(r.pins || {})) if (table !== null) for (const v of Object.values(table)) expect(['number', 'string']).toContain(typeof v); // null = this chip has none
     }
-    expect(Object.keys(RECIPES).length).toBeGreaterThanOrEqual(45);
+    expect(Object.keys(RECIPES).length).toBeGreaterThanOrEqual(81);
   });
 
   test('the guide text carries the wiring and the sketch for the board\'s family, the sketch only when asked', () => {
@@ -160,12 +166,105 @@ describe('component recipes (compiled sketches)', () => {
     const text = componentText(dht, { family: 'esp32s3' });
     expect(text).toMatch(/Wiring for the ESP32-S3/);
     expect(text).toMatch(/Install: DHT sensor library/);
-    expect(text).toMatch(/Known-good sketch for the ESP32-S3/);
+    expect(verifiedFor('dht', 'esp32s3')).toMatchObject({ fqbn: 'esp32:esp32:esp32s3' });
+    expect(text).toMatch(/Known-good sketch for the ESP32-S3 \(core 3\.x\) \(Impulse compiled it for esp32:esp32:esp32s3 with esp32:esp32@/);
+    // A family nobody compiled for: the sketch comes with a warning instead of a promise.
+    const unproven = componentText(dht, { family: 'esp8266' });
+    expect(unproven).toMatch(/not compiled by Impulse for it yet/);
+    expect(unproven).not.toMatch(/Known-good/);
     expect(text).toMatch(/```cpp\n#include <DHT.h>/);
     expect(componentText(dht, { family: 'esp32s3', withSketch: false })).not.toMatch(/```cpp/);
     expect(componentText(dht)).not.toMatch(/Wiring for/); // no family: the plain guide
     expect(findComponents('WiFi')[0].id).toBe('esp32-wifi');
     expect(findComponents('deep sleep')[0].id).toBe('esp32-deep-sleep');
+  });
+});
+
+describe('recipe pins are safe on every chip', () => {
+  const { checkPin } = require('../pinMap');
+  const CHIP = { avr: 'avr-atmega328p', esp32: 'esp32', esp32s2: 'esp32-s2', esp32s3: 'esp32-s3', esp32c3: 'esp32-c3', esp32c6: 'esp32-c6', rp2040: 'rp2040' };
+  // Beyond what the pin map flags: the serial console pins, the S3's octal PSRAM
+  // (N8R8/N16R8 boards) and RGB LED, and the Pico's internal pins.
+  const RESERVED = { avr: [0, 1], esp32: [1, 3], esp32s2: [43, 44], esp32s3: [33, 34, 35, 36, 37, 43, 44, 48], esp32c3: [20, 21], esp32c6: [16, 17], rp2040: [23, 24, 25, 29] };
+
+  test('no recipe puts a part on a missing, flash, USB, strapping, input-only or reserved pin', () => {
+    const problems = [];
+    for (const [id, r] of Object.entries(RECIPES)) {
+      const c = COMPONENTS.find((x) => x.id === id);
+      for (const family of Object.keys(CHIP)) {
+        const recipe = recipeFor(c, family);
+        if (!recipe) continue;
+        for (const [key, pin] of Object.entries(recipe.pins)) {
+          if (!Number.isInteger(pin)) continue; // a name the core defines (A0) or a wiring hint
+          const reading = (r.inputs || []).includes(key) || (r.analog || []).includes(key);
+          const issue = checkPin(pin, CHIP[family], { output: !reading, analogRead: (r.analog || []).includes(key), analogWrite: family === 'avr' && (r.pwm || []).includes(key) });
+          if (issue) problems.push(`${id} on ${family}: ${key} = ${pin}, ${issue.reason}`);
+          else if (RESERVED[family].includes(pin)) problems.push(`${id} on ${family}: ${key} = ${pin} is reserved`);
+        }
+        const used = Object.entries(recipe.pins).filter(([, p]) => Number.isInteger(p));
+        const seen = new Map();
+        for (const [key, pin] of used) {
+          if (seen.has(pin)) problems.push(`${id} on ${family}: ${key} and ${seen.get(pin)} share pin ${pin}`);
+          seen.set(pin, key);
+        }
+      }
+    }
+    expect(problems).toEqual([]);
+  });
+
+  test('the compile record only names recipes and families that exist', () => {
+    const record = require('../recipes.verified.json');
+    for (const [id, families] of Object.entries(record.results)) {
+      const c = COMPONENTS.find((x) => x.id === id);
+      expect([id, Boolean(c && RECIPES[id])]).toEqual([id, true]);
+      for (const [family, proof] of Object.entries(families)) {
+        expect([id, family, Boolean(recipeFor(c, family))]).toEqual([id, family, true]);
+        expect(proof).toMatchObject({ fqbn: expect.stringMatching(/^[\w.-]+:[\w.-]+:[\w.-]+$/), core: expect.stringMatching(/@\d/) });
+      }
+    }
+  });
+
+  test('every part has a recipe, and every recipe fills all of its blanks for some family', () => {
+    expect(COMPONENTS.filter((c) => !RECIPES[c.id]).map((c) => c.id)).toEqual([]);
+    for (const c of COMPONENTS) {
+      const any = Object.keys(CHIP).some((family) => recipeFor(c, family));
+      expect([c.id, any]).toEqual([c.id, true]);
+    }
+  });
+
+  // The guide promises "Impulse installs what is missing when it compiles". The
+  // library index lists headers for fewer than half of its releases (none for
+  // GxEPD2, WebSockets or the SparkFun MAX3010x library), so each header must
+  // lead the installer to the recipe's own library: through the core, the
+  // known-headers table, or a library named like the header.
+  test('every header a recipe includes leads the installer to that recipe\'s library', () => {
+    const { KNOWN_HEADERS, isCoreHeader } = require('../../../libraryService');
+    const ARCH = { avr: 'avr', esp32: 'esp32', esp32s2: 'esp32', esp32s3: 'esp32', esp32c3: 'esp32', esp32c6: 'esp32', 'nano-esp32': 'esp32', rp2040: 'rp2040' };
+    const BUNDLED = { esp32: ['SD.h'] }; // the ESP32 core ships its own SD library
+    const owners = new Map(Object.entries(KNOWN_HEADERS).map(([h, owner]) => [h.toLowerCase(), owner]));
+    const squash = (v) => String(v).toLowerCase().replace(/[^a-z0-9]/g, '');
+    const problems = [];
+    for (const c of COMPONENTS) {
+      for (const family of Object.keys(ARCH)) {
+        const recipe = recipeFor(c, family);
+        if (!recipe) continue;
+        const includes = [...recipe.sketch.matchAll(/^\s*#include\s*[<"]([^>"]+)[>"]/gm)].map((m) => m[1]);
+        for (const header of includes) {
+          const file = header.split('/').pop();
+          if (isCoreHeader(header, ARCH[family]) || (BUNDLED[ARCH[family]] || []).includes(file)) continue;
+          const owner = owners.get(file.toLowerCase());
+          if (owner === null) continue; // the core's own
+          if (owner !== undefined) {
+            if (!recipe.libs.some((lib) => lib.toLowerCase() === owner.toLowerCase())) problems.push(`${c.id} on ${family}: ${header} installs ${owner}, but the recipe uses ${recipe.libs.join(', ') || 'no library'}`);
+            continue;
+          }
+          if (recipe.libs.some((lib) => squash(lib) === squash(file.replace(/\.(h|hpp)$/, '')))) continue;
+          if (header.includes('/') && includes.some((other) => !other.includes('/') && owners.get(other.toLowerCase()))) continue; // inside a library the sketch already pulls in
+          problems.push(`${c.id} on ${family}: nothing tells the installer which library has ${header}`);
+        }
+      }
+    }
+    expect(problems).toEqual([]);
   });
 });
 
@@ -183,7 +282,7 @@ describe('component facts that ride with a request', () => {
   test('writes a [COMPONENT FACTS] block with the sketch for the board, or nothing', () => {
     const facts = componentFacts('Show DHT22 readings on an LCD', { fqbn: 'esp32:esp32:esp32s3' });
     expect(facts).toMatch(/^\[COMPONENT FACTS\] The message names DHT11 and LCD 16x2 I2C/);
-    expect(facts).toMatch(/Known-good sketch for the ESP32-S3/);
+    expect(facts).toMatch(/Known-good sketch for the ESP32-S3/); // dht is compiled for the S3 (recipes.verified.json)
     expect(facts.match(/```cpp/g)).toHaveLength(1); // the sketch only for the first part
     expect(componentFacts('make it faster', { fqbn: 'arduino:avr:uno' })).toBeNull();
   });
