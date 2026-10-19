@@ -96,5 +96,241 @@
    "date": "2026-10-19"
   }
  },
- "hardware": {}
+ "hardware": {},
+ "decoder": {
+  "esp32-ledc-core3": {
+   "fqbn": "esp32:esp32:esp32",
+   "core": "esp32:esp32@3.3.12",
+   "date": "2026-10-19",
+   "rewrite": true
+  },
+  "esp32-ledc-core2": {
+   "fqbn": "arduino:esp32:nano_nora",
+   "core": "arduino:esp32@2.0.18-arduino.5",
+   "date": "2026-10-19",
+   "rewrite": true
+  },
+  "esp32-timer-core3": {
+   "fqbn": "esp32:esp32:esp32",
+   "core": "esp32:esp32@3.3.12",
+   "date": "2026-10-19",
+   "rewrite": true
+  },
+  "esp32-timer-core2": {
+   "fqbn": "arduino:esp32:nano_nora",
+   "core": "arduino:esp32@2.0.18-arduino.5",
+   "date": "2026-10-19",
+   "rewrite": true
+  },
+  "esp32-espnow-recv-core3": {
+   "fqbn": "esp32:esp32:esp32",
+   "core": "esp32:esp32@3.3.12",
+   "date": "2026-10-19",
+   "rewrite": true
+  },
+  "esp32-espnow-recv-core2": {
+   "fqbn": "arduino:esp32:nano_nora",
+   "core": "arduino:esp32@2.0.18-arduino.5",
+   "date": "2026-10-19",
+   "rewrite": true
+  },
+  "esp32-espnow-send-core32": {
+   "fqbn": "esp32:esp32:esp32",
+   "core": "esp32:esp32@3.3.12",
+   "date": "2026-10-19",
+   "rewrite": true
+  },
+  "esp32-rgbledwrite-core2": {
+   "fqbn": "arduino:esp32:nano_nora",
+   "core": "arduino:esp32@2.0.18-arduino.5",
+   "date": "2026-10-19",
+   "rewrite": true
+  },
+  "esp32-hall-removed": {
+   "fqbn": "esp32:esp32:esp32",
+   "core": "esp32:esp32@3.3.12",
+   "date": "2026-10-19",
+   "rewrite": null
+  },
+  "esp32-softwareserial": {
+   "fqbn": "esp32:esp32:esp32",
+   "core": "esp32:esp32@3.3.12",
+   "date": "2026-10-19",
+   "rewrite": null
+  },
+  "esp8266-header-on-esp32": {
+   "fqbn": "esp32:esp32:esp32",
+   "core": "esp32:esp32@3.3.12",
+   "date": "2026-10-19",
+   "rewrite": true
+  },
+  "wifi-on-avr": {
+   "fqbn": "arduino:avr:uno",
+   "core": "arduino:avr@1.8.8",
+   "date": "2026-10-19",
+   "rewrite": null
+  },
+  "avr-serial-printf": {
+   "fqbn": "arduino:avr:uno",
+   "core": "arduino:avr@1.8.8",
+   "date": "2026-10-19",
+   "rewrite": null
+  },
+  "avr-serial1": {
+   "fqbn": "arduino:avr:uno",
+   "core": "arduino:avr@1.8.8",
+   "date": "2026-10-19",
+   "rewrite": null
+  },
+  "avr-input-pulldown": {
+   "fqbn": "arduino:avr:uno",
+   "core": "arduino:avr@1.8.8",
+   "date": "2026-10-19",
+   "rewrite": null
+  },
+  "avr-analog-resolution": {
+   "fqbn": "arduino:avr:uno",
+   "core": "arduino:avr@1.8.8",
+   "date": "2026-10-19",
+   "rewrite": null
+  },
+  "avr-wire-pins": {
+   "fqbn": "arduino:avr:uno",
+   "core": "arduino:avr@1.8.8",
+   "date": "2026-10-19",
+   "rewrite": true
+  },
+  "nodemcu-pin-names": {
+   "fqbn": "esp32:esp32:esp32",
+   "core": "esp32:esp32@3.3.12",
+   "date": "2026-10-19",
+   "rewrite": null
+  },
+  "missing-include-wifi": {
+   "fqbn": "esp32:esp32:esp32",
+   "core": "esp32:esp32@3.3.12",
+   "date": "2026-10-19",
+   "rewrite": true
+  },
+  "missing-include-wire": {
+   "fqbn": "arduino:avr:uno",
+   "core": "arduino:avr@1.8.8",
+   "date": "2026-10-19",
+   "rewrite": true
+  },
+  "missing-include-spi": {
+   "fqbn": "arduino:avr:uno",
+   "core": "arduino:avr@1.8.8",
+   "date": "2026-10-19",
+   "rewrite": true
+  },
+  "missing-include-eeprom": {
+   "fqbn": "arduino:avr:uno",
+   "core": "arduino:avr@1.8.8",
+   "date": "2026-10-19",
+   "rewrite": true
+  },
+  "missing-include-preferences": {
+   "fqbn": "esp32:esp32:esp32",
+   "core": "esp32:esp32@3.3.12",
+   "date": "2026-10-19",
+   "rewrite": true
+  },
+  "missing-include-servo": {
+   "fqbn": "arduino:avr:uno",
+   "core": "arduino:avr@1.8.8",
+   "date": "2026-10-19",
+   "rewrite": true
+  },
+  "smart-quotes": {
+   "fqbn": "arduino:avr:uno",
+   "core": "arduino:avr@1.8.8",
+   "date": "2026-10-19",
+   "rewrite": true
+  },
+  "missing-setup-loop": {
+   "fqbn": "arduino:avr:uno",
+   "core": "arduino:avr@1.8.8",
+   "date": "2026-10-19",
+   "rewrite": true
+  },
+  "redefinition-setup-loop": {
+   "fqbn": "arduino:avr:uno",
+   "core": "arduino:avr@1.8.8",
+   "date": "2026-10-19",
+   "rewrite": null
+  },
+  "lvalue-assign": {
+   "fqbn": "arduino:avr:uno",
+   "core": "arduino:avr@1.8.8",
+   "date": "2026-10-19",
+   "rewrite": true
+  },
+  "else-without-if": {
+   "fqbn": "arduino:avr:uno",
+   "core": "arduino:avr@1.8.8",
+   "date": "2026-10-19",
+   "rewrite": null
+  },
+  "missing-semicolon": {
+   "fqbn": "arduino:avr:uno",
+   "core": "arduino:avr@1.8.8",
+   "date": "2026-10-19",
+   "rewrite": null
+  },
+  "missing-brace-end": {
+   "fqbn": "arduino:avr:uno",
+   "core": "arduino:avr@1.8.8",
+   "date": "2026-10-19",
+   "rewrite": true
+  },
+  "unterminated-string": {
+   "fqbn": "arduino:avr:uno",
+   "core": "arduino:avr@1.8.8",
+   "date": "2026-10-19",
+   "rewrite": null
+  },
+  "expected-unqualified-id": {
+   "fqbn": "arduino:avr:uno",
+   "core": "arduino:avr@1.8.8",
+   "date": "2026-10-19",
+   "rewrite": null
+  },
+  "expected-primary-expression": {
+   "fqbn": "arduino:avr:uno",
+   "core": "arduino:avr@1.8.8",
+   "date": "2026-10-19",
+   "rewrite": null
+  },
+  "not-declared": {
+   "fqbn": "arduino:avr:uno",
+   "core": "arduino:avr@1.8.8",
+   "date": "2026-10-19",
+   "rewrite": null
+  },
+  "analog-pin-missing": {
+   "fqbn": "arduino:avr:uno",
+   "core": "arduino:avr@1.8.8",
+   "date": "2026-10-19",
+   "rewrite": null
+  },
+  "led-builtin-missing": {
+   "fqbn": "esp32:esp32:esp32",
+   "core": "esp32:esp32@3.3.12",
+   "date": "2026-10-19",
+   "rewrite": true
+  },
+  "compare-pointer-integer": {
+   "fqbn": "esp32:esp32:esp32",
+   "core": "esp32:esp32@3.3.12",
+   "date": "2026-10-19",
+   "rewrite": null
+  },
+  "string-literal-to-char": {
+   "fqbn": "esp32:esp32:esp32",
+   "core": "esp32:esp32@3.3.12",
+   "date": "2026-10-19",
+   "rewrite": null
+  }
+ }
 }

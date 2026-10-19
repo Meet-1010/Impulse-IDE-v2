@@ -27,8 +27,8 @@
      {
       "what": "Onboard RGB LED",
       "old": "neopixelWrite(pin, r, g, b)",
-      "new": "rgbLedWrite(pin, r, g, b)",
-      "error": "'neopixelWrite' was not declared in this scope"
+      "new": "rgbLedWrite(pin, r, g, b) is the new name; neopixelWrite still compiles on 3.3 as the old name",
+      "error": ""
      },
      {
       "what": "Removed functions",

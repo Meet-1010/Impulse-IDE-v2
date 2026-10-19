@@ -465,6 +465,7 @@ app.whenReady().then(() => {
     aiAgent.toolExecutor.docs = new DocsService({ cacheDir: path.join(app.getPath('userData'), 'docs-cache') });
     // Every compile, from anywhere, reports pins the board does not have.
     arduinoService.pinInspector = () => aiAgent.toolExecutor.checkPins();
+    arduinoService.sketchLinter = () => aiAgent.toolExecutor.lintSketch();
   }
   // Gateway requests say which app version sent them.
   aiAgent.providerOptions = { impulse: { version: app.getVersion() }, 'impulse-openai': { version: app.getVersion() } };

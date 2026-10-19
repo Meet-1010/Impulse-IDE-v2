@@ -1,4 +1,5 @@
 const { proofLine, docsProof, fixProof } = require('../knowledge/proof');
+const { lint, lintReport } = require('../knowledge/linter');
 const { validateToolCall } = require('./toolSchema');
 const { boundedOutput } = require('./retain');
 const { circuitToolResult } = require('../knowledge/circuitFacts');
@@ -246,6 +247,8 @@ class ToolExecutor {
         installedLibraries: compileResult.installedLibraries || [],
         pinIssues: compileResult.pinIssues || [],
         pinReport: compileResult.pinReport || null,
+        // What compiles but fails on the bench (Impulse's hardware linter).
+        ...(compileResult.lint?.length ? { lint: compileResult.lint.slice(0, 8).map((f) => ({ level: f.level, line: f.line, problem: f.message, fix: f.fix })) } : {}),
         output: boundedOutput(compileResult.output || '', 1200),
       };
     } catch (err) {
@@ -353,6 +356,31 @@ class ToolExecutor {
     const taken = info.pinsTaken || [];
     const issues = checkSketchPins(sketch, info, { taken, boardName: `the ${info.name}` });
     return { issues, report: pinReport(issues, { boardName: `the ${info.name}` }), board: info.name };
+  }
+
+  /**
+   * The hardware linter on the open sketch, with the selected board's facts
+   * (core version, LED_BUILTIN, USB CDC). Never throws: no board or no sketch
+   * means no findings.
+   */
+  async lintSketch(code = null) {
+    try {
+      const fqbn = await this.selectedFqbn().catch(() => '');
+      const sketch = code ?? (this.uiCallbacks?.getEditorCode ? await this.uiCallbacks.getEditorCode() : '');
+      if (!fqbn || !sketch) return { findings: [], report: '' };
+      const info = this.boardKnowledge ? await this.boardKnowledge.boardInfo(fqbn).catch(() => null) : null;
+      const pins = info?.pins && Object.keys(info.pins).length ? info.pins : null;
+      const ctx = {
+        fqbn,
+        coreVersion: String(info?.core || '').split(' ')[1] || '',
+        ledBuiltin: pins ? (pins.LED_BUILTIN ?? null) : undefined,
+        cdcOnBoot: /enabled/i.test(String(info?.boardOptions?.['USB CDC On Boot'] || '')),
+      };
+      const findings = lint(sketch, ctx);
+      return { findings, report: lintReport(findings) };
+    } catch {
+      return { findings: [], report: '' };
+    }
   }
 
   async executeListBoards() {
@@ -888,6 +916,8 @@ function buildFailure(result, kind) {
     error: [result.title || result.error?.message || result.error || (kind === 'upload' ? 'Upload failed' : 'Compilation failed'), result.hint].filter(Boolean).join(' '),
     excerpt: result.excerpt || '',
     diagnostics: (result.diagnostics || []).slice(0, 20),
+    // Impulse's error decoder: the cause and the fix of the errors it knows (no guessing needed).
+    ...(result.decoded?.length ? { decoded: result.decoded.slice(0, 3).map((d) => ({ error: d.title, cause: d.cause, fix: d.fix, line: d.line, proof: d.proof })) } : {}),
     summary: result.summary || [],
     output: boundedOutput(result.output || '', 2500),
   };

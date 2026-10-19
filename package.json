@@ -49,7 +49,9 @@
     "field-lab": "node scripts/build-field-lab.mjs",
     "knowledge:probe": "node scripts/knowledge-probe.mjs",
     "knowledge:audit": "node scripts/knowledge-audit.mjs",
-    "knowledge:recipes": "node scripts/knowledge-recipes.mjs"
+    "knowledge:recipes": "node scripts/knowledge-recipes.mjs",
+    "knowledge:errors": "node scripts/knowledge-errors.mjs",
+    "bench": "node scripts/embedbench.mjs"
   },
   "keywords": [
     "arduino",

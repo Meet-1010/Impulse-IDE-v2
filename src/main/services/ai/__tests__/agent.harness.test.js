@@ -107,6 +107,25 @@ describe('the verify guard', () => {
     expect(result.response).toMatch(/Sketch uses 1,000 bytes/);
   });
 
+  it('sends what the hardware linter finds back to the model once the sketch compiles', async () => {
+    const { agent, calls, executed } = agentWith([
+      { content: null, toolCalls: [{ id: '1', name: 'set_editor_code', arguments: { code: 'a' } }] },
+      { content: 'Written.', toolCalls: [] },
+      { content: null, toolCalls: [{ id: '2', name: 'set_editor_code', arguments: { code: 'b' } }] },
+      { content: 'Moved the sensor to GPIO 34.', toolCalls: [] },
+    ], { compile_sketch: { success: true, tool: 'compile_sketch', summary: ['Sketch uses 900,000 bytes (68%) of program storage space.'] } });
+    let lints = 0;
+    agent.toolExecutor.lintSketch = async () => (++lints === 1
+      ? { findings: [{ id: 'esp32-adc2-with-wifi', level: 'error', line: 9, message: 'GPIO 25 is an ADC2 pin, and ADC2 cannot read while Wi-Fi is on.', fix: 'Use an ADC1 pin.' }], report: 'Problem (line 9): GPIO 25 is an ADC2 pin, and ADC2 cannot read while Wi-Fi is on. Fix: Use an ADC1 pin.' }
+      : { findings: [], report: '' });
+    const result = await agent.processQuery('read the pot with wifi on', { hasFileOpen: true }, 'agent');
+    expect(executed).toEqual(['set_editor_code', 'compile_sketch', 'set_editor_code', 'compile_sketch']);
+    const lintMessage = calls[2].messages.find((m) => m.role === 'user' && /\[LINT\]/.test(m.content));
+    expect(lintMessage.content).toMatch(/compiles, but Impulse's hardware linter found what will fail on this board:\nProblem \(line 9\): GPIO 25 is an ADC2 pin/);
+    expect(result.toolResults.some((r) => r.tool === 'lint' && r.verify)).toBe(true);
+    expect(result.response).toMatch(/^Moved the sensor to GPIO 34\./);
+  });
+
   it('does not compile when nothing was edited, when the model compiled already, or outside agent mode', async () => {
     const a = agentWith([{ content: 'just talk', toolCalls: [] }]);
     await a.agent.processQuery('hi', { hasFileOpen: true }, 'agent');

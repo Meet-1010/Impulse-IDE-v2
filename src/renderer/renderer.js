@@ -2899,6 +2899,14 @@ async function compileSketch() {
                 output: result.data?.output || ''
             });
 
+            // It compiles; what the hardware linter found that fails on the board goes to Problems (without taking focus).
+            const lint = result.data?.lint || [];
+            if (lint.length) {
+                const file = String(state.currentSketch || '').split(/[\\/]/).pop() || 'sketch.ino';
+                showProblem(`Impulse found ${lint.length === 1 ? 'one thing that compiles' : `${lint.length} things that compile`} but will not work on this board.`, { note: true, focus: false });
+                showProblem(lint.map((f) => `${file}:${f.line}:1: ${f.level}: ${f.message} Fix: ${f.fix}`).join('\n'), { focus: false });
+                logToConsole(`Impulse found ${lint.length} problem${lint.length === 1 ? '' : 's'} the compiler cannot see: see Problems.`, 'warning');
+            }
             return { ok: true, size: result.data?.programSize ?? null, percent: result.data?.usagePercent ?? null, summary: result.data?.summary || [] };
         } else {
             if (result.code === 'BUSY') {
@@ -4404,7 +4412,8 @@ function logToConsole(message, type = 'info') {
 }
 
 // note: the message is Impulse's own sentence (UI font), not compiler output.
-function showProblem(message, { note = false } = {}) {
+// focus: bring the Problems tab to the front (not for findings on a build that worked).
+function showProblem(message, { note = false, focus = true } = {}) {
     const problemsEl = document.getElementById('problemsOutput');
     if (!problemsEl) return;
     problemsEl.querySelector('.problems-empty')?.remove();
@@ -4413,7 +4422,7 @@ function showProblem(message, { note = false } = {}) {
         noteEl.className = 'problem-note';
         noteEl.textContent = message;
         problemsEl.appendChild(noteEl);
-        document.querySelector('.output-tab[data-tab="problems"]')?.click();
+        if (focus) document.querySelector('.output-tab[data-tab="problems"]')?.click();
         return;
     }
 
@@ -4477,7 +4486,7 @@ function showProblem(message, { note = false } = {}) {
     });
 
     // Auto-switch to Problems tab if errors exist
-    if (lines.length > 0) {
+    if (focus && lines.length > 0) {
         document.querySelector('.output-tab[data-tab="problems"]')?.click();
     }
 }

@@ -4,6 +4,7 @@ const fs = require('fs').promises;
 const ErrorHandler = require('../utils/errorHandler');
 const { BuildJobs } = require('./buildJobs');
 const { LibraryService } = require('./libraryService');
+const { decode: decodeErrors } = require('./ai/knowledge/errorDecoder');
 const { parseMemory, summaryLines, parseDiagnostics, classifyFailure, firstErrorLine } = require('./buildOutput');
 const { PlatformIO, projectRoot } = require('./platformio');
 const { extraCoreFor } = require('./toolchain');
@@ -55,6 +56,8 @@ class ArduinoService {
     this.autoInstallLibraries = true;
     /** Set by the main process: checks the sketch's pins against the board. */
     this.pinInspector = null;
+    // The hardware linter (set by main.js): what compiles but fails on the bench.
+    this.sketchLinter = null;
     /** One compile or upload at a time, watched live (see buildJobs.js). */
     this.jobs = new BuildJobs();
     /** How long a build may stay silent, and run in all (tests shorten these). */
@@ -628,14 +631,17 @@ class ArduinoService {
       // It compiles; whether the pins exist on this board is another question.
       const pins = this.pinInspector ? await this.pinInspector({ sketchPath, fqbn: boardFQBN }).catch(() => null) : null;
       if (pins?.report) summary.push(...pins.report.split('\n'));
+      const linted = this.sketchLinter ? await this.sketchLinter({ sketchPath, fqbn: boardFQBN }).catch(() => null) : null;
+      const lint = (linted?.findings || []).filter((f) => f.level !== 'info');
+      if (lint.length) summary.push(`Impulse found ${lint.length === 1 ? 'one thing that compiles' : `${lint.length} things that compile`} but will fail on the board: ${lint.slice(0, 2).map((f) => `line ${f.line}: ${f.message}`).join(' ')}`);
       return {
         success: true, output, warnings, memory, summary, diagnostics, installedLibraries,
-        pinIssues: pins?.issues || [], pinReport: pins?.report || null,
+        pinIssues: pins?.issues || [], pinReport: pins?.report || null, lint,
         programSize: memory?.flash?.used ?? null, usagePercent: memory?.flash?.percent ?? null,
         message: summary[0] || 'Compiled.',
       };
     }
-    throw this._failure(output, 'compile', { reason, code, memory, diagnostics, installedLibraries });
+    throw this._failure(output, 'compile', { reason, code, memory, diagnostics, installedLibraries, fqbn: boardFQBN });
   }
 
   /**
@@ -696,14 +702,14 @@ class ArduinoService {
         warnings: compiled?.warnings || [], memory: compiled?.memory || null, summary: compiled?.summary || [], diagnostics: compiled?.diagnostics || [],
       };
     }
-    throw this._failure(output, 'upload', { reason, code, memory: compiled?.memory });
+    throw this._failure(output, 'upload', { reason, code, memory: compiled?.memory, fqbn: boardFQBN });
   }
 
   /**
    * A coded Error for a failed job: what went wrong (title), what to do
    * (hint), the first line worth quoting, the diagnostics and the output.
    */
-  _failure(output, kind, { reason = null, code = null, memory = null, diagnostics = null, override = null, errors = null, installedLibraries = [] } = {}) {
+  _failure(output, kind, { reason = null, code = null, memory = null, diagnostics = null, override = null, errors = null, installedLibraries = [], fqbn = '' } = {}) {
     let f;
     if (reason === 'CANCELLED') f = { code: 'CANCELLED', title: 'Stopped', hint: '' };
     else if (reason === 'IDLE') f = { code: 'TIMEOUT', title: kind === 'upload' ? 'The upload stopped responding' : 'The build stopped responding', hint: `Nothing was printed for ${Math.max(1, Math.round((kind === 'upload' ? this.timeouts.uploadIdleMs : this.timeouts.compileIdleMs) / 60000))} minutes, so Impulse stopped it. Try again; if it happens again, check the cable and the port.` };
@@ -712,6 +718,10 @@ class ArduinoService {
     else f = override || classifyFailure(output, kind, { memory });
     const legacy = ArduinoService.explainToolchainError(output);
     if (legacy && (f.code === 'COMPILE_FAILED' || f.code === 'UPLOAD_FAILED')) f = { ...f, title: legacy };
+    // The error decoder knows the common compile errors: its cause and fix
+    // replace the generic "the sketch has a compile error".
+    const decoded = ['CODE_ERROR', 'LINK_ERROR', 'LIBRARY_MISSING', 'COMPILE_FAILED'].includes(f.code) ? decodeErrors(output, { fqbn }) : [];
+    if (decoded.length) f = { ...f, title: decoded[0].title, hint: `${decoded[0].cause} Fix: ${decoded[0].fix}` };
     const diag = diagnostics || parseDiagnostics(output);
     const err = new Error(f.title);
     err.code = f.code;
@@ -725,6 +735,7 @@ class ArduinoService {
     err.memory = memory;
     err.summary = summaryLines(memory);
     err.installedLibraries = installedLibraries;
+    err.decoded = decoded;
     return err;
   }
 
@@ -745,6 +756,7 @@ class ArduinoService {
       diagnostics: Array.isArray(error?.diagnostics) ? error.diagnostics : [],
       memory: error?.memory || null,
       summary: Array.isArray(error?.summary) ? error.summary : [],
+      decoded: Array.isArray(error?.decoded) ? error.decoded : [],
     };
   }
 
@@ -1056,7 +1068,7 @@ class ArduinoService {
         const { code, output, reason } = await this._runStreaming(job, args, { cwd: dir, idleMs: this.timeouts.uploadIdleMs, maxMs: this.timeouts.uploadMaxMs });
         const memory = parseMemory(output);
         if (code === 0) return { success: true, output, memory, summary: summaryLines(memory), message: `Uploaded with ${programmerId}` };
-        throw this._failure(output, 'upload', { reason, code, memory });
+        throw this._failure(output, 'upload', { reason, code, memory, fqbn: boardFQBN });
       });
     } catch (error) {
       const handled = this._handled(error, 'Arduino Upload (programmer)', { sketchPath, boardFQBN, programmerId });

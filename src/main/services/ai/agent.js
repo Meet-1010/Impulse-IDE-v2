@@ -369,6 +369,17 @@ class AIAgent {
             continue;
           }
           if (pins?.issues?.length) response.content = `${response.content || ''}\n\n${pins.report}`.trim();
+          // It compiles and the pins exist; the hardware linter knows what still fails on the bench.
+          const linted = await this.toolExecutor.lintSketch?.().catch(() => null);
+          const lintErrors = (linted?.findings || []).filter((f) => f.level === 'error');
+          if (lintErrors.length) {
+            toolResults.push({ success: false, tool: 'lint', verify: true, findings: linted.findings });
+            messages.push({ role: 'assistant', content: response.content || '' });
+            messages.push({ role: 'user', content: `[LINT] The sketch compiles, but Impulse's hardware linter found what will fail on this board:\n${linted.report}\nFix these, then tell the user what you changed and why.` });
+            await climb();
+            iteration++;
+            continue;
+          }
           if (check && check.success && Array.isArray(check.summary) && check.summary.length) {
             response.content = `${response.content || ''}\n\n${check.summary[0]}`.trim();
           }

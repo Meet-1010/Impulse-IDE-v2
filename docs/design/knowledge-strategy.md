@@ -134,7 +134,8 @@ model is having a bad day.
    battery-powered board, `delay()` or `Serial.print()` inside an interrupt,
    a missing `volatile`, `String` concatenation in a loop on an Uno,
    `millis()` stored in an `int`, two parts on one I²C address,
-   `SoftwareSerial` on an ESP32. Today only the pin rules exist.
+   `SoftwareSerial` on an ESP32. Today: 28 rules (`knowledge/linter.js`), in
+   every build, the Problems tab and the agent's verify step.
 3. **Pin planner.** Given a board and the parts, assigns pins that satisfy
    every constraint (hardware buses, PWM/ADC/interrupt capability, no
    strapping, flash or USB pins, ADC1 when Wi-Fi is on). The model asks the
@@ -144,7 +145,9 @@ model is having a bad day.
    budget, a relay without a flyback diode.
 5. **Error decoder.** Compiler, linker and upload errors → cause and exact
    fix, from the drift tables and the fix playbooks. Most common errors get
-   fixed without spending a model call.
+   fixed without spending a model call. Today: 56 rules
+   (`knowledge/errorDecoder.js`), 39 proven on real compilers with their
+   automatic rewrites (`npm run knowledge:errors`).
 6. **Crash decoder.** An ESP32 "Guru Meditation" backtrace becomes the file
    and line in the user's sketch, using the build's own symbols; brownouts
    and watchdog resets are named in plain words.
@@ -185,7 +188,7 @@ delete what they shared.
 
 ## 6. Proof: a benchmark that runs every night
 
-**EmbedBench**: a few hundred real tasks (student projects, sensors and
+**EmbedBench** (v0 today: 60 tasks on six boards, `bench/`): a few hundred real tasks (student projects, sensors and
 displays, ESP32 features, errors to fix, wiring bugs to find), each with a
 board, its parts, the request, and a machine-checked definition of success:
 it compiles, its `@expect` checks pass in the simulator, and for a subset, on
