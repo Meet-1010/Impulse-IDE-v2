@@ -1,0 +1,100 @@
+{
+ "note": "Evidence for proof.js. Written by npm run knowledge:audit -- --write (audit) and npm run knowledge:probe -- --write (probes); hardware entries come from runs on real boards. Do not edit by hand.",
+ "audit": {
+  "date": "2026-10-19",
+  "cores": {
+   "arduino:avr": "1.8.8",
+   "arduino:esp32": "2.0.18-arduino.5",
+   "esp32:esp32": "3.3.12"
+  },
+  "boards": [
+   "atmega2560-bare",
+   "atmega328p-bare",
+   "d1-mini32",
+   "d1-r32",
+   "esp32-c3-devkitm",
+   "esp32-c3-supermini",
+   "esp32-c6-devkitc",
+   "esp32-c6-supermini",
+   "esp32-cam",
+   "esp32-dev-module",
+   "esp32-devkit-v1",
+   "esp32-pico-d4",
+   "esp32-poe",
+   "esp32-s2-devkit",
+   "esp32-s3-devkitc",
+   "esp32-s3-supermini",
+   "esp32-wrover",
+   "esp32-wrover-kit",
+   "feather-esp32",
+   "feather-esp32-v2",
+   "firebeetle-esp32",
+   "firebeetle2-esp32e",
+   "heltec-wifi-kit-32-v3",
+   "heltec-wifi-lora-32-v3",
+   "leonardo",
+   "lilygo-t-display",
+   "lilygo-t-display-s3",
+   "lilypad",
+   "lolin-c3-mini",
+   "lolin-d32",
+   "lolin-s2-mini",
+   "lolin-s3-mini",
+   "lolin32",
+   "lolin32-lite",
+   "m5stack-atoms3",
+   "m5stack-core2",
+   "mega",
+   "micro",
+   "nano",
+   "nano-esp32",
+   "nodemcu-32s",
+   "pro-micro",
+   "pro-mini-3v3",
+   "pro-mini-5v",
+   "qtpy-esp32s3",
+   "ttgo-lora32",
+   "uno",
+   "xiao-esp32c3",
+   "xiao-esp32c6",
+   "xiao-esp32s3"
+  ],
+  "families": [
+   "avr-atmega2560",
+   "avr-atmega328p",
+   "avr-atmega32u4",
+   "esp32",
+   "esp32-c3",
+   "esp32-c6",
+   "esp32-s2",
+   "esp32-s3"
+  ]
+ },
+ "probes": {
+  "avr": {
+   "fqbn": "arduino:avr:uno",
+   "core": "arduino:avr@1.8.8",
+   "sketch": "d75db571fadc",
+   "date": "2026-10-19"
+  },
+  "esp32": {
+   "fqbn": "esp32:esp32:esp32",
+   "core": "esp32:esp32@3.3.12",
+   "sketch": "89ef701e602f",
+   "date": "2026-10-19"
+  },
+  "esp32-nano": {
+   "fqbn": "arduino:esp32:nano_nora",
+   "core": "arduino:esp32@2.0.18-arduino.5",
+   "sketch": "dbf2682d6967",
+   "date": "2026-10-19"
+  },
+  "rp2040": {
+   "fqbn": "rp2040:rp2040:rpipico",
+   "core": "rp2040:rp2040@6.3.0",
+   "sketch": "30db6132f27c",
+   "date": "2026-10-19"
+  }
+ },
+ "hardware": {}
+}

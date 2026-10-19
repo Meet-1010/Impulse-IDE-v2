@@ -167,10 +167,10 @@ describe('component recipes (compiled sketches)', () => {
     expect(text).toMatch(/Wiring for the ESP32-S3/);
     expect(text).toMatch(/Install: DHT sensor library/);
     expect(verifiedFor('dht', 'esp32s3')).toMatchObject({ fqbn: 'esp32:esp32:esp32s3' });
-    expect(text).toMatch(/Known-good sketch for the ESP32-S3 \(core 3\.x\) \(Impulse compiled it for esp32:esp32:esp32s3 with esp32:esp32@/);
+    expect(text).toMatch(/Known-good sketch for the ESP32-S3 \(core 3\.x\)\. Proof L3, compiled by Impulse: compiled for esp32:esp32:esp32s3 with esp32:esp32@/);
     // A family nobody compiled for: the sketch comes with a warning instead of a promise.
     const unproven = componentText(dht, { family: 'esp8266' });
-    expect(unproven).toMatch(/not compiled by Impulse for it yet/);
+    expect(unproven).toMatch(/Proof L0, not yet checked: not compiled by Impulse for this family yet/);
     expect(unproven).not.toMatch(/Known-good/);
     expect(text).toMatch(/```cpp\n#include <DHT.h>/);
     expect(componentText(dht, { family: 'esp32s3', withSketch: false })).not.toMatch(/```cpp/);

@@ -5,6 +5,7 @@
  * any installed core; boards whose core isn't installed are found with
  * search() and named with the core to install.
  */
+const { proof, proofLine, coreProof, boardProof, driftProof, guideProof } = require('./proof');
 const { readDefinitions, pinFacts, variantHeaders } = require('./pinsHeader');
 const { familyOf, familyById, guideText } = require('./mcuGuide');
 const records = require('./boardRecords');
@@ -120,6 +121,12 @@ class BoardKnowledge {
       const drift = records.driftText(records.platformOf(d.fqbn), d.coreVersion);
       if (drift) info.coreApi = drift;
     }
+    // How each part of this answer is known (knowledge/proof.js).
+    info.proof = {
+      pins: proofLine(coreProof(info.core)),
+      notes: layer?.entry ? proofLine(boardProof(layer.entry)) : (layer ? proofLine(proof(0, "Impulse's family notes")) : undefined),
+      coreApi: info.coreApi ? proofLine(driftProof(records.platformOf(d.fqbn), d.coreVersion)) : undefined,
+    };
     if (raw) {
       info.definitions = [...defs.entries()].slice(0, 400).map(([name, v]) => `${name} = ${v.value}`);
     }
@@ -163,7 +170,7 @@ class BoardKnowledge {
       const flash = map.flash?.length ? ` Pins ${map.flash.map(([lo, hi]) => (lo === hi ? lo : `${lo}–${hi}`)).join(', ')} are the flash: never use them.` : '';
       parts.push(`pins ${ranges} and no others${inputOnly}${flash}`);
     }
-    const text = [`[BOARD FACTS, from the installed core] ${parts.join('; ')}.`, ...info.notes.slice(0, 3)];
+    const text = [`[BOARD FACTS, proof L2: read from the installed core] ${parts.join('; ')}.`, ...info.notes.slice(0, 3)];
     text.push('Use the core\'s constants (LED_BUILTIN, SDA, A0…); call get_board_info, get_mcu_guide or get_component_guide before guessing a pin, voltage or I2C address.');
     const notes = records.notesText(info.fqbn, { familyId: info.family, coreVersion: (info.core.split(' ')[1] || '') });
     return notes ? `${text.join(' ')}\n${notes}` : text.join(' ');
@@ -173,7 +180,7 @@ class BoardKnowledge {
   async mcuGuide({ chip, fqbn } = {}) {
     if (chip && /^general$/i.test(chip)) {
       const { GENERAL } = require('./mcuGuide');
-      return `# ${GENERAL.title}\n${GENERAL.facts.map((f) => `- ${f}`).join('\n')}`;
+      return `# ${GENERAL.title}\n${GENERAL.facts.map((f) => `- ${f}`).join('\n')}\n${proofLine(proof(0, "Impulse's general rules"))}`;
     }
     let family = chip ? familyById(chip) : null;
     let coreVersion = '';
@@ -186,7 +193,7 @@ class BoardKnowledge {
       const { FAMILIES } = require('./mcuGuide');
       return `No guide for "${chip}". Known families: ${FAMILIES.map((f) => f.id).join(', ')}, or "general".`;
     }
-    return guideText(family, { coreVersion });
+    return `${guideText(family, { coreVersion })}\n${proofLine(guideProof(family.id))}`;
   }
 
   /**
@@ -200,7 +207,7 @@ class BoardKnowledge {
     for (const b of records.searchCatalog(query)) {
       if (seen.has(b.fqbn)) continue;
       seen.add(b.fqbn);
-      out.push({ name: b.name, fqbn: b.fqbn, core: b.platform, installed: null, catalog: true, note: b.india });
+      out.push({ name: b.name, fqbn: b.fqbn, core: b.platform, installed: null, catalog: true, note: b.india, proof: proofLine(boardProof(b)) });
     }
     const listed = await this.runCli(['board', 'listall', query, '--format', 'json'], { timeout: 20000 });
     if (listed?.success) {

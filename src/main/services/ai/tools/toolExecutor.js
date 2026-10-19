@@ -1,3 +1,4 @@
+const { proofLine, docsProof, fixProof } = require('../knowledge/proof');
 const { validateToolCall } = require('./toolSchema');
 const { boundedOutput } = require('./retain');
 const { circuitToolResult } = require('../knowledge/circuitFacts');
@@ -326,6 +327,8 @@ class ToolExecutor {
       ]);
       if (known && (known.local?.length || known.shared?.length)) {
         failure.knownFixes = known;
+        const worked = (known.local?.length || 0) + (known.shared || []).reduce((n, f) => n + (Number(f.count) || 1), 0);
+        failure.knownFixesProof = proofLine(fixProof(worked, known.shared?.length ? 'shared' : 'local'));
         failure.note = `${failure.note ? `${failure.note} ` : ''}This error was seen before: knownFixes lists what fixed it (local = on this computer, shared = other Impulse users). Apply the matching fix before trying anything else.`;
       }
     } catch { /* known fixes are a bonus */ }
@@ -383,7 +386,7 @@ class ToolExecutor {
       if (!url) return { success: false, error: 'Give a url, or call action "list" first.' };
       const page = await this.docs.read(url, { focus: String(args.focus || '').slice(0, 120) });
       return page.ok
-        ? { success: true, url: page.url, title: page.title, focus: args.focus || null, truncated: !!page.truncated, cached: !!page.cached, text: page.text }
+        ? { success: true, url: page.url, title: page.title, focus: args.focus || null, truncated: !!page.truncated, cached: !!page.cached, proof: proofLine(docsProof(page.url)), text: page.text }
         : { success: false, error: page.error, url };
     }
     return { success: false, error: `Unknown read_docs action "${args.action}". Use list or read.` };

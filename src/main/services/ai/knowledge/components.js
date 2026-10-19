@@ -6,6 +6,7 @@
  * a compiled, known-good sketch for the common ones.
  */
 
+const { proofLine, componentProof, recipeProof } = require('./proof');
 const { RECIPES } = require('./recipes');
 
 const COMPONENTS = [
@@ -586,15 +587,17 @@ function componentText(c, { family = null, withSketch = true } = {}) {
   if (c.i2c?.length) lines.push(`- I2C address: ${c.i2c.join(' or ')}`);
   if (c.library) lines.push(`- Library: ${c.library}`);
   for (const n of c.notes || []) lines.push(`- ${n}`);
+  lines.push(`- Part facts: ${proofLine(componentProof(c))}`);
   const r = family ? recipeFor(c, family) : null;
   if (r) {
     const label = FAMILY_LABEL[family] || family;
     if (r.wiring.length) lines.push(`- Wiring for the ${label}: ${r.wiring.join('; ')}.`);
     if (r.libs.length) lines.push(`- Install: ${r.libs.join(', ')} (Library Manager names; Impulse installs what is missing when it compiles).`);
     if (withSketch) {
+      const p = proofLine(recipeProof(c.id, family, r.verified));
       const intro = r.verified
-        ? `Known-good sketch for the ${label} (Impulse compiled it for ${r.verified.fqbn} with ${r.verified.core}; adapt it rather than starting from memory):`
-        : `Sketch for the ${label}, written for this family but not compiled by Impulse for it yet: compile before relying on it.`;
+        ? `Known-good sketch for the ${label}. ${p} Adapt it rather than starting from memory:`
+        : `Sketch for the ${label}. ${p}`;
       lines.push('', intro, '```cpp', r.sketch.trim(), '```');
     }
   }

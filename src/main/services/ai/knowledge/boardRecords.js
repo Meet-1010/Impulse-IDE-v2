@@ -8,6 +8,7 @@
  * Pure data and functions, no I/O.
  * @module main/services/ai/knowledge/boardRecords
  */
+const { proof, proofTag, boardProof, driftProof } = require('./proof');
 const { boards: CATALOG } = require('./boards/catalog.json');
 const FAMILIES = require('./boards/families.json');
 const RECORDS = require('./boards/records.json');
@@ -168,6 +169,7 @@ function notesText(fqbn, { familyId = null, coreVersion = '' } = {}) {
   if (family?.notes?.length) lines.push(family.notes[0]);
   const drift = driftText(platformOf(fqbn), coreVersion, { max: 4, compact: true });
   if (drift) lines.push(drift);
+  lines.push(`Proof: notes ${proofTag(entry ? boardProof(entry) : proof(0))}${drift ? `; core API ${proofTag(driftProof(platformOf(fqbn), coreVersion))}` : ''}.`);
   lines.push('get_board_info has the full notes, get_mcu_guide the chip\'s limits.');
   return lines.join('\n');
 }

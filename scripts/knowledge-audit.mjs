@@ -10,7 +10,9 @@
 //   node scripts/knowledge-audit.mjs                 # every installed core
 //   node scripts/knowledge-audit.mjs --config-file X # another arduino-cli config
 //   node scripts/knowledge-audit.mjs esp32           # only boards of this platform
+//   node scripts/knowledge-audit.mjs --write         # record what passed in knowledge/proofs.json (proof L2)
 import { spawnSync } from 'node:child_process';
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
@@ -24,7 +26,7 @@ const { mapFor, checkPin } = require(path.join(root, 'src/main/services/ai/knowl
 const args = process.argv.slice(2);
 const configIndex = args.indexOf('--config-file');
 const cliArgs = configIndex >= 0 ? ['--config-file', args[configIndex + 1]] : [];
-const only = args.filter((a, i) => !a.startsWith('--') && i !== configIndex + 1);
+const only = args.filter((a, i) => !a.startsWith('--') && (configIndex < 0 || i !== configIndex + 1));
 const cli = process.env.ARDUINO_CLI || 'arduino-cli';
 const run = async (a, opts = {}) => {
   const res = spawnSync(cli, [...cliArgs, ...a], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout: opts.timeout || 60000 });
@@ -60,7 +62,12 @@ function pinsMentioned(text) {
 }
 
 let checked = 0;
+// What passed, for proofs.json: boards whose record agrees with their core,
+// and chip families whose pin table no core contradicted.
+const passed = new Set();
+const familiesChecked = new Set();
 for (const board of wanted) {
+  const before = problems.length;
   if (!known.has(board.fqbn)) {
     note(board.id, 'catalog', `FQBN ${board.fqbn} is not in the installed core`);
     continue;
@@ -122,6 +129,23 @@ for (const board of wanted) {
       note(board.id, 'record', `the record says ${label} is GPIO ${claim[1]}, the core says ${name} = ${real}`);
     }
   }
+  if (problems.length === before) passed.add(board.id);
+  if (map && problems.length === before) familiesChecked.add(info.family);
+}
+
+if (args.includes('--write')) {
+  const file = path.join(root, 'src/main/services/ai/knowledge/proofs.json');
+  const proofs = JSON.parse(fs.readFileSync(file, 'utf8'));
+  const cores = await run(['core', 'list', '--format', 'json']);
+  const list = cores.success ? (JSON.parse(cores.stdout).platforms || []) : [];
+  proofs.audit = {
+    date: new Date().toISOString().slice(0, 10),
+    cores: Object.fromEntries(list.map((c) => [c.id, c.installed_version]).filter(([id]) => platforms.has(id))),
+    boards: [...passed].sort(),
+    families: [...familiesChecked].sort(),
+  };
+  fs.writeFileSync(file, `${JSON.stringify(proofs, null, 1)}\n`);
+  console.log(`Recorded ${passed.size} boards and ${familiesChecked.size} chip families in ${path.relative(root, file)}.`);
 }
 
 console.log(`${checked} boards read from their cores.`);
