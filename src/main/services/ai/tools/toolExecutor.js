@@ -364,7 +364,7 @@ class ToolExecutor {
    * (core version, LED_BUILTIN, USB CDC). Never throws: no board or no sketch
    * means no findings.
    */
-  async lintSketch(code = null) {
+  async lintSketch(code = null, { built = false } = {}) {
     try {
       const fqbn = await this.selectedFqbn().catch(() => '');
       const sketch = code ?? (this.uiCallbacks?.getEditorCode ? await this.uiCallbacks.getEditorCode() : '');
@@ -376,7 +376,17 @@ class ToolExecutor {
         coreVersion: String(info?.core || '').split(' ')[1] || '',
         ledBuiltin: pins ? (pins.LED_BUILTIN ?? null) : undefined,
         cdcOnBoot: /enabled/i.test(String(info?.boardOptions?.['USB CDC On Boot'] || '')),
+        built,
       };
+      // The sketch's other tabs, so a Serial.begin() in another file counts.
+      const sketchPath = this.uiCallbacks?.getCurrentSketchPath ? await this.uiCallbacks.getCurrentSketchPath().catch(() => '') : '';
+      if (sketchPath) {
+        const fs = require('fs');
+        const path = require('path');
+        const dir = path.dirname(sketchPath);
+        ctx.project = fs.readdirSync(dir).filter((f) => /\.(?:ino|cpp|c|h|hpp)$/i.test(f) && path.join(dir, f) !== sketchPath)
+          .slice(0, 20).map((f) => { try { return fs.readFileSync(path.join(dir, f), 'utf8'); } catch { return ''; } }).join('\n');
+      }
       const findings = lint(sketch, ctx);
       return { findings, report: lintReport(findings) };
     } catch {

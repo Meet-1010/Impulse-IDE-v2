@@ -372,7 +372,7 @@ async function verifyLoop(task, dir, name, code, conversation, instructions) {
       built = await tryCompile(current);
     }
   }
-  const lintErrors = lint(current, ctx).filter((f) => f.level === 'error');
+  const lintErrors = lint(current, { ...ctx, built: built.status !== 'error' }).filter((f) => f.level === 'error');
   let extra = null;
   if (built.status === 'error' || lintErrors.length) {
     const decoded = built.status === 'error' ? decode(built.error, { fqbn: ctx.fqbn }) : [];

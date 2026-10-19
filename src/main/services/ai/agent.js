@@ -390,7 +390,7 @@ class AIAgent {
           }
           if (pins?.issues?.length) response.content = `${response.content || ''}\n\n${pins.report}`.trim();
           // It compiles and the pins exist; the hardware linter knows what still fails on the bench.
-          const linted = await this.toolExecutor.lintSketch?.().catch(() => null);
+          const linted = await this.toolExecutor.lintSketch?.(null, { built: true }).catch(() => null);
           const lintErrors = (linted?.findings || []).filter((f) => f.level === 'error');
           if (lintErrors.length) {
             toolResults.push({ success: false, tool: 'lint', verify: true, findings: linted.findings });

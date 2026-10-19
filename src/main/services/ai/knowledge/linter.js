@@ -119,7 +119,7 @@ const espMajor = (ctx) => (isEsp32(ctx) ? majorOf(ctx.coreVersion) : null);
  */
 const RULES = [
   {
-    id: 'esp32-ledc-core2-api', level: 'error', proofLevel: 3,
+    id: 'esp32-ledc-core2-api', level: 'error', proofLevel: 3, compileError: true,
     when: (ctx) => espMajor(ctx) >= 3,
     test: (s) => { const m = /\bledc(?:Setup|AttachPin)\s*\(/.exec(s); return m && { index: m.index }; },
     message: 'ledcSetup/ledcAttachPin are the core 2 LEDC API; this ESP32 core is 3.x, where they no longer exist.',
@@ -127,7 +127,7 @@ const RULES = [
     rewrite: ledcToCore3,
   },
   {
-    id: 'esp32-ledc-core3-api', level: 'error', proofLevel: 3,
+    id: 'esp32-ledc-core3-api', level: 'error', proofLevel: 3, compileError: true,
     when: (ctx) => espMajor(ctx) === 2,
     test: (s) => { const m = /\bledcAttach\s*\(/.exec(s); return m && { index: m.index }; },
     message: 'ledcAttach is the core 3 LEDC API; this board\'s core is 2.x (Arduino\'s Nano ESP32 core is 2.0.x).',
@@ -135,7 +135,7 @@ const RULES = [
     rewrite: ledcToCore2,
   },
   {
-    id: 'esp32-timer-core2-api', level: 'error', proofLevel: 3,
+    id: 'esp32-timer-core2-api', level: 'error', proofLevel: 3, compileError: true,
     when: (ctx) => espMajor(ctx) >= 3,
     test: (s) => { const m = /\btimerBegin\s*\(\s*[^,()]+,\s*[^,()]+,|\btimerAlarm(?:Write|Enable)\s*\(/.exec(s); return m && { index: m.index }; },
     message: 'This is the core 2 timer API; on this ESP32 core (3.x) timerBegin takes a frequency and the alarm calls became timerAlarm.',
@@ -143,7 +143,7 @@ const RULES = [
     rewrite: timerToCore3,
   },
   {
-    id: 'esp32-timer-core3-api', level: 'error', proofLevel: 3,
+    id: 'esp32-timer-core3-api', level: 'error', proofLevel: 3, compileError: true,
     when: (ctx) => espMajor(ctx) === 2,
     test: (s) => { const m = /\btimerBegin\s*\(\s*[^,()]+\s*\)|\btimerAlarm\s*\(/.exec(s); return m && { index: m.index }; },
     message: 'This is the core 3 timer API; this board\'s core is 2.x.',
@@ -151,7 +151,7 @@ const RULES = [
     rewrite: timerToCore2,
   },
   {
-    id: 'esp32-espnow-core2-callback', level: 'error', proofLevel: 3,
+    id: 'esp32-espnow-core2-callback', level: 'error', proofLevel: 3, compileError: true,
     when: (ctx) => espMajor(ctx) >= 3,
     test: (s) => {
       const m = /void\s+(\w+)\s*\(\s*const\s+uint8_t\s*\*\s*\w+\s*,\s*const\s+uint8_t\s*\*\s*\w+\s*,\s*int\s+\w+\s*\)/.exec(s);
@@ -162,7 +162,7 @@ const RULES = [
     rewrite: espNowRecvToCore3,
   },
   {
-    id: 'esp32-espnow-core3-callback', level: 'error', proofLevel: 3,
+    id: 'esp32-espnow-core3-callback', level: 'error', proofLevel: 3, compileError: true,
     when: (ctx) => espMajor(ctx) === 2,
     test: (s) => { const m = /\besp_now_recv_info_t\b/.exec(s); return m && { index: m.index }; },
     message: 'esp_now_recv_info_t is core 3; on this core (2.x) the receive callback gets the sender\'s MAC address.',
@@ -170,14 +170,14 @@ const RULES = [
     rewrite: espNowRecvToCore2,
   },
   {
-    id: 'esp32-espnow-send-callback', level: 'error', proofLevel: 3,
+    id: 'esp32-espnow-send-callback', level: 'error', proofLevel: 3, compileError: true,
     when: (ctx) => espMajor(ctx) >= 3 && (espMajor(ctx) > 3 || minorOf(ctx.coreVersion) >= 2),
     test: (s) => { const m = /void\s+\w+\s*\(\s*const\s+uint8_t\s*\*\s*\w+\s*,\s*esp_now_send_status_t\s+\w+\s*\)/.exec(s); return m && /esp_now_register_send_cb/.test(s) ? { index: m.index } : null; },
     message: 'From core 3.2 the ESP-NOW send callback gets a const wifi_tx_info_t * instead of the MAC address.',
     fix: 'void onSent(const wifi_tx_info_t *info, esp_now_send_status_t status) { … } (the peer is info->des_addr).',
   },
   {
-    id: 'esp32-softwareserial', level: 'error', proofLevel: 3,
+    id: 'esp32-softwareserial', level: 'error', proofLevel: 3, compileError: true,
     when: isEsp32,
     test: (s, code) => { const m = /#include\s*<SoftwareSerial\.h>/.exec(code); return m && { index: m.index }; },
     message: 'The ESP32 core has no SoftwareSerial.',
@@ -199,21 +199,21 @@ const RULES = [
     fix: (ctx) => (family(ctx) === 'esp32c3' ? 'Use an ADC1 pin (GPIO 0–4).' : 'Use an ADC1 pin: GPIO 32–39 (34–39 are input-only, fine for analog).'),
   },
   {
-    id: 'avr-input-pulldown', level: 'error', proofLevel: 3,
+    id: 'avr-input-pulldown', level: 'error', proofLevel: 3, compileError: true,
     when: isAvr,
     test: (s) => { const m = /\bINPUT_PULLDOWN\b/.exec(s); return m && { index: m.index }; },
     message: 'AVR chips have no internal pull-down resistors.',
     fix: 'INPUT_PULLUP with the button to GND (pressed reads LOW), or INPUT with a 10 kΩ resistor to GND.',
   },
   {
-    id: 'avr-serial-printf', level: 'error', proofLevel: 3,
+    id: 'avr-serial-printf', level: 'error', proofLevel: 3, compileError: true,
     when: isAvr,
     test: (s) => { const m = /\bSerial\d?\s*\.\s*printf\s*\(/.exec(s); return m && { index: m.index }; },
     message: 'Serial.printf does not exist on AVR boards.',
     fix: 'char buf[64]; snprintf(buf, sizeof buf, "x=%d", x); Serial.println(buf); (%f does not work on AVR: use Serial.print(value, 2).)',
   },
   {
-    id: 'avr-wire-pins', level: 'error', proofLevel: 3,
+    id: 'avr-wire-pins', level: 'error', proofLevel: 3, compileError: true,
     when: isAvr,
     test: (s) => { const m = /\bWire\s*\.\s*begin\s*\(\s*[^,()]+,\s*[^,()]+\)/.exec(s); return m && { index: m.index }; },
     message: 'AVR I2C pins are fixed (Uno and Nano: A4 = SDA, A5 = SCL); Wire.begin takes no pins.',
@@ -335,9 +335,11 @@ const RULES = [
   },
   {
     id: 'serial-without-begin', level: 'error', proofLevel: 0,
-    test: (s) => {
+    test: (s, code, ctx) => {
       const p = /\bSerial\s*\.\s*(?:print|println|printf|write)\s*\(/.exec(s);
-      return p && !/\bSerial\s*\.\s*begin\s*\(/.test(s) ? { index: p.index } : null;
+      // Serial.begin may live in another tab of the sketch (ctx.project).
+      const everywhere = `${s}\n${stripCode(ctx.project || '')}`;
+      return p && !/\bSerial\s*\.\s*begin\s*\(/.test(everywhere) ? { index: p.index } : null;
     },
     message: 'The sketch prints to Serial but never calls Serial.begin(), so nothing appears.',
     fix: 'Serial.begin(115200); at the start of setup().',
@@ -403,7 +405,7 @@ const RULES = [
     fix: 'Print the parts one after another (Serial.print("T="); Serial.print(t);), or use a fixed char buffer with snprintf.',
   },
   {
-    id: 'led-builtin-undefined', level: 'error', proofLevel: 2,
+    id: 'led-builtin-undefined', level: 'error', proofLevel: 2, compileError: true,
     when: (ctx) => ctx.ledBuiltin === null,
     test: (s) => { const m = /\bLED_BUILTIN\b/.exec(s); return m && { index: m.index }; },
     message: 'LED_BUILTIN is not defined for this board (its core names no user LED), so this does not compile.',
@@ -414,7 +416,9 @@ const RULES = [
 /**
  * Lint a sketch (one file's text).
  * @param {string} code
- * @param {{ fqbn?: string, coreVersion?: string, ledBuiltin?: number|string|null|undefined, cdcOnBoot?: boolean, file?: string }} [ctx]
+ * @param {{ fqbn?: string, coreVersion?: string, ledBuiltin?: number|string|null|undefined, cdcOnBoot?: boolean, file?: string, project?: string, built?: boolean }} [ctx]
+ *   project: the sketch's other files, for rules that look across tabs (Serial.begin in another file);
+ *   built: the sketch just compiled, so rules that predict a compile error are skipped
  * @returns {Array<{ id: string, level: 'error'|'warning'|'info', line: number, file: string|null, message: string, fix: string, canRewrite: boolean, proofLevel: number }>}
  */
 function lint(code, ctx = {}) {
@@ -422,6 +426,8 @@ function lint(code, ctx = {}) {
   const out = [];
   for (const rule of RULES) {
     if (rule.when && !rule.when(ctx)) continue;
+    // After a build that worked, a rule that predicts a compile error can only be wrong.
+    if (ctx.built && rule.compileError) continue;
     let hits;
     try {
       hits = rule.test(stripped, String(code || ''), ctx);

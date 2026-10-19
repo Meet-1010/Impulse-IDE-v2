@@ -65,6 +65,7 @@ describe('the linter', () => {
 
   test('serial: begin, prints lost on native USB, and waiting forever', () => {
     expect(ids('void setup() { Serial.println("x"); }\nvoid loop() {}\n', UNO)).toContain('serial-without-begin');
+    expect(ids('void report() { Serial.println("x"); }\n', { ...UNO, project: 'void setup() { Serial.begin(9600); }' })).not.toContain('serial-without-begin'); // begin() in another tab
     const early = 'void setup() { Serial.begin(115200); Serial.println("count=0"); }\nvoid loop() {}\n';
     expect(ids(early, PICO)).toContain('native-usb-early-print');
     expect(ids(early, UNO)).not.toContain('native-usb-early-print'); // the Uno's USB chip keeps the port open
@@ -80,6 +81,9 @@ describe('the linter', () => {
     expect(ids('#include <EEPROM.h>\nvoid setup() { EEPROM.begin(8); EEPROM.write(0, 1); EEPROM.commit(); }\nvoid loop() {}\n', ESP32)).not.toContain('esp-eeprom-begin');
     expect(ids('void setup() { pinMode(LED_BUILTIN, OUTPUT); }\nvoid loop() {}\n', { ...ESP32, ledBuiltin: null })).toContain('led-builtin-undefined');
     expect(ids('void setup() { pinMode(LED_BUILTIN, OUTPUT); }\nvoid loop() {}\n', { ...ESP32, ledBuiltin: 2 })).toEqual([]);
+    // After a build that worked, what would have been a compile error cannot be one.
+    expect(ids('void setup() { pinMode(LED_BUILTIN, OUTPUT); }\nvoid loop() {}\n', { ...ESP32, ledBuiltin: null, built: true })).toEqual([]);
+    expect(ids('void setup() { ledcSetup(0, 5000, 8); }\nvoid loop() {}\n', { ...ESP32, built: true })).toEqual([]);
   });
 
   test('the report for the model and the Problems tab', () => {
